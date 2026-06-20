@@ -1,177 +1,219 @@
-# paper_rag
+# Paper RAG Agent
 
 [![ci](https://github.com/TongTong0828/paper-rag-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/TongTong0828/paper-rag-agent/actions)
 [![codecov](https://codecov.io/gh/TongTong0828/paper-rag-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/TongTong0828/paper-rag-agent)
 [![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)]()
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Agentic RAG over academic papers. Originally built as a sub-system for
-[DeerFlow](https://github.com/bytedance/deer-flow); the code in this repo runs
-standalone as a Python package + FastAPI router.
+An open-source academic-paper RAG agent with a runnable DeerFlow workspace UI.
+It can ingest papers, build a local hybrid index, answer literature questions
+with citations, generate wiki-style concept notes, collect feedback, and run a
+small golden-set regression gate.
 
-What's inside:
+The repository is intended to be useful in two modes:
 
-- Hybrid retrieval (BM25 + dense Qdrant, RRF fusion, BGE reranker)
-- Three-tier abstain decision (`confident / weak_evidence / no_evidence`) with
-  data-driven threshold calibration
-- Self-evolving wiki with cross-paper concept linking
-- Five deliverable formats: markdown survey / pptx / docx / latex+bib / pdf
-- Proactive scheduler: daily digest, subscription matching, stale-paper
-  reminders, auto-ingest webhook
-- Feedback loop: thumbs / copy events → hard-case dataset → semi-auto
-  threshold recalibration
+- **Standalone Paper RAG**: Python package, CLI scripts, local SQLite/Qdrant
+  index, retrieval, QA, wiki, feedback, and eval tools.
+- **Embedded DeerFlow App**: a modified DeerFlow checkout under
+  `integrations/deer-flow` that hosts the Paper RAG API and the
+  `/workspace/paper-rag` Next.js UI.
 
-Numbers (HEAD of `main`):
+The beta target is a complete local project experience. Production deployment,
+CI golden gates, monitoring, backups, multi-tenant hardening, and cost
+accounting are deliberately left outside the default setup.
 
-| | |
+## What You Get
+
+| Area | Included |
 |---|---|
-| Tests | 162 passing (incl. 19 middleware) |
-| ADRs | 21 |
-| HTTP endpoints | 19 |
-| Grafana panels / alert rules | 13 / 13 |
+| Retrieval | SQLite metadata, FTS5/BM25 sparse search, embedded Qdrant dense search, RRF fusion |
+| QA | OpenAI-compatible LLM calls, query rewrite, abstain/no-evidence guard, citations |
+| UI | DeerFlow-style `/workspace/paper-rag` page for QA, papers, wiki, ingest, feedback, inbox, subscriptions |
+| Ingest | arXiv/PDF ingest path with PyMuPDF fallback and optional MinerU parser |
+| Feedback | Helpful/not-helpful events, hard-case collection, eval item suggestions |
+| Evaluation | Retrieval-only and no-judge QA golden-set runners |
+| Safety | `.env` and runtime data ignored, local secret scanner, evidence-only fallback |
 
----
+## Prerequisites
 
-## Quickstart
+For the full DeerFlow UI path, use these versions:
+
+- Python 3.12 for the embedded DeerFlow backend.
+- Node.js 20+ with Corepack enabled.
+- `uv` for DeerFlow backend dependency installation.
+- A local shell on macOS/Linux.
+- An OpenAI-compatible chat provider key for real QA generation.
+
+The standalone Python package supports Python 3.10+, but the bundled DeerFlow
+backend declares Python 3.12+, so the recommended setup below uses one Python
+3.12 virtualenv for everything.
+
+## Quickstart: Full Local App
+
+Clone the repository and install the backend/runtime dependencies:
 
 ```bash
-# 1. Install runtime dependencies.
-# For the full DeerFlow + real QA path, use the embedded backend venv.
-python -m pip install -e ".[dev,embed,ingest]"
-make init-store
+git clone https://github.com/TongTong0828/paper-rag-agent.git
+cd paper-rag-agent
 
-# 2. Ingest a paper and ask a question (CLI)
-make ingest ID=2310.11511                 # Self-RAG
-make ask Q="What is Self-RAG?"
+# Install uv if needed, then create DeerFlow's backend virtualenv.
+python3 -m pip install -U uv
+uv python install 3.12
 
-# 3. Run the embedded DeerFlow gateway + workspace UI
-cp .env.example .env                      # then put real provider values in .env
-make deerflow-backend
-make deerflow-frontend                    # second terminal, opens /workspace/paper-rag
+cd integrations/deer-flow/backend
+uv sync --python 3.12
+cd ../../..
 
-# 4. Regression checks
-make verify-p0                            # lint + focused tests + smoke + secret scan + golden retrieval
-make eval-golden-qa                       # real QA no-judge golden set, requires LLM credentials
+# Install Paper RAG into the same backend venv.
+export PY="$PWD/integrations/deer-flow/backend/.venv/bin/python"
+$PY -m pip install -U pip
+$PY -m pip install -e ".[dev,embed,ingest]"
 ```
 
-CI installs only the minimal dependency set required for pure-logic tests
-and the import-walk smoke check; see `.github/workflows/ci.yml` if you want
-to reproduce that environment locally.
+Install the frontend dependencies:
 
-For DeepSeek or another OpenAI-compatible provider, keep credentials in local
-`.env` only:
+```bash
+cd integrations/deer-flow/frontend
+corepack enable
+corepack pnpm install
+cd ../../..
+```
+
+Create your local environment file:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your own provider values. For DeepSeek or any
+OpenAI-compatible provider:
 
 ```bash
 OPENAI_BASE_URL=https://api.deepseek.com
-OPENAI_API_KEY=sk-...
+OPENAI_API_KEY=sk-your-key-here
 CHAT_MODEL=deepseek-chat
+SMALL_MODEL=deepseek-chat
 PAPER_RAG_CONFIG=config/local.yaml
 ```
 
-`.env` and runtime indexes are gitignored. Run `make secret-scan` before
-publishing or sharing a branch.
+Initialize the local store and ingest one starter paper:
 
----
-
-## Architecture
-
-```mermaid
-flowchart TB
-    FE[Frontend / Next.js<br/><sub>workspace/paper-rag</sub>] -->|HTTPS| GW
-
-    subgraph GW [DeerFlow Gateway · FastAPI]
-        direction TB
-        MW[8 middleware layers<br/><sub>BodySize → GZip → RequestId → AccessLog<br/>→ Prometheus → RateLimit → Timeout → Auth</sub>]
-        ROUTER[paper_rag router<br/>19 endpoints]
-        MW --> ROUTER
-    end
-
-    GW --> PKG
-
-    subgraph PKG [paper_rag package]
-        direction LR
-        RAG[rag/<br/>retrieve/]
-        DEL[deliver/<br/>wiki/]
-        STORE[store/<br/>feedback/]
-        PROACT[proactive/]
-    end
-
-    PKG --> QDR[(Qdrant<br/>vectors)]
-    PKG --> SQL[(SQLite × 2<br/>papers + feedback)]
-
-    CRON[APScheduler sidecar<br/><sub>daily 08:00 · Mon 09:00</sub>] -->|fan-out| HOOKS[DingTalk · Feishu<br/>WeCom · Email]
-    CRON -.reads.- SQL
-
-    PROM[Prometheus<br/>15s scrape] -->|metrics| GRA[Grafana<br/>13 panels]
-    PROM --> AM[alertmanager<br/>13 rules]
-    GW -.scrapes.- PROM
-    PKG -.scrapes.- PROM
+```bash
+make init-store
+make ingest ID=2310.11511
 ```
 
-The gateway and middleware live in the deer-flow monorepo. A snapshot of
-those files (router + middleware + frontend page + observability stack)
-is reproduced under [`docs/integration/`](docs/integration/) for reference.
+Start the DeerFlow gateway:
 
----
-
-## Request flow (typical QA)
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant U as Client
-    participant GW as Gateway (8 mw)
-    participant QA as qa_stream
-    participant RET as retrieve
-    participant ABS as abstain
-    participant LLM as LLM
-
-    U->>GW: POST /api/paper_rag/qa (SSE)
-    GW->>GW: RequestId · AccessLog · Prometheus<br/>RateLimit · Timeout (SSE bypass) · Auth
-    GW->>QA: dispatch with user_id
-
-    loop _retrieve_round
-        QA->>RET: rewrite + hybrid_search<br/>(BM25 FTS5 + Qdrant, RRF)
-        RET->>QA: candidates
-        QA->>RET: rerank (BGE-reranker-v2-m3)
-        RET->>QA: top_k chunks
-    end
-
-    QA->>ABS: decide(chunks, low=0.21, high=0.48)
-    alt score < 0.21
-        ABS-->>QA: no_evidence — canned reply
-        QA-->>U: SSE done (LLM skipped)
-    else 0.21 ≤ score < 0.48
-        ABS-->>QA: weak — inject hint
-        QA->>LLM: chat(hint + evidence)
-        LLM-->>QA: answer
-        QA-->>U: SSE stream
-    else score ≥ 0.48
-        ABS-->>QA: confident
-        QA->>LLM: chat(evidence)
-        LLM-->>QA: answer
-        QA-->>U: SSE stream
-    end
-
-    QA->>QA: validate_citations + detect_suspicious
-    QA-->>QA: paper_access.touch_many() (async)
+```bash
+make deerflow-backend
 ```
 
-See [`docs/diagrams/abstain_flow.md`](docs/diagrams/abstain_flow.md) for the
-full mermaid sequence diagram and [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md)
-for a longer walkthrough. [`docs/DEMO.md`](docs/DEMO.md) has 4 mermaid
-diagrams for the abstain decision, proactive scheduler, feedback loop,
-and middleware stack. Runnable walk-throughs live in [`examples/`](examples/).
+In a second terminal, start the UI:
 
----
+```bash
+make deerflow-frontend
+```
 
-## Current Golden Baseline
+Open:
 
-The strict regression set is [`tests/eval/qa_set.golden.jsonl`](tests/eval/qa_set.golden.jsonl).
-It contains evidence-supported questions plus explicit no-answer cases. The
-latest no-judge QA run is saved under `data/index/eval_runs/` locally.
+```text
+http://127.0.0.1:3000/workspace/paper-rag
+```
 
-| Metric | Latest local value |
+Try:
+
+- Ask: `What is Self-RAG?`
+- Papers: confirm the ingested paper appears.
+- Wiki: generate a concept note for an indexed paper.
+- Feedback: click helpful/not helpful after an answer.
+- Subscriptions: add, pause, resume, and delete a topic subscription.
+
+## Smoke Test The App
+
+With the backend running:
+
+```bash
+make deerflow-smoke
+```
+
+For a real QA check that fails if the app only returns evidence-only fallback:
+
+```bash
+$PY scripts/deerflow_smoke.py \
+  --base-url http://127.0.0.1:8001 \
+  --timeout 180 \
+  --qa-question "What is Self-RAG?" \
+  --require-llm-answer
+```
+
+A healthy runtime status should look conceptually like:
+
+```text
+ok   200 runtime_status: llm-ready; embed-ok; qdrant-ok; vectors=...
+```
+
+If you see `embed-missing`, install `.[embed]` into the backend venv. If you
+see `qdrant-missing` or zero vectors after you already have parsed papers, run:
+
+```bash
+make deerflow-rebuild-index
+```
+
+## Standalone CLI Usage
+
+The CLI path uses the same local index and config:
+
+```bash
+export PY="$PWD/integrations/deer-flow/backend/.venv/bin/python"
+
+make init-store
+make ingest ID=2310.11511
+make ask Q="What is Self-RAG?"
+```
+
+For retrieval-only debugging without an LLM call:
+
+```bash
+$PY scripts/ask.py "What is Self-RAG?" --no-llm --top-k 8
+```
+
+For a local PDF:
+
+```bash
+$PY scripts/ingest_one.py --pdf /absolute/path/to/paper.pdf --title "My Paper"
+```
+
+## Evaluation And Regression Gates
+
+Use these before changing retrieval, abstain thresholds, query rewrite, or the
+DeerFlow integration layer:
+
+```bash
+make verify-p0
+make eval-golden
+make eval-golden-qa
+```
+
+What they mean:
+
+| Command | Purpose |
+|---|---|
+| `make verify-p0` | Focused lint, focused tests, import smoke, secret scan, retrieval golden set |
+| `make eval-golden` | Retrieval-only strict golden set, no LLM generation |
+| `make eval-golden-qa` | Full QA no-judge golden set, requires provider credentials |
+| `make secret-scan` | Local scan for accidentally committed API keys |
+| `make hard-cases` | Turn feedback events into candidate eval items |
+
+The main strict set is:
+
+```text
+tests/eval/qa_set.golden.jsonl
+```
+
+Latest local beta baseline:
+
+| Metric | Value |
 |---|---:|
 | Positive paper recall@10 | 1.0 |
 | Positive paper MRR | 0.947 |
@@ -180,126 +222,177 @@ latest no-judge QA run is saved under `data/index/eval_runs/` locally.
 | No-answer success | 1.0 |
 | No-answer direct abstain | 1.0 |
 
-Useful commands:
+## Repository Layout
 
-```bash
-make eval-golden       # retrieval-only, no LLM generation
-make eval-golden-qa    # real QA, no LLM judge
+```text
+paper-rag-agent/
+|-- src/paper_rag/                         # Standalone Python package
+|   |-- rag/                               # QA loop, abstain, streaming, query rewrite
+|   |-- retrieve/                          # Dense/sparse retrieval, formatting, rerank
+|   |-- store/                             # SQLite + Qdrant ingest/index stores
+|   |-- parse/ and chunk/                  # PDF parsing and chunk construction
+|   |-- wiki/                              # Self-evolving concept notes
+|   |-- proactive/                         # Inbox, subscriptions, digests
+|   `-- feedback/                          # Feedback event storage
+|-- integrations/deer-flow/                # Embedded runnable DeerFlow app
+|   |-- backend/app/gateway/routers/
+|   |   `-- paper_rag.py                   # Paper RAG FastAPI adapter
+|   `-- frontend/src/app/workspace/paper-rag/
+|       `-- page.tsx                       # Paper RAG workspace UI
+|-- scripts/                               # Setup, ingest, smoke, eval helper scripts
+|-- tests/                                 # Unit/integration/eval tests
+|-- tests/eval/qa_set.golden.jsonl         # Golden regression set
+|-- config/local.yaml                      # Docker-free local config
+`-- docs/                                  # Design, integration, operations notes
 ```
 
-## Performance baseline
+## Architecture
 
-Numbers from `docs/PERF_BASELINE.md`; production traffic will refresh them.
+```mermaid
+flowchart TB
+    FE["DeerFlow Next.js UI<br/>/workspace/paper-rag"] --> GW["DeerFlow Gateway<br/>FastAPI"]
+    GW --> API["paper_rag router<br/>/api/paper_rag/*"]
+    API --> QA["paper_rag.rag<br/>query rewrite + QA + abstain"]
+    QA --> RET["paper_rag.retrieve<br/>BM25 + dense + RRF"]
+    RET --> SQL[("SQLite<br/>papers, chunks, feedback")]
+    RET --> QDR[("Embedded Qdrant<br/>vectors")]
+    API --> WIKI["paper_rag.wiki<br/>concept notes"]
+    API --> PRO["paper_rag.proactive<br/>inbox + subscriptions"]
+    QA --> LLM["OpenAI-compatible<br/>chat provider"]
+```
 
-| Metric | Value | Notes |
+Default local config uses embedded Qdrant at:
+
+```text
+data/index/qdrant_embedded
+```
+
+That keeps the demo Docker-free. For multi-process or production-style use,
+switch `config/*.yaml` to a Qdrant server URL.
+
+## Request Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant UI as DeerFlow UI
+    participant GW as Gateway
+    participant RAG as Paper RAG
+    participant RET as Retriever
+    participant LLM as LLM
+
+    U->>UI: Ask a paper question
+    UI->>GW: POST /api/paper_rag/qa/sync
+    GW->>RAG: Dispatch with local config
+    RAG->>RET: Rewrite, retrieve, fuse, rerank
+    RET-->>RAG: Top chunks with paper/chunk citations
+    RAG->>RAG: Abstain decision
+    alt no evidence
+        RAG-->>UI: no_evidence answer, no fabricated citations
+    else enough evidence
+        RAG->>LLM: Evidence-grounded prompt
+        LLM-->>RAG: Answer
+        RAG-->>UI: Answer + citations + confidence
+    end
+    UI-->>U: Render answer, citations, feedback controls
+```
+
+## Common Troubleshooting
+
+| Symptom | Likely Cause | Fix |
 |---|---|---|
-| Test suite | 3.0 s | 162 tests, used as CI gate |
-| Recall@10 | 0.90 | 33-question eval set |
-| Abstain neg-blocked / pos-kept | 100% / 97% | offline calibration |
-| QA P50 / P95 | ~2.0s / ~5.0s | confident path / reflect+long answer |
-| `no_evidence` latency | ~250 ms | LLM is skipped |
-| Cold start (qa_agentic) | 316 ms | OpenAI client + tiktoken |
-| Lean docker image | ~600 MB | multi-stage + venv copy |
+| `integrations/deer-flow/backend/.venv/bin/python: no such file` | DeerFlow backend venv was not created | Run `cd integrations/deer-flow/backend && uv sync --python 3.12` |
+| Backend starts but QA says LLM unavailable | Missing `.env` values or provider failure | Check `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL` |
+| `/api/paper_rag/status` shows `embed-missing` | `FlagEmbedding` extra not installed | `$PY -m pip install -e ".[embed,ingest]"` |
+| Dense retrieval has zero vectors | Store initialized but papers not indexed | `make ingest ID=2310.11511` or `make deerflow-rebuild-index` |
+| Frontend cannot reach API | Backend not running or wrong port | Start `make deerflow-backend`; default port is `8001` |
+| `pnpm` command missing | Corepack not enabled | `corepack enable` then rerun `corepack pnpm install` |
+| Slow first QA/ingest | Model weights downloading | Wait for BGE model download; cache lives under local model/cache dirs |
+| Secret scan fails | A key-like value is in tracked text | Move real secrets into `.env`; never commit provider keys |
 
----
+## Configuration Notes
 
-## Failure modes
+Important local files:
 
-| Component down | Effect | Degradation |
-|---|---|---|
-| Qdrant | Dense recall is empty | BM25-only path; abstain switches to BM25 score |
-| LLM | Generation fails | Evidence-only response, `qa_degraded_total` increments |
-| Reranker | Rerank fails | Falls back to RRF order, marks `quality=low` |
-| feedback.sqlite locked | Inbox writes drop | Logs warning; QA path unaffected |
-| All webhooks | No outbound push | Inbox still readable from frontend |
-| Cron container | Digest / stale skip | Gateway unaffected; manual `POST /proactive/digest/run` |
-| Redis (rate limit) | Multi-replica counters drift | Falls back to in-memory window |
-
-13 Prometheus alert rules cover 5xx > 1%, p95 > 5s, abstain rate > 30%,
-auth/timeout/rate spikes, and component-down conditions.
-
----
-
-## Key design decisions
-
-| ADR | Topic |
+| File | Purpose |
 |---|---|
-| 0014 | Three-tier abstain — calibration vs recall trade-off |
-| 0015 | M8 service split: sibling package + gateway router |
-| 0016 | N+1+S call shape for survey generation |
-| 0017 | M11 feedback loop — semi-auto threshold recalibration |
-| 0018 | M9 proactive agent + APScheduler |
-| 0019 | Two SQLite databases (papers vs feedback) |
-| 0020 | 8-layer middleware stack + Prometheus cardinality control |
-| 0021 | Four langgraph middlewares (cost / latency / recursion / PII) |
+| `.env.example` | Copy to `.env` and fill provider credentials |
+| `config/local.yaml` | Recommended Docker-free local config |
+| `config/default.yaml` | Baseline package config |
+| `docs/integration/deerflow_embedded.md` | Detailed DeerFlow integration runbook |
+| `docs/P012_COMPLETION_PLAN.md` | Current P0/P1/P2 completion map |
+| `docs/MINERU_SETUP.md` | Optional MinerU setup for richer PDF parsing |
 
-Full set: [`docs/adrs/`](docs/adrs/).
+Runtime data is intentionally ignored by git:
 
----
-
-## Repository layout
-
+```text
+.env
+data/
+.deer-flow/
+integrations/deer-flow/**/.venv
+integrations/deer-flow/frontend/.next
+integrations/deer-flow/frontend/node_modules
+integrations/deer-flow/frontend/public/demo/threads/*/user-data/
 ```
-paper_rag/
-├── src/paper_rag/
-│   ├── rag/                  Core agentic loop
-│   │   ├── abstain.py        Three-tier decision (ADR-0014)
-│   │   ├── qa_agentic.py     Rewrite → retrieve → rerank → reflect
-│   │   └── qa_stream.py      SSE variant
-│   ├── retrieve/             Hybrid + rerank
-│   ├── deliver/              5 deliverable formats
-│   ├── proactive/            Daily digest, subscriptions, stale, webhook
-│   ├── feedback/             Event store + hard-case extraction
-│   └── observability/        60-line stdlib Prometheus exposition
-├── tests/                    pytest 162/162
-├── scripts/
-│   ├── calibrate_abstain.py  Online / offline threshold calibration
-│   └── collect_hard_cases.py Weekly cron entry
-└── docs/
-    ├── SYSTEM_DESIGN.md
-    ├── PERF_BASELINE.md
-    ├── EVAL_REPORT.md
-    ├── adrs/                 21 ADRs
-    ├── diagrams/             3 mermaid sequence diagrams
-    └── integration/          Snapshot of deer-flow integration files
-```
-
----
 
 ## Development
 
+Use the backend venv as the project Python:
+
 ```bash
-# Install dev tooling
-pip install -e .[dev]
-pre-commit install                  # local lint matches CI
+export PY="$PWD/integrations/deer-flow/backend/.venv/bin/python"
 
-# Lint (same rules CI runs)
-ruff check --select E,F,W,I --ignore E501 src tests
-
-# Tests (real pytest, with coverage)
-pytest -q \
-    --ignore=tests/eval \
-    --ignore=tests/test_gateway_paper_rag.py \
-    --ignore=tests/test_middleware.py \
-    --ignore=tests/test_langgraph_middleware.py \
-    --cov=src/paper_rag
-
-# Lightweight fallback for environments without pytest
-PYTHONPATH=src:tests python scripts/_run_tests.py
-PYTHONPATH=src python scripts/_run_smoke.py
-
-# Threshold calibration
-python scripts/calibrate_abstain.py --mode offline
-python scripts/calibrate_abstain.py --mode online --no-rewrite --top-k 8
-
-# Collect hard cases (weekly)
-make hard-cases
+$PY -m ruff check src tests
+$PY -m pytest -q --ignore=tests/eval
+$PY scripts/secret_scan.py
 ```
 
-Contributions and bug reports are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Frontend checks:
 
----
+```bash
+cd integrations/deer-flow/frontend
+corepack pnpm typecheck
+corepack pnpm exec eslint src/app/workspace/paper-rag/page.tsx
+```
+
+Focused DeerFlow backend integration checks:
+
+```bash
+integrations/deer-flow/backend/.venv/bin/python \
+  -m pytest integrations/deer-flow/backend/tests/test_paper_rag_integration.py
+```
+
+## Beta Scope
+
+Complete for the local beta:
+
+- Real Paper RAG runtime with local index and OpenAI-compatible LLM.
+- DeerFlow gateway adapter and DeerFlow-style Paper RAG workspace UI.
+- QA, citations, loading/error/no-evidence states.
+- Papers, Wiki, Ingest, Feedback, Inbox, and Subscription workflows.
+- Golden-set baseline and RAG tuning hooks.
+- Local secret scanning and runtime-data ignore rules.
+
+Deferred by design for now:
+
+- Cloud deployment automation.
+- CI golden gate enforcement.
+- Production permission isolation.
+- Backup/restore playbooks.
+- Monitoring dashboards as required local setup.
+- Larger real-world golden sets.
+- Cost accounting.
+
+## Further Reading
+
+- [Embedded DeerFlow Integration](docs/integration/deerflow_embedded.md)
+- [P0/P1/P2 Completion Plan](docs/P012_COMPLETION_PLAN.md)
+- [System Design](docs/SYSTEM_DESIGN.md)
+- [Operations Notes](docs/OPERATIONS.md)
+- [ADR Index](docs/adrs/)
+- [MinerU Setup](docs/MINERU_SETUP.md)
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
