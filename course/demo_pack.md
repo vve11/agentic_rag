@@ -44,7 +44,7 @@ make ingest ID=2104.08663
 机器可读版本在：
 
 ```text
-docs/course/demo_questions.jsonl
+course/demo_questions.jsonl
 ```
 
 课堂推荐按下面顺序演示。

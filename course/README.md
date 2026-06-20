@@ -15,7 +15,7 @@
 PDF 版技术手册在：
 
 ```text
-output/pdf/paper_rag_agent_project_manual.pdf
+course/paper_rag_agent_project_manual.pdf
 ```
 
 ## 课程交付最小闭环
