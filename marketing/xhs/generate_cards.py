@@ -70,7 +70,7 @@ def save(img: Image.Image, name: str):
 def card_cover():
     img = make_canvas()
     draw = ImageDraw.Draw(img)
-    draw_header(draw, "AI项目课")
+    draw_header(draw, "RAG+Agent")
     text(draw, (70, 185), "我做了一个\n能写进简历的\nAgent 项目", FONT_TITLE, spacing=16)
     text(draw, (74, 550), "Paper RAG Agent", font(46, True), "#111827")
     text(draw, (74, 615), "一个面向论文研读的 AI 工作台", FONT_SUB, "#374151")
@@ -82,7 +82,7 @@ def card_cover():
         [
             "不是普通聊天机器人",
             "不是智能客服模板",
-            "是可以演示、答辩、写简历的完整项目",
+            "是可以学习、演示、写简历的完整项目",
         ],
     )
     text(draw, (74, 1185), "适合：想做 AI Agent / RAG 项目的同学", FONT_SMALL, "#6b7280")
@@ -120,7 +120,7 @@ def card_value():
             "回答时展示引用证据",
             "生成论文 Wiki / 知识笔记",
             "记录反馈，方便继续优化",
-            "可以作为课堂演示和面试项目",
+            "适合 RAG+Agent 学习和面试展示",
         ],
     )
     text(draw, (72, 1175), "公开帖只讲效果，不展开具体实现细节。", FONT_SMALL, "#6b7280")
@@ -137,7 +137,7 @@ def card_difference():
     text(draw, (105, 410), "智能客服", font(40, True), "#111827")
     text(draw, (605, 410), "Paper RAG Agent", font(38, True), "#ffffff")
     text(draw, (105, 510), "更偏业务接待\nFAQ 回复\n售前售后流程\n固定话术", FONT_BODY, "#374151", spacing=18)
-    text(draw, (605, 510), "更偏知识研读\n论文问答\n证据引用\n项目答辩", FONT_BODY, "#f9fafb", spacing=18)
+    text(draw, (605, 510), "更偏知识研读\n论文问答\n证据引用\n面试表达", FONT_BODY, "#f9fafb", spacing=18)
     text(draw, (105, 850), "关键词：服务流程", FONT_SMALL, "#6b7280")
     text(draw, (605, 850), "关键词：学习成果", FONT_SMALL, "#d1d5db")
     text(draw, (72, 1160), "一个适合讲“我做过完整 AI 应用”的项目。", FONT_BODY, "#374151")
@@ -169,8 +169,8 @@ def card_audience():
 def card_course():
     img = make_canvas()
     draw = ImageDraw.Draw(img)
-    draw_header(draw, "课程交付")
-    text(draw, (70, 145), "完整版本会提供\n项目 + 手册 + 演示路径", font(52, True), spacing=10)
+    draw_header(draw, "学习包")
+    text(draw, (70, 145), "完整版本会提供\n项目 + 手册 + 面试路径", font(52, True), spacing=10)
     rounded(draw, (70, 380, 1010, 1025), 34, "#ffffff", "#ded8cc")
     bullet_lines(
         draw,
@@ -178,13 +178,13 @@ def card_course():
         445,
         [
             "完整项目源码与运行说明",
-            "课程手册和学习路径",
-            "标准演示问题与答辩材料",
+            "RAG+Agent 学习手册",
+            "标准演示问题与面试材料",
             "简历包装和面试表达建议",
             "常见报错排查清单",
         ],
     )
-    text(draw, (74, 1148), "公开内容只展示项目方向，完整细节随课程交付。", FONT_BODY, "#374151")
+    text(draw, (74, 1148), "公开内容只展示项目方向，完整细节随学习包交付。", FONT_BODY, "#374151")
     save(img, "06_course_pack.png")
 
 
