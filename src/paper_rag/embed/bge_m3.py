@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from .. import config as cfg
+from ..utils.hf_cache import resolve_cached_snapshot
 from ..utils.logger import get_logger
 
 log = get_logger("embed.bge_m3")
@@ -37,9 +38,10 @@ def _model():
                 device = "cpu"
         # use_fp16 is unsafe on CPU (numerical issues)
         use_fp16 = device != "cpu"
-        log.info(f"loading {c.embedding.model_name} on {device} (fp16={use_fp16}, cache={c.paths.models_dir})")
+        model_name = resolve_cached_snapshot(c.embedding.model_name, c.paths.models_dir)
+        log.info(f"loading {model_name} on {device} (fp16={use_fp16}, cache={c.paths.models_dir})")
         _MODEL = BGEM3FlagModel(
-            c.embedding.model_name,
+            model_name,
             use_fp16=use_fp16,
             cache_dir=c.paths.models_dir,
             devices=[device] if device != "auto" else None,

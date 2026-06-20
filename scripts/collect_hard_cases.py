@@ -12,7 +12,8 @@ Usage:
 
 Hard-case rules (v1)
 --------------------
-1. thumbs_down with reason in {hallucination, irrelevant} → strongest signal
+1. thumbs_down with reason in {hallucination, irrelevant, incomplete, wrong_citation}
+   → hard-case candidate
 2. ≥ 2 follow_up_question events within 5 min for the same conversation_id
 3. judge_score with faithful < 4 OR complete < 3
 4. abstain_followup_ingest event → system missed a paper that was actually
@@ -25,6 +26,7 @@ on the events table.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import sys
@@ -78,7 +80,7 @@ def collect_hard_cases(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if e["event_type"] != "thumbs_down":
             continue
         reason = (e["payload"] or {}).get("reason")
-        if reason not in ("hallucination", "irrelevant", "wrong_citation"):
+        if reason not in ("hallucination", "irrelevant", "incomplete", "wrong_citation"):
             continue
         trace = e.get("trace_id") or ""
         if trace in seen_traces:
@@ -87,7 +89,7 @@ def collect_hard_cases(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out.append(_to_hard_case(e, rule=f"thumbs_down_{reason}"))
 
     # Rule 2: ≥2 follow_up within 5min
-    for cid, evs in by_convo.items():
+    for _cid, evs in by_convo.items():
         followups = [e for e in evs if e["event_type"] == "follow_up_question"]
         if len(followups) < 2:
             continue
@@ -134,21 +136,64 @@ def collect_hard_cases(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _to_hard_case(event: dict[str, Any], *, rule: str, **extra) -> dict[str, Any]:
     """Convert an event row into a hard_cases.jsonl entry."""
-    return {
+    payload = event.get("payload") or {}
+    case = {
         "qid": _hard_qid(event),
         "trace_id": event.get("trace_id"),
         "conversation_id": event.get("conversation_id"),
         "user_id": event.get("user_id"),
         "rule": rule,
         "captured_at": event["created_at"],
+        "question": _clean_text(payload.get("question"), limit=2000),
+        "answer_preview": _clean_text(payload.get("answer_preview"), limit=1000),
+        "citations": _clean_citations(payload.get("citations")),
         "extra": extra,
     }
+    suggested = _suggest_eval_item(case)
+    if suggested:
+        case["suggested_eval_item"] = suggested
+    return case
 
 
 def _hard_qid(event: dict[str, Any]) -> str:
     ts = int(event["created_at"])
     short = (event.get("trace_id") or "noTrace")[:10]
     return f"hc_{ts}_{short}"
+
+
+def _clean_text(value: Any, *, limit: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    compact = " ".join(value.split())
+    return compact[:limit] if compact else None
+
+
+def _clean_citations(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        item = item.strip()
+        if item:
+            out.append(item[:120])
+    return out[:20]
+
+
+def _suggest_eval_item(case: dict[str, Any]) -> dict[str, Any] | None:
+    question = case.get("question")
+    if not isinstance(question, str) or not question:
+        return None
+    return {
+        "qid": case["qid"],
+        "question": question,
+        "intent": "reasoning",
+        "relevant_paper_ids": [],
+        "must_contain": [],
+        "gold_answer": None,
+        "notes": f"hard_case_candidate:{case['rule']}; trace_id={case.get('trace_id') or ''}",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -165,10 +210,8 @@ def read_existing(path: Path) -> set[str]:
             line = line.strip()
             if not line:
                 continue
-            try:
+            with contextlib.suppress(json.JSONDecodeError, KeyError):
                 seen.add(json.loads(line)["qid"])
-            except (json.JSONDecodeError, KeyError):
-                pass
     return seen
 
 

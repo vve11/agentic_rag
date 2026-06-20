@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import html
 import re
 import sys
 from pathlib import Path
@@ -28,6 +29,26 @@ log = get_logger("ingest_arxiv_direct")
 _TITLE_RE = re.compile(r'<meta name="citation_title" content="([^"]+)"')
 _AUTHOR_RE = re.compile(r'<meta name="citation_author" content="([^"]+)"')
 _YEAR_RE = re.compile(r'<meta name="citation_date" content="(\d{4})')
+_ABSTRACT_META_RE = re.compile(r'<meta name="citation_abstract" content="([^"]*)"', re.DOTALL)
+_ABSTRACT_BLOCK_RE = re.compile(
+    r'<blockquote class="abstract[^"]*">\s*<span class="descriptor">Abstract:\s*</span>(.*?)</blockquote>',
+    re.DOTALL,
+)
+
+
+def _strip_html(value: str) -> str:
+    value = re.sub(r"<[^>]+>", " ", value)
+    return " ".join(html.unescape(value).split())
+
+
+def _extract_abstract(html_text: str) -> str | None:
+    meta = _ABSTRACT_META_RE.search(html_text)
+    if meta:
+        return _strip_html(meta.group(1))
+    block = _ABSTRACT_BLOCK_RE.search(html_text)
+    if block:
+        return _strip_html(block.group(1))
+    return None
 
 
 def _fetch_meta(arxiv_id: str) -> dict:
@@ -41,6 +62,7 @@ def _fetch_meta(arxiv_id: str) -> dict:
         "title": title_m.group(1) if title_m else f"arXiv {arxiv_id}",
         "authors": _AUTHOR_RE.findall(html),
         "year": int(_YEAR_RE.search(html).group(1)) if _YEAR_RE.search(html) else None,
+        "abstract": _extract_abstract(html),
     }
 
 
@@ -75,6 +97,7 @@ def fetch_one(arxiv_id: str):
         year=meta["year"],
         venue="arXiv",
         arxiv_id=arxiv_id,
+        abstract=meta.get("abstract"),
         urls=[f"https://arxiv.org/abs/{arxiv_id}"],
         source="arxiv-direct",
     )

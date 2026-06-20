@@ -45,6 +45,8 @@ qdrant:
 mineru:
   mode: local
   cli: mineru
+  method: auto
+  lang: null
   timeout_sec: 600
   fallback_to_pymupdf: true
 

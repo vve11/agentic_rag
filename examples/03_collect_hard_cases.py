@@ -36,18 +36,18 @@ sys.path.insert(0, str(ROOT / "src"))
 # ## 1. Inject synthetic events
 
 # %%
-from paper_rag.feedback import collector  # noqa: E402
+from paper_rag.feedback import record_event  # noqa: E402
 
 events = [
-    {"user_id": "u1", "trace_id": "trace-001", "type": "thumbs_down",
-     "payload": {"question": "What is XYZ?", "answer": "(no evidence)"}},
-    {"user_id": "u1", "trace_id": "trace-002", "type": "thumbs_down",
-     "payload": {"question": "Compare A and B", "answer": "Mixed signals"}},
-    {"user_id": "u2", "trace_id": "trace-003", "type": "thumbs_down",
-     "payload": {"question": "Define foobar", "answer": "Foobar is unknown."}},
+    {"user_id": "u1", "trace_id": "trace-001", "event_type": "thumbs_down",
+     "payload": {"reason": "hallucination"}},
+    {"user_id": "u1", "trace_id": "trace-002", "event_type": "thumbs_down",
+     "payload": {"reason": "irrelevant"}},
+    {"user_id": "u2", "trace_id": "trace-003", "event_type": "thumbs_down",
+     "payload": {"reason": "wrong_citation"}},
 ]
 for e in events:
-    collector.record(**e)
+    record_event(**e)
 print(f"injected {len(events)} thumbs_down events")
 
 # %% [markdown]
@@ -59,7 +59,7 @@ print(f"injected {len(events)} thumbs_down events")
 out_path = ROOT / "tests" / "eval" / "hard_cases_demo.jsonl"
 result = subprocess.run(
     [sys.executable, str(ROOT / "scripts" / "collect_hard_cases.py"),
-     "--out", str(out_path), "--since-days", "30"],
+     "--out", str(out_path), "--since", "30d"],
     capture_output=True, text=True, check=False,
 )
 print(result.stdout[-1500:])

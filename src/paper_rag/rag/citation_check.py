@@ -32,7 +32,12 @@ def validate_citations(answer: str, retrieved: list[dict]) -> tuple[str, list[st
     """
     allowed = {c.get("chunk_id") for c in retrieved if c.get("chunk_id")}
     found = _CITE_RE.findall(answer)
-    valid = [cid for cid in found if cid in allowed]
+    valid = []
+    seen = set()
+    for cid in found:
+        if cid in allowed and cid not in seen:
+            valid.append(cid)
+            seen.add(cid)
 
     def _sub(m):
         return m.group(0) if m.group(1) in allowed else ""
@@ -63,7 +68,17 @@ def detect_suspicious_citations(answer: str) -> dict:
     }
 
 
+def strip_suspicious_citation_forms(answer: str) -> str:
+    """Remove citation forms that are not grounded in retrieved chunks."""
+    cleaned = _NUM_CITE_RE.sub("", answer)
+    cleaned = _AUTHOR_YEAR_RE.sub("", cleaned)
+    cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip()
+
+
 __all__ = [
     "detect_suspicious_citations",
+    "strip_suspicious_citation_forms",
     "validate_citations",
 ]

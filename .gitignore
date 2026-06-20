@@ -58,6 +58,16 @@ coverage.xml
 *.cover
 .hypothesis/
 
+# ── JavaScript / embedded app runtime artifacts ──────────────────────────────
+node_modules/
+.next/
+.turbo/
+integrations/deer-flow/.deer-flow/
+integrations/deer-flow/.deer-flow-*/
+integrations/deer-flow/pr-build/
+integrations/deer-flow/frontend/public/demo/threads/*/user-data/
+.deer-flow/
+
 # ── Virtual environments ─────────────────────────────────────────────────────
 .venv/
 venv/

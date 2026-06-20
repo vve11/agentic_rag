@@ -23,7 +23,11 @@ from ..retrieve.format import format_evidence
 from ..retrieve.pipeline import retrieve_round as _retrieve_round
 from ..utils.logger import get_logger
 from . import abstain as abstain_mod
-from .citation_check import detect_suspicious_citations, validate_citations
+from .citation_check import (
+    detect_suspicious_citations,
+    strip_suspicious_citation_forms,
+    validate_citations,
+)
 from .intent_classifier import classify
 from .llm import chat
 from .reflect import reflect
@@ -60,7 +64,7 @@ def _maybe_rewrite_with_history(question: str, conversation_id: str | None) -> s
         if rewritten != question:
             log.info(f"history rewrite: {question!r} -> {rewritten!r}")
         return rewritten
-    except Exception as e:  # noqa: BLE001 — history layer must never break QA
+    except Exception as e:
         log.warning(f"history rewrite failed (non-fatal): {e}")
         return question
 
@@ -73,7 +77,7 @@ def _check_cache(question: str, paper_ids: list[str] | None, trace_id: str) -> d
         from . import qa_cache
 
         cached = qa_cache.get(question, paper_ids)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning(f"qa_cache get failed (non-fatal): {e}")
         return None
     if cached is None:
@@ -224,9 +228,14 @@ def _no_evidence_response(
 
 def _build_user_prompt(question: str, final_chunks: list[dict], abstain_result: dict) -> str:
     evidence = format_evidence(final_chunks)
+    allowed_citations = " ".join(
+        f"[chunk:{ch['chunk_id']}]" for ch in final_chunks if ch.get("chunk_id")
+    )
     user = (
         f"Question: {question}\n\nEvidence:\n{evidence}\n\n"
-        "Answer (use ONLY [chunk:<id>] citations, never [1] or (Author 2020)):"
+        f"Allowed citation tokens: {allowed_citations}\n\n"
+        "Answer (copy citation tokens EXACTLY from the allowed list; never invent "
+        "[chunk:1], [chunk:2], [1], or (Author 2020) citations):"
     )
     if abstain_result["decision"] == abstain_mod.DECISION_WEAK:
         # Inject explicit insufficiency hint — the LLM may still answer, but
@@ -270,7 +279,7 @@ def _store_in_cache(question: str, paper_ids: list[str] | None, out: dict) -> No
         from . import qa_cache
 
         qa_cache.put(question, paper_ids, out)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning(f"qa_cache put failed (non-fatal): {e}")
 
 
@@ -288,7 +297,7 @@ def _persist_history(
             out.get("answer", ""),
             out.get("citations", []),
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning(f"history.append failed (non-fatal): {e}")
 
 
@@ -369,7 +378,7 @@ def _answer_impl(
             temperature=cfg.load().llm.temperatures.answer,
             max_tokens=1024,
         )
-    except Exception as e:  # noqa: BLE001 — fall back to evidence-only response
+    except Exception as e:
         log.warning(f"chat failed, returning evidence-only: {e}")
         return _chat_failed_response(intent_cfg, trace, stopped, final_chunks, trace_id, e)
 
@@ -377,6 +386,7 @@ def _answer_impl(
     suspicious = detect_suspicious_citations(cleaned)
     if suspicious["count"]:
         log.warning(f"suspicious citations detected: {suspicious}")
+        cleaned = strip_suspicious_citation_forms(cleaned)
     log.info(
         f"qa_agentic done: trace_id={trace_id} iters={len(trace)} "
         f"stop={stopped} cites={len(valid)}"

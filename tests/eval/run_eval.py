@@ -59,12 +59,17 @@ def run() -> int:
     per_item: list[dict] = []
     t0 = time.time()
     for i, it in enumerate(items, 1):
-        rec = {"qid": it.qid, "question": it.question, "intent": it.intent}
+        rec = {
+            "qid": it.qid,
+            "question": it.question,
+            "intent": it.intent,
+            "expected_relevant_paper_count": len(it.relevant_paper_ids),
+        }
         try:
             if args.retrieval_only:
-                from paper_rag.retrieve.hybrid import hybrid_search
+                from paper_rag.retrieve.pipeline import retrieve_round
 
-                chunks = hybrid_search(it.question, top_k=args.top_k)
+                chunks = retrieve_round(it.question, None, args.top_k)
                 rec.update(_score_retrieval(chunks, it, args.top_k))
             else:
                 from paper_rag.rag.qa_agentic import answer
@@ -72,7 +77,13 @@ def run() -> int:
                 out = answer(it.question, paper_ids=None)
                 rec["answer"] = out["answer"]
                 rec["citations"] = out["citations"]
-                rec["stopped_by"] = out["trace"]["stopped_by"]
+                trace = out.get("trace", {}) or {}
+                rec["stopped_by"] = trace.get("stopped_by")
+                abstain = trace.get("abstain") or {}
+                rec["abstain_decision"] = abstain.get("decision")
+                rec["abstain_evidence_score"] = abstain.get("evidence_score")
+                rec["abstain_top_chunk_score"] = abstain.get("top_chunk_score")
+                rec["abstain_score_field"] = abstain.get("score_field")
                 rec.update(_score_retrieval(out["chunks"], it, args.top_k))
                 rec.update(_score_answer(out, it, run_judge=not args.no_judge))
         except Exception as e:
@@ -121,14 +132,24 @@ def _score_retrieval(chunks: list[dict], item, k: int) -> dict:
 
 
 def _score_answer(out: dict, item, *, run_judge: bool) -> dict:
+    answer_text = out.get("answer", "")
     cites = out.get("citations", [])
     retrieved_ids = [c.get("chunk_id") for c in out.get("chunks", []) if c.get("chunk_id")]
     res = {
         "n_citations": len(cites),
         "cite_existence": citation_existence_rate(cites, retrieved_ids),
-        "must_contain": must_contain_score(out.get("answer", ""), item.must_contain),
-        "violations": must_not_contain_violations(out.get("answer", ""), item.must_not_contain),
+        "must_contain": must_contain_score(answer_text, item.must_contain),
+        "violations": must_not_contain_violations(answer_text, item.must_not_contain),
     }
+    if not item.relevant_paper_ids:
+        trace = out.get("trace", {}) or {}
+        abstain_decision = (trace.get("abstain") or {}).get("decision")
+        stopped_by = trace.get("stopped_by")
+        res["no_answer_ok"] = float(
+            stopped_by in {"no_evidence_abstain", "no_chunks"}
+            or abstain_decision in {"no_evidence", "no_chunks"}
+            or (not cites and _looks_like_insufficient_evidence(answer_text))
+        )
     cp = citation_precision(cites, item.relevant_chunk_ids)
     if cp is not None:
         res["cite_precision"] = cp
@@ -158,23 +179,79 @@ def _aggregate(per_item: list[dict]) -> dict:
         vals = [r[key] for r in per_item if isinstance(r.get(key), (int, float))]
         return round(mean(vals), 3) if vals else 0.0
 
+    def _avg_in(rows: list[dict], key: str) -> float:
+        vals = [r[key] for r in rows if isinstance(r.get(key), (int, float))]
+        return round(mean(vals), 3) if vals else 0.0
+
+    positives = [r for r in per_item if r.get("paper_recall@k") is not None and _has_relevant_paper(r)]
+    no_answer = [r for r in per_item if r.get("paper_recall@k") is not None and not _has_relevant_paper(r)]
+
+    answer_rows = [r for r in per_item if "answer" in r]
+
     out = {
         "paper_recall@k": _avg("paper_recall@k"),
         "paper_mrr": _avg("paper_mrr"),
+        "positive_paper_recall@k": _avg_in(positives, "paper_recall@k"),
+        "positive_paper_mrr": _avg_in(positives, "paper_mrr"),
         "chunk_recall@k": _avg("chunk_recall@k"),
         "fpr@k": _avg("fpr@k"),
-        "cite_existence": _avg("cite_existence"),
-        "cite_precision": _avg("cite_precision"),
-        "must_contain": _avg("must_contain"),
-        "violations": sum(int(r.get("violations", 0)) for r in per_item),
         "errors": sum(1 for r in per_item if r.get("error")),
+        "n_positive": len(positives),
+        "n_no_answer": len(no_answer),
     }
+    if answer_rows:
+        out.update(
+            {
+                "cite_existence": _avg("cite_existence"),
+                "cite_precision": _avg("cite_precision"),
+                "must_contain": _avg("must_contain"),
+                "no_answer_success_rate": _avg("no_answer_ok"),
+                "violations": sum(int(r.get("violations", 0)) for r in per_item),
+            }
+        )
+    if no_answer and any(r.get("stopped_by") or r.get("abstain_decision") for r in no_answer):
+        abstained = [
+            r
+            for r in no_answer
+            if r.get("stopped_by") in {"no_evidence_abstain", "no_chunks"}
+            or r.get("abstain_decision") in {"no_evidence", "no_chunks"}
+        ]
+        out["no_answer_abstain_rate"] = round(len(abstained) / len(no_answer), 3)
+    decisions: dict[str, int] = {}
+    for r in per_item:
+        decision = r.get("abstain_decision")
+        if isinstance(decision, str) and decision:
+            decisions[decision] = decisions.get(decision, 0) + 1
+    if decisions:
+        out["abstain_decisions"] = decisions
     judge_keys = ("faithful", "complete", "concise")
     judges = [r.get("judge") for r in per_item if isinstance(r.get("judge"), dict) and "faithful" in r["judge"]]
     if judges:
         for k in judge_keys:
             out[f"judge_{k}"] = round(mean(j[k] for j in judges), 2)
     return out
+
+
+def _has_relevant_paper(rec: dict) -> bool:
+    return bool(rec.get("expected_relevant_paper_count", 0))
+
+
+def _looks_like_insufficient_evidence(answer: str) -> bool:
+    low = (answer or "").lower()
+    hints = (
+        "does not contain",
+        "does not mention",
+        "not contain",
+        "not provided",
+        "cannot answer",
+        "can't answer",
+        "insufficient evidence",
+        "evidence is insufficient",
+        "未在",
+        "没有",
+        "无法回答",
+    )
+    return any(hint in low for hint in hints)
 
 
 if __name__ == "__main__":

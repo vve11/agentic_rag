@@ -50,10 +50,20 @@ class Chunk(SQLModel, table=True):
     chunk_id: str = Field(primary_key=True)
     paper_id: str = Field(index=True)
     section_id: str | None = Field(default=None, index=True)
+    section: str | None = None
+    section_idx: int | None = None
     modality: str = "text"
     page: int | None = None
     text: str = ""
     context_text: str = ""
+    title: str | None = None
+    source_path: str | None = None
+    asset_path: str | None = None
+    asset_rel_path: str | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    raw_snippet: str | None = None
+    metadata_json: str = "{}"
     neighbors_json: str = "[]"
 
 
@@ -71,6 +81,20 @@ class IngestRun(SQLModel, table=True):
 
 
 _ENGINE = None
+
+
+_CHUNK_COLUMN_MIGRATIONS: dict[str, str] = {
+    "section": "TEXT",
+    "section_idx": "INTEGER",
+    "title": "TEXT",
+    "source_path": "TEXT",
+    "asset_path": "TEXT",
+    "asset_rel_path": "TEXT",
+    "char_start": "INTEGER",
+    "char_end": "INTEGER",
+    "raw_snippet": "TEXT",
+    "metadata_json": "TEXT DEFAULT '{}'",
+}
 
 
 def _apply_pragmas(dbapi_conn, _connection_record) -> None:
@@ -106,8 +130,23 @@ def get_engine():
         )
         event.listen(_ENGINE, "connect", _apply_pragmas)
         SQLModel.metadata.create_all(_ENGINE)
+        _migrate_chunk_columns(_ENGINE)
         log.info(f"sqlite engine ready at {c.paths.sqlite_path} (WAL+busy_timeout)")
     return _ENGINE
+
+
+def _migrate_chunk_columns(engine) -> None:
+    """Add nullable chunk metadata columns for existing SQLite stores."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        existing = {
+            row[1]
+            for row in conn.exec_driver_sql("PRAGMA table_info(chunk)").fetchall()
+        }
+        for name, ddl_type in _CHUNK_COLUMN_MIGRATIONS.items():
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE chunk ADD COLUMN {name} {ddl_type}"))
 
 
 def upsert_paper(meta: dict[str, Any], status: str = "created") -> None:
@@ -227,20 +266,41 @@ def find_existing_paper(*, doi: str | None = None, arxiv_id: str | None = None,
 
 def upsert_sections_and_chunks(paper_id: str, sections: list[dict], chunks: list[dict]) -> None:
     engine = get_engine()
+    section_ids = {sec["section_id"] for sec in sections}
+    chunk_ids = {ch["chunk_id"] for ch in chunks}
     with Session(engine) as s:
+        for existing in list(s.exec(select(Chunk).where(Chunk.paper_id == paper_id))):
+            if existing.chunk_id not in chunk_ids:
+                s.delete(existing)
+        for existing in list(s.exec(select(Section).where(Section.paper_id == paper_id))):
+            if existing.section_id not in section_ids:
+                s.delete(existing)
         for sec in sections:
             existing = s.get(Section, sec["section_id"])
             if existing:
-                continue
-            s.add(Section(**sec))
+                for k, v in sec.items():
+                    setattr(existing, k, v)
+                s.add(existing)
+            else:
+                s.add(Section(**sec))
         for ch in chunks:
             existing = s.get(Chunk, ch["chunk_id"])
-            payload = dict(ch)
-            payload.setdefault("neighbors_json", json.dumps(payload.pop("neighbors", []), ensure_ascii=False))
+            payload = _chunk_payload_for_sqlite(ch)
             if existing:
-                continue
-            s.add(Chunk(**payload))
+                for k, v in payload.items():
+                    setattr(existing, k, v)
+                s.add(existing)
+            else:
+                s.add(Chunk(**payload))
         s.commit()
+
+
+def _chunk_payload_for_sqlite(ch: dict) -> dict:
+    payload = dict(ch)
+    payload["neighbors_json"] = json.dumps(payload.pop("neighbors", []), ensure_ascii=False)
+    payload["metadata_json"] = json.dumps(payload.pop("metadata", {}), ensure_ascii=False)
+    allowed = set(Chunk.model_fields)
+    return {k: v for k, v in payload.items() if k in allowed}
 
 
 def list_chunks_for_papers(paper_ids: list[str]) -> list[Chunk]:

@@ -1,12 +1,16 @@
 # Makefile — unified entry points for paper_rag.
 
-PY ?= python
+PY ?= python3
 PYTHONPATH := src:tests
+DEERFLOW_DIR := integrations/deer-flow
+DEERFLOW_BACKEND_PY ?= $(CURDIR)/$(DEERFLOW_DIR)/backend/.venv/bin/python
+DEERFLOW_BACKEND_PORT ?= 8001
+DEERFLOW_FRONTEND_PORT ?= 3000
 
-.PHONY: help install install-dev lint format test test-pytest smoke \
+.PHONY: help install install-dev lint format test test-pytest smoke secret-scan mineru-doctor mineru-download-layout rebuild-index validate-metadata \
         qdrant-up qdrant-down init-store ingest ask eval clean clean-data \
         docker-build docker-build-bake docker-up-proactive docker-cli docker-shell \
-        calibrate-abstain hard-cases
+        calibrate-abstain hard-cases eval-golden eval-golden-qa verify-p0 deerflow-backend deerflow-frontend deerflow-smoke deerflow-rebuild-index
 
 help:
 	@echo "Targets:"
@@ -18,12 +22,20 @@ help:
 	@echo "  test-pytest    Run tests via pytest (richer output, fixtures)"
 	@echo "  test-middleware  Run gateway + langgraph middleware tests only"
 	@echo "  smoke          Walk all modules and assert importable count"
+	@echo "  secret-scan    Scan source/config/docs for accidental API keys"
+	@echo "  mineru-doctor  Diagnose local MinerU/magic-pdf readiness"
+	@echo "  mineru-download-layout  Download MinerU doclayout_yolo weight"
+	@echo "  rebuild-index  Rebuild SQLite/Qdrant from existing data/parsed files"
+	@echo "  validate-metadata  Check SQLite/Qdrant payloads and local asset paths"
 	@echo "  qdrant-up      Start Qdrant docker container"
 	@echo "  qdrant-down    Stop & remove Qdrant container"
 	@echo "  init-store     Build SQLite tables + Qdrant collections"
 	@echo "  ingest ID=...  Ingest one (e.g. make ingest ID=2310.12345)"
 	@echo "  ask Q=...      Ask a question (e.g. make ask Q='What is X?')"
 	@echo "  eval           Run retrieval-only eval on example set"
+	@echo "  eval-golden    Run retrieval-only eval on the strict golden set"
+	@echo "  eval-golden-qa Run full QA no-judge eval on the strict golden set"
+	@echo "  verify-p0      Run lint, focused tests, smoke, secret scan, golden retrieval"
 	@echo "  calibrate-abstain  Re-run threshold calibration (offline mode)"
 	@echo "  hard-cases     Collect hard cases from feedback events"
 	@echo "  docker-build   Build paper_rag image (lean, ~600MB)"
@@ -33,6 +45,10 @@ help:
 	@echo "  docker-shell   Drop into bash inside fresh container"
 	@echo "  obs-up         Start Prometheus + Grafana monitoring stack"
 	@echo "  obs-down       Stop monitoring stack"
+	@echo "  deerflow-backend   Start embedded DeerFlow gateway with paper_rag"
+	@echo "  deerflow-frontend  Start embedded DeerFlow Next.js UI"
+	@echo "  deerflow-smoke     Check embedded DeerFlow paper_rag endpoints"
+	@echo "  deerflow-rebuild-index  Rebuild local embedded Qdrant from parsed papers"
 	@echo "  publish        Publish to GitHub (REPO=... WORKDIR=...)"
 	@echo "  publish-dryrun Preview what would be committed"
 	@echo "  clean          Remove pycache & build artifacts"
@@ -62,6 +78,44 @@ test-middleware:
 smoke:
 	@PYTHONPATH=src $(PY) scripts/_run_smoke.py
 
+secret-scan:
+	@$(PY) scripts/secret_scan.py
+
+mineru-doctor:
+	$(PY) scripts/mineru_doctor.py
+
+mineru-download-layout:
+	$(PY) scripts/download_mineru_layout_model.py
+
+rebuild-index:
+	$(PY) scripts/rebuild_index_from_parsed.py
+
+validate-metadata:
+	$(PY) scripts/validate_metadata_paths.py --strict
+
+deerflow-backend:
+	set -a; [ ! -f .env ] || . ./.env; set +a; \
+	    DEER_FLOW_AUTH_DISABLED=1 \
+	    DEER_FLOW_CONFIG_PATH=$(CURDIR)/$(DEERFLOW_DIR)/config.example.yaml \
+	    DEER_FLOW_HOME=$(CURDIR)/$(DEERFLOW_DIR)/.deer-flow-local \
+	    PAPER_RAG_HOME=$(CURDIR) \
+	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
+	    PYTHONPATH=$(CURDIR)/$(DEERFLOW_DIR)/backend:$(CURDIR)/$(DEERFLOW_DIR)/backend/packages/harness:$(CURDIR)/src \
+	    $(DEERFLOW_BACKEND_PY) -m uvicorn app.gateway.app:app --host 127.0.0.1 --port $(DEERFLOW_BACKEND_PORT)
+
+deerflow-frontend:
+	cd $(DEERFLOW_DIR)/frontend && \
+	    DEER_FLOW_AUTH_DISABLED=1 \
+	    DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://127.0.0.1:$(DEERFLOW_BACKEND_PORT) \
+	    corepack pnpm exec next dev --turbo --hostname 127.0.0.1 --port $(DEERFLOW_FRONTEND_PORT)
+
+deerflow-smoke:
+	$(PY) scripts/deerflow_smoke.py --base-url http://127.0.0.1:$(DEERFLOW_BACKEND_PORT)
+
+deerflow-rebuild-index:
+	PAPER_RAG_CONFIG=$(CURDIR)/config/local.yaml $(DEERFLOW_BACKEND_PY) scripts/init_store.py
+	PAPER_RAG_CONFIG=$(CURDIR)/config/local.yaml $(DEERFLOW_BACKEND_PY) scripts/rebuild_index_from_parsed.py
+
 qdrant-up:
 	bash scripts/up_qdrant.sh
 
@@ -81,6 +135,31 @@ ask:
 
 eval:
 	$(PY) tests/eval/run_eval.py --file tests/eval/qa_set.example.jsonl --retrieval-only
+
+eval-golden:
+	set -a; [ ! -f .env ] || . ./.env; set +a; \
+	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
+	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
+	    $(DEERFLOW_BACKEND_PY) tests/eval/run_eval.py \
+	        --file tests/eval/qa_set.golden.jsonl \
+	        --retrieval-only \
+	        --top-k $${EVAL_TOP_K:-10}
+
+eval-golden-qa:
+	set -a; [ ! -f .env ] || . ./.env; set +a; \
+	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
+	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
+	    $(DEERFLOW_BACKEND_PY) tests/eval/run_eval.py \
+	        --file tests/eval/qa_set.golden.jsonl \
+	        --no-judge \
+	        --top-k $${EVAL_TOP_K:-10}
+
+verify-p0:
+	$(DEERFLOW_BACKEND_PY) -m ruff check src/paper_rag/rag/abstain.py src/paper_rag/rag/query_rewrite.py tests/test_abstain.py tests/test_m5_fixes.py tests/eval/run_eval.py scripts/secret_scan.py
+	$(DEERFLOW_BACKEND_PY) -m pytest tests/test_abstain.py tests/test_m5_fixes.py tests/test_eval_metrics.py
+	PYTHONPATH=src $(DEERFLOW_BACKEND_PY) scripts/_run_smoke.py
+	$(DEERFLOW_BACKEND_PY) scripts/secret_scan.py
+	$(MAKE) eval-golden
 
 calibrate-abstain:
 	$(PY) scripts/calibrate_abstain.py --mode offline \

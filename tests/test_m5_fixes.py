@@ -52,6 +52,18 @@ def test_validate_citations_drops_unknown():
     assert set(valid) == {"a1b2c3d4", "deadbeef"}
 
 
+def test_strip_suspicious_citation_forms_keeps_chunk_citations():
+    from paper_rag.rag.citation_check import strip_suspicious_citation_forms
+
+    cleaned = strip_suspicious_citation_forms(
+        "RAG combines memories (Lewis et al., 2020) [chunk:abc123]. Extra [12]."
+    )
+
+    assert "(Lewis et al., 2020)" not in cleaned
+    assert "[12]" not in cleaned
+    assert "[chunk:abc123]" in cleaned
+
+
 def test_mineru_image_path_rewrite_logic():
     """The internal _IMAGE_REF_RE + rewrite should redirect to figures/."""
     from paper_rag.parse.mineru_local import _IMAGE_REF_RE
@@ -67,3 +79,69 @@ def test_mineru_image_path_rewrite_logic():
     out = _IMAGE_REF_RE.sub(_rewrite, md)
     assert "figures/fig1.png" in out
     assert "images/fig1.png" not in out
+
+
+def test_mineru_failure_classifier_cv2():
+    from paper_rag.parse.mineru_local import classify_failure
+
+    reason, hint = classify_failure("ModuleNotFoundError: No module named 'cv2'")
+    assert reason == "missing_cv2"
+    assert ".[mineru]" in hint
+
+
+def test_mineru_failure_classifier_full_extra():
+    from paper_rag.parse.mineru_local import classify_failure
+
+    reason, hint = classify_failure("ModuleNotFoundError: No module named 'ultralytics'")
+    assert reason == "missing_mineru_full_extra"
+    assert ".[mineru]" in hint
+
+
+def test_mineru_doctor_report_serializes():
+    from paper_rag.parse.mineru_local import MineruCheck, MineruDoctorReport
+
+    report = MineruDoctorReport(
+        ok=False,
+        cli_path=None,
+        config_path="/tmp/magic-pdf.json",
+        checks=[MineruCheck("cv2", False, "missing", "install")],
+    )
+    payload = report.to_dict()
+    assert payload["ok"] is False
+    assert payload["checks"][0]["name"] == "cv2"
+
+
+def test_query_rewrite_factscore_variants():
+    from paper_rag.rag.query_rewrite import _heuristic_variants
+
+    variants = _heuristic_variants("What is FactScore and how is it used in Self-RAG?")
+
+    joined = " ".join(variants).lower()
+    assert "self-rag" in joined
+    assert "factscore" in joined
+    assert "factuality" in joined
+
+
+def test_query_rewrite_chunk_size_variants():
+    from paper_rag.rag.query_rewrite import _heuristic_variants
+
+    variants = _heuristic_variants(
+        "What is the typical chunk size used for embedding in production RAG systems?"
+    )
+
+    joined = " ".join(variants).lower()
+    assert "chunking" in joined
+    assert "100 256 512" in joined
+    assert "embedding" in joined
+
+
+def test_query_rewrite_latency_variants():
+    from paper_rag.rag.query_rewrite import _heuristic_variants
+
+    variants = _heuristic_variants(
+        "What latency tradeoffs do retrieval and reranking introduce in RAG systems?"
+    )
+
+    joined = " ".join(variants).lower()
+    assert "latency" in joined
+    assert "reranking" in joined

@@ -21,22 +21,25 @@ log = get_logger("init_store")
 def init_qdrant() -> None:
     from qdrant_client.http import models as qm
 
-    from paper_rag.store.qdrant_store import get_client
+    from paper_rag.store import qdrant_store
 
     c = cfg.load()
-    client = get_client()  # respects qdrant.local_path / url
+    client = qdrant_store.get_client()  # respects qdrant.local_path / url
     distance = qm.Distance.COSINE if c.qdrant.distance.lower() == "cosine" else qm.Distance.DOT
 
-    for name in (c.qdrant.collection_chunks, c.qdrant.collection_wiki):
-        existing = {col.name for col in client.get_collections().collections}
-        if name in existing:
-            log.info(f"Qdrant collection already exists: {name}")
-            continue
-        client.create_collection(
-            collection_name=name,
-            vectors_config=qm.VectorParams(size=c.embedding.dim, distance=distance),
-        )
-        log.info(f"Created Qdrant collection: {name} (dim={c.embedding.dim})")
+    try:
+        for name in (c.qdrant.collection_chunks, c.qdrant.collection_wiki):
+            existing = {col.name for col in client.get_collections().collections}
+            if name in existing:
+                log.info(f"Qdrant collection already exists: {name}")
+                continue
+            client.create_collection(
+                collection_name=name,
+                vectors_config=qm.VectorParams(size=c.embedding.dim, distance=distance),
+            )
+            log.info(f"Created Qdrant collection: {name} (dim={c.embedding.dim})")
+    finally:
+        qdrant_store.close_client()
 
 
 def init_sqlite() -> None:

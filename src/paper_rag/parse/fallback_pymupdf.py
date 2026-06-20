@@ -27,7 +27,7 @@ def parse_pdf(paper_id: str, pdf_path: str | Path) -> Path:
     doc = fitz.open(str(pdf_path))
     parts: list[str] = []
     for i, page in enumerate(doc):
-        text = page.get_text("text") or ""
+        text = (page.get_text("text") or "").replace("\x00", "")
         parts.append(f"\n\n<!-- page {i + 1} -->\n\n{text.strip()}")
     md_path.write_text("\n".join(parts).strip(), encoding="utf-8")
     log.info(f"pymupdf fallback wrote {md_path} ({md_path.stat().st_size} bytes)")

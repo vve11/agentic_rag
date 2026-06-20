@@ -35,26 +35,41 @@ Numbers (HEAD of `main`):
 ## Quickstart
 
 ```bash
-# 1. Install (dev mode)
-make install-dev
-make qdrant-up
+# 1. Install runtime dependencies.
+# For the full DeerFlow + real QA path, use the embedded backend venv.
+python -m pip install -e ".[dev,embed,ingest]"
 make init-store
 
 # 2. Ingest a paper and ask a question (CLI)
 make ingest ID=2310.11511                 # Self-RAG
 make ask Q="What is Self-RAG?"
 
-# 3. Run the gateway + frontend (only when integrated with deer-flow)
-make up                                   # gateway + frontend + qdrant
-make obs-up                               # Prometheus + Grafana
+# 3. Run the embedded DeerFlow gateway + workspace UI
+cp .env.example .env                      # then put real provider values in .env
+make deerflow-backend
+make deerflow-frontend                    # second terminal, opens /workspace/paper-rag
 
-# 4. Tests
-make test
+# 4. Regression checks
+make verify-p0                            # lint + focused tests + smoke + secret scan + golden retrieval
+make eval-golden-qa                       # real QA no-judge golden set, requires LLM credentials
 ```
 
 CI installs only the minimal dependency set required for pure-logic tests
 and the import-walk smoke check; see `.github/workflows/ci.yml` if you want
 to reproduce that environment locally.
+
+For DeepSeek or another OpenAI-compatible provider, keep credentials in local
+`.env` only:
+
+```bash
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_API_KEY=sk-...
+CHAT_MODEL=deepseek-chat
+PAPER_RAG_CONFIG=config/local.yaml
+```
+
+`.env` and runtime indexes are gitignored. Run `make secret-scan` before
+publishing or sharing a branch.
 
 ---
 
@@ -149,6 +164,28 @@ diagrams for the abstain decision, proactive scheduler, feedback loop,
 and middleware stack. Runnable walk-throughs live in [`examples/`](examples/).
 
 ---
+
+## Current Golden Baseline
+
+The strict regression set is [`tests/eval/qa_set.golden.jsonl`](tests/eval/qa_set.golden.jsonl).
+It contains evidence-supported questions plus explicit no-answer cases. The
+latest no-judge QA run is saved under `data/index/eval_runs/` locally.
+
+| Metric | Latest local value |
+|---|---:|
+| Positive paper recall@10 | 1.0 |
+| Positive paper MRR | 0.947 |
+| Citation existence | 1.0 |
+| Must-contain coverage | 1.0 |
+| No-answer success | 1.0 |
+| No-answer direct abstain | 1.0 |
+
+Useful commands:
+
+```bash
+make eval-golden       # retrieval-only, no LLM generation
+make eval-golden-qa    # real QA, no LLM judge
+```
 
 ## Performance baseline
 

@@ -18,12 +18,12 @@ Given the final chunk list (already RRF-fused + reranked + truncated):
                       with an explicit "evidence may be insufficient" hint)
     confident       — score >= threshold_high             (normal flow)
 
-`evidence_score` is the mean of the top-`min_chunks` per-chunk scores. We pick
+`evidence_score` is the mean of the top-`min_chunks` scores after selecting
 the highest-quality scoring signal available in the candidate dict (preference
-order is configurable; default `score_rerank > score_rrf > score`). RRF scores
-are bounded ~`(0, 0.05]` so they get linearly normalized into a [0, 1]-ish band
-before mean — this keeps the same threshold semantics regardless of whether
-the reranker is enabled.
+order is configurable; default `score_rerank > score_dense > score`). RRF
+scores are bounded ~`(0, 0.05]` so they get linearly normalized into a [0, 1]-ish
+band before mean — this keeps the same threshold semantics regardless of
+whether the reranker is enabled.
 
 Industrial-grade properties
 ---------------------------
@@ -42,7 +42,7 @@ Industrial-grade properties
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 # Type alias for clarity
 Decision = str  # one of: confident | weak_evidence | no_evidence | no_chunks
@@ -67,24 +67,11 @@ LOW_QUALITY_FIELDS = frozenset({"score_bm25", "score_rrf"})
 # Picked so that an RRF score of 0.033 (rank-1 in 1 list) maps to ~0.5.
 _RRF_NORMALIZE_FACTOR = 15.0
 
-# BM25 raw scores are unbounded (typical 0–30). We squash with a soft sigmoid
+# BM25 raw scores are unbounded (typical 0-30). We squash with a soft sigmoid
 # centered at BM25=8 (a typical rank-1 score for an in-corpus query). This is
 # only used as a degraded-mode fallback when dense retrieval is unavailable.
 _BM25_SIGMOID_CENTER = 8.0
 _BM25_SIGMOID_SLOPE = 0.5
-
-
-def _pick_score(chunk: dict, fields: Iterable[str]) -> tuple[float | None, str | None]:
-    """Return (score, field_name) using the first field present in `chunk`."""
-    for field in fields:
-        v = chunk.get(field)
-        if v is None:
-            continue
-        try:
-            return float(v), field
-        except (TypeError, ValueError):
-            continue
-    return None, None
 
 
 def _normalize(score: float, field: str) -> float:
@@ -131,19 +118,37 @@ def evidence_score(
     if not chunks:
         return 0.0, None, 0
 
-    take = chunks[:min_chunks] if min_chunks > 0 else chunks
     raw_scores: list[float] = []
-    field_used: str | None = None
-    for ch in take:
-        s, field = _pick_score(ch, score_fields)
-        if s is None:
+    field_used = _best_available_field(chunks, score_fields)
+    if field_used is None:
+        return 0.0, None, 0
+    for ch in chunks:
+        value = ch.get(field_used)
+        if value is None:
             continue
-        if field_used is None:
-            field_used = field
-        raw_scores.append(_normalize(s, field))
+        try:
+            raw_scores.append(_normalize(float(value), field_used))
+        except (TypeError, ValueError):
+            continue
     if not raw_scores:
         return 0.0, None, 0
-    return sum(raw_scores) / len(raw_scores), field_used, len(raw_scores)
+    raw_scores.sort(reverse=True)
+    take = raw_scores[:min_chunks] if min_chunks > 0 else raw_scores
+    return sum(take) / len(take), field_used, len(take)
+
+
+def _best_available_field(chunks: list[dict], score_fields: Iterable[str]) -> str | None:
+    for field in score_fields:
+        for ch in chunks:
+            value = ch.get(field)
+            if value is None:
+                continue
+            try:
+                float(value)
+                return field
+            except (TypeError, ValueError):
+                continue
+    return None
 
 
 def _classify(
@@ -179,10 +184,13 @@ def _classify(
 def _top_chunk_score(chunks: list[dict], field_used: str | None) -> float:
     if field_used is None or not chunks:
         return 0.0
-    try:
-        return _normalize(float(chunks[0].get(field_used, 0.0) or 0.0), field_used)
-    except (TypeError, ValueError):
-        return 0.0
+    scores: list[float] = []
+    for ch in chunks:
+        try:
+            scores.append(_normalize(float(ch.get(field_used, 0.0) or 0.0), field_used))
+        except (TypeError, ValueError):
+            continue
+    return max(scores) if scores else 0.0
 
 
 def decide(
@@ -266,11 +274,11 @@ WEAK_EVIDENCE_HINT = (
 
 
 __all__ = [
+    "DECISION_CONFIDENT",
+    "DECISION_NO_CHUNKS",
+    "DECISION_NO_EVIDENCE",
+    "DECISION_WEAK",
+    "WEAK_EVIDENCE_HINT",
     "decide",
     "evidence_score",
-    "WEAK_EVIDENCE_HINT",
-    "DECISION_CONFIDENT",
-    "DECISION_WEAK",
-    "DECISION_NO_EVIDENCE",
-    "DECISION_NO_CHUNKS",
 ]

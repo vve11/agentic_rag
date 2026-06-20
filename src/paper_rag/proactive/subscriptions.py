@@ -109,15 +109,15 @@ def get(sub_id: int) -> dict[str, Any] | None:
 
 
 def delete(sub_id: int, *, user_id: str | None = None) -> bool:
-    """Soft-delete (enabled=0). user_id check prevents cross-user deletion."""
+    """Delete a subscription. user_id check prevents cross-user deletion."""
     with _connect() as con:
         if user_id is not None:
             cur = con.execute(
-                "UPDATE subscriptions SET enabled=0 WHERE id=? AND user_id=?",
+                "DELETE FROM subscriptions WHERE id=? AND user_id=?",
                 (sub_id, user_id),
             )
         else:
-            cur = con.execute("UPDATE subscriptions SET enabled=0 WHERE id=?", (sub_id,))
+            cur = con.execute("DELETE FROM subscriptions WHERE id=?", (sub_id,))
         return bool(cur.rowcount)
 
 
@@ -155,14 +155,14 @@ def iter_active() -> Iterator[dict[str, Any]]:
 
 
 __all__ = [
+    "STRENGTH_THRESHOLD",
     "SUBSCRIPTION_KINDS",
     "SUBSCRIPTION_STRENGTHS",
-    "STRENGTH_THRESHOLD",
     "add",
-    "list_for_user",
-    "get",
     "delete",
-    "toggle",
-    "mark_matched",
+    "get",
     "iter_active",
+    "list_for_user",
+    "mark_matched",
+    "toggle",
 ]

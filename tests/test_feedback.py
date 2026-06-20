@@ -23,11 +23,11 @@ sys.path.insert(0, str(ROOT / "src"))
 
 def _fresh_db():
     """Allocate a fresh SQLite path + return its Path."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
-    tmp.close()
-    Path(tmp.name).unlink(missing_ok=True)
-    os.environ["FEEDBACK_SQLITE_PATH"] = tmp.name
-    return Path(tmp.name)
+    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp:
+        tmp_name = tmp.name
+    Path(tmp_name).unlink(missing_ok=True)
+    os.environ["FEEDBACK_SQLITE_PATH"] = tmp_name
+    return Path(tmp_name)
 
 
 def _reset_collector_rate_limit():
@@ -213,6 +213,41 @@ def test_hard_case_collector_thumbs_down_hallucination():
     assert cases[0]["trace_id"] == "t-hallu"
 
 
+def test_hard_case_collector_preserves_eval_candidate_context():
+    """Feedback hard cases should be reviewable/promotable into EvalItem rows."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import importlib
+    if "collect_hard_cases" in sys.modules:
+        importlib.reload(sys.modules["collect_hard_cases"])
+    chc = importlib.import_module("collect_hard_cases")
+
+    events = [
+        {
+            "id": 1,
+            "user_id": "alice",
+            "trace_id": "t-inc",
+            "conversation_id": "c1",
+            "event_type": "thumbs_down",
+            "payload": {
+                "reason": "incomplete",
+                "question": "What does Self-RAG use FactScore for?",
+                "answer_preview": "It uses FactScore for factuality evaluation.",
+                "citations": ["abc123", "def456"],
+            },
+            "created_at": 1000.0,
+        },
+    ]
+
+    cases = chc.collect_hard_cases(events)
+
+    assert len(cases) == 1
+    assert cases[0]["rule"] == "thumbs_down_incomplete"
+    assert cases[0]["question"] == "What does Self-RAG use FactScore for?"
+    assert cases[0]["citations"] == ["abc123", "def456"]
+    assert cases[0]["suggested_eval_item"]["question"] == cases[0]["question"]
+    assert cases[0]["suggested_eval_item"]["relevant_paper_ids"] == []
+
+
 def test_hard_case_collector_repeat_followups_in_5min():
     """≥2 follow-ups within 5min → repeat_follow_up rule."""
     sys.path.insert(0, str(ROOT / "scripts"))
@@ -284,6 +319,7 @@ def main() -> int:
         test_user_stats_aggregates_by_type,
         test_rate_limit_enforced,
         test_hard_case_collector_thumbs_down_hallucination,
+        test_hard_case_collector_preserves_eval_candidate_context,
         test_hard_case_collector_repeat_followups_in_5min,
         test_hard_case_collector_judge_low,
         test_hard_case_dedup_across_rules,

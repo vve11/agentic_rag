@@ -24,9 +24,13 @@ import sys
 import time
 from pathlib import Path
 
-_DEFAULT_ROOT = Path(__file__).resolve().parents[2]
-ROOT = Path(os.environ.get("DEER_FLOW_ROOT", _DEFAULT_ROOT))
-sys.path.insert(0, str(ROOT / "paper_rag" / "src"))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_DEFAULT_DEERFLOW_ROOT = REPO_ROOT.parent
+ROOT = Path(os.environ.get("DEER_FLOW_ROOT", _DEFAULT_DEERFLOW_ROOT))
+GATEWAY_MIDDLEWARE_ROOT = ROOT / "backend/app/gateway/middleware"
+if not GATEWAY_MIDDLEWARE_ROOT.exists():
+    GATEWAY_MIDDLEWARE_ROOT = REPO_ROOT / "docs/integration/middleware/gateway"
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 
 def _load_module(mod_name: str, path: Path):
@@ -44,15 +48,15 @@ def _load_module(mod_name: str, path: Path):
 # imports from these aliases instead of `app.gateway.middleware.*`.
 _obs = _load_module(
     "gw_obs",
-    ROOT / "backend/app/gateway/middleware/observability.py",
+    GATEWAY_MIDDLEWARE_ROOT / "observability.py",
 )
 _prot = _load_module(
     "gw_prot",
-    ROOT / "backend/app/gateway/middleware/protection.py",
+    GATEWAY_MIDDLEWARE_ROOT / "protection.py",
 )
 _auth = _load_module(
     "gw_auth",
-    ROOT / "backend/app/gateway/middleware/auth.py",
+    GATEWAY_MIDDLEWARE_ROOT / "auth.py",
 )
 
 

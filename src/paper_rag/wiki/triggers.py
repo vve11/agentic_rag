@@ -8,7 +8,7 @@ from ..utils.logger import get_logger
 log = get_logger("wiki.triggers")
 
 
-def on_paper_indexed(paper_id: str) -> dict:
+def on_paper_indexed(paper_id: str, *, force: bool = False) -> dict:
     """Run extraction + create/patch flow for a freshly indexed paper.
 
     Returns a small report. No-op if wiki.enabled=false. All sqlmodel /
@@ -17,7 +17,7 @@ def on_paper_indexed(paper_id: str) -> dict:
     """
     from sqlmodel import Session, select  # local import for optional dep
     c = cfg.load().wiki
-    if not c.enabled:
+    if not c.enabled and not force:
         return {"skipped": "wiki disabled"}
 
     from ..embed import bge_m3

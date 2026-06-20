@@ -43,13 +43,19 @@ sys.path.insert(0, str(ROOT / "src"))
 # %% [markdown]
 # ## 1. Ingest one paper
 #
-# `arxiv:2310.11511` is Self-RAG. We use the CLI tool here so the script is
-# safe to re-run — it is idempotent (dedup catches the second call).
+# `arxiv:2310.11511` is Self-RAG. The ingest pipeline is idempotent: dedup
+# catches a second run and returns the existing paper id.
 
 # %%
-from paper_rag.tools.paper_index import ingest as ingest_tool  # type: ignore
+from paper_rag import config as cfg  # noqa: E402
+from paper_rag.ingest.arxiv_source import ArxivSource  # noqa: E402
+from paper_rag.store.ingest_pipeline import ingest  # noqa: E402
+from paper_rag.utils.paths import ensure_dirs  # noqa: E402
 
-result = ingest_tool({"arxiv_id": "2310.11511", "user_id": "demo"})
+cfg.load()
+ensure_dirs()
+fetched = ArxivSource().fetch("2310.11511")
+result = ingest(fetched)
 print(json.dumps(result, indent=2, ensure_ascii=False)[:500])
 
 # %% [markdown]

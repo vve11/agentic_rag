@@ -19,14 +19,18 @@ Same hard caps as qa_agentic (max_inner_iters / max_inner_tokens).
 
 from __future__ import annotations
 
-from typing import Generator
+from collections.abc import Generator
 
 from .. import config as cfg
 from ..retrieve.format import format_evidence
 from ..retrieve.pipeline import retrieve_round_with_rewrite
 from ..utils.logger import get_logger
 from . import abstain as abstain_mod
-from .citation_check import detect_suspicious_citations, validate_citations
+from .citation_check import (
+    detect_suspicious_citations,
+    strip_suspicious_citation_forms,
+    validate_citations,
+)
 from .intent_classifier import classify
 from .query_rewrite import rewrite  # re-exported so tests can monkey-patch qa_stream.rewrite
 from .reflect import reflect
@@ -125,9 +129,14 @@ def stream_answer(question: str, *, paper_ids: list[str] | None = None) -> Gener
         return
 
     # Stream the answer token by token.
+    allowed_citations = " ".join(
+        f"[chunk:{ch['chunk_id']}]" for ch in final_chunks if ch.get("chunk_id")
+    )
     user = (
         f"Question: {question}\n\nEvidence:\n{format_evidence(final_chunks)}\n\n"
-        f"Answer (use ONLY [chunk:<id>] citations, ≤200 words):"
+        f"Allowed citation tokens: {allowed_citations}\n\n"
+        "Answer (copy citation tokens EXACTLY from the allowed list; never invent "
+        "[chunk:1], [chunk:2], [1], or (Author 2020) citations; ≤200 words):"
     )
     if abstain_result["decision"] == abstain_mod.DECISION_WEAK:
         user += abstain_mod.WEAK_EVIDENCE_HINT
@@ -141,11 +150,14 @@ def stream_answer(question: str, *, paper_ids: list[str] | None = None) -> Gener
         return
 
     cleaned, valid = validate_citations(full, final_chunks)
+    suspicious = detect_suspicious_citations(cleaned)
+    if suspicious["count"]:
+        cleaned = strip_suspicious_citation_forms(cleaned)
     paper_ids_used = sorted({c.get("paper_id") for c in final_chunks if c.get("paper_id")})
     yield {"event": "done", "data": {
         "answer": cleaned,
         "citations": valid,
-        "suspicious": detect_suspicious_citations(cleaned),
+        "suspicious": suspicious,
         "abstain": abstain_result,
         "n_chunks": len(final_chunks),
         "paper_ids": paper_ids_used,

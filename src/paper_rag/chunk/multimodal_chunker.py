@@ -20,6 +20,9 @@ class MMChunk:
     text: str           # what gets embedded
     modality: str       # figure | table | formula
     raw: str            # original markdown snippet
+    char_start: int
+    char_end: int
+    asset_rel_path: str | None = None
 
 
 def extract_figures(body: str) -> list[MMChunk]:
@@ -29,7 +32,16 @@ def extract_figures(body: str) -> list[MMChunk]:
         path = m.group("path").strip()
         context = _surrounding_text(body, m.start(), m.end())
         text = f"Figure: {alt}\nContext: {context}\nPath: {path}"
-        out.append(MMChunk(text=text, modality="figure", raw=m.group(0)))
+        out.append(
+            MMChunk(
+                text=text,
+                modality="figure",
+                raw=m.group(0),
+                char_start=m.start(),
+                char_end=m.end(),
+                asset_rel_path=path,
+            )
+        )
     return out
 
 
@@ -37,9 +49,34 @@ def extract_tables(body: str) -> list[MMChunk]:
     out: list[MMChunk] = []
     for m in _TABLE_BLOCK_RE.finditer(body):
         block = m.group(1).strip()
+        if not _looks_like_table(block):
+            continue
         context = _surrounding_text(body, m.start(), m.end())
-        out.append(MMChunk(text=f"Table:\n{block}\nContext: {context}", modality="table", raw=block))
+        out.append(
+            MMChunk(
+                text=f"Table:\n{block}\nContext: {context}",
+                modality="table",
+                raw=block,
+                char_start=m.start(),
+                char_end=m.end(),
+            )
+        )
     return out
+
+
+def _looks_like_table(block: str) -> bool:
+    """Reject formula artifacts such as two repeated one-cell ``|Q|`` lines."""
+    rows = [line.strip() for line in block.splitlines() if line.strip()]
+    valid_rows = [
+        row
+        for row in rows
+        if row.startswith("|") and row.endswith("|") and len(_table_cells(row)) >= 2
+    ]
+    return len(valid_rows) >= 2
+
+
+def _table_cells(row: str) -> list[str]:
+    return [cell.strip() for cell in row.strip("|").split("|")]
 
 
 def extract_formulas(body: str) -> list[MMChunk]:
@@ -47,7 +84,15 @@ def extract_formulas(body: str) -> list[MMChunk]:
     for m in _FORMULA_BLOCK_RE.finditer(body):
         latex = m.group("body").strip()
         context = _surrounding_text(body, m.start(), m.end())
-        out.append(MMChunk(text=f"Formula: {latex}\nContext: {context}", modality="formula", raw=m.group(0)))
+        out.append(
+            MMChunk(
+                text=f"Formula: {latex}\nContext: {context}",
+                modality="formula",
+                raw=m.group(0),
+                char_start=m.start(),
+                char_end=m.end(),
+            )
+        )
     return out
 
 

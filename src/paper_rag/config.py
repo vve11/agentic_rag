@@ -56,6 +56,8 @@ class _Qdrant(BaseModel):
 class _MinerU(BaseModel):
     mode: str = "local"
     cli: str = "mineru"
+    method: str = "auto"  # auto | txt | ocr
+    lang: str | None = None
     timeout_sec: int = 600
     fallback_to_pymupdf: bool = True
 

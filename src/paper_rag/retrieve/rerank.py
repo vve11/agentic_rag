@@ -16,6 +16,7 @@ fall back to the original candidate order — never propagate the exception.
 from __future__ import annotations
 
 from .. import config as cfg
+from ..utils.hf_cache import resolve_cached_snapshot
 from ..utils.logger import get_logger
 
 log = get_logger("retrieve.rerank")
@@ -36,10 +37,11 @@ def _model():
             return None
         c = cfg.load()
         cache_dir = c.reranker.cache_dir or c.paths.models_dir
-        log.info(f"loading reranker {c.reranker.model_name} (cache={cache_dir})")
+        model_name = resolve_cached_snapshot(c.reranker.model_name, cache_dir)
+        log.info(f"loading reranker {model_name} (cache={cache_dir})")
         try:
             _MODEL = FlagReranker(
-                c.reranker.model_name,
+                model_name,
                 use_fp16=c.reranker.use_fp16,
                 cache_dir=cache_dir,
             )

@@ -2,6 +2,11 @@
 
 ## 何时用什么模式
 
+## 评测集分层
+
+- `qa_set.golden.jsonl`：严格回归集，只放当前论文证据能支撑的问题。优化 RAG、做 release gate、比较 baseline 时优先跑它。
+- `qa_set.real.jsonl`：探索/压力测试集，保留更宽的问题形态，也可能包含需要重新标注或不适合做 hard gate 的题。用来发现新问题，不直接当成唯一验收线。
+
 | 阶段 | 命令 | 评什么 | 需要 |
 |---|---|---|---|
 | 没装 LLM、刚入完库 | `--retrieval-only` | 召回@k、MRR | Qdrant + bge-m3 + 已 ingest 的论文 |
@@ -34,7 +39,12 @@
 4. 加 1~2 个 explore 问题（多文献综合）
 5. 重要的题再补 gold_answer，跑完整 judge
 
-**先跑 retrieval-only，把检索调到 ≥0.7 再上完整 RAG**——不然评测的全是 LLM 抖动而不是检索能力。
+**先跑 retrieval-only，把检索调到 ≥0.7 再上完整 RAG**——不然评测的全是 LLM 抖动而不是检索能力。日常优化建议先跑：
+
+```bash
+python tests/eval/run_eval.py --file tests/eval/qa_set.golden.jsonl --retrieval-only --top-k 10
+python tests/eval/run_eval.py --file tests/eval/qa_set.golden.jsonl --no-judge --top-k 10
+```
 
 ## 输出
 

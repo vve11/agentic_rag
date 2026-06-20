@@ -26,11 +26,11 @@ sys.path.insert(0, str(ROOT / "src"))
 
 
 def _fresh_db():
-    tmp = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
-    tmp.close()
-    Path(tmp.name).unlink(missing_ok=True)
-    os.environ["FEEDBACK_SQLITE_PATH"] = tmp.name
-    return Path(tmp.name)
+    with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp:
+        tmp_name = tmp.name
+    Path(tmp_name).unlink(missing_ok=True)
+    os.environ["FEEDBACK_SQLITE_PATH"] = tmp_name
+    return Path(tmp_name)
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +71,26 @@ def test_subscription_delete_is_user_scoped():
     assert subscriptions.delete(sid, user_id="bob") is False
     # Alice can
     assert subscriptions.delete(sid, user_id="alice") is True
-    # After delete, list_for_user (only_enabled=True) returns empty
+    # After delete, the row is removed, unlike pause/toggle which keeps it visible.
     assert subscriptions.list_for_user("alice") == []
+    assert subscriptions.get(sid) is None
+
+
+def test_subscription_toggle_keeps_disabled_subscription_listable():
+    _fresh_db()
+    from paper_rag.proactive import subscriptions
+
+    sid = subscriptions.add("alice", "keyword", "RAG")
+    assert subscriptions.toggle(sid, enabled=False, user_id="alice") is True
+
+    assert subscriptions.list_for_user("alice") == []
+    rows = subscriptions.list_for_user("alice", only_enabled=False)
+    assert len(rows) == 1
+    assert rows[0]["id"] == sid
+    assert rows[0]["enabled"] == 0
+
+    assert subscriptions.toggle(sid, enabled=True, user_id="alice") is True
+    assert subscriptions.list_for_user("alice")[0]["enabled"] == 1
 
 
 def test_subscription_validation():

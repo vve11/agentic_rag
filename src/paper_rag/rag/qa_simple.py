@@ -9,7 +9,11 @@ from __future__ import annotations
 from ..retrieve.dense import retrieve
 from ..retrieve.format import format_evidence
 from ..utils.logger import get_logger
-from .citation_check import detect_suspicious_citations, validate_citations
+from .citation_check import (
+    detect_suspicious_citations,
+    strip_suspicious_citation_forms,
+    validate_citations,
+)
 from .llm import chat
 
 log = get_logger("rag.qa_simple")
@@ -41,6 +45,7 @@ def answer(question: str, *, top_k: int = 8, paper_ids: list[str] | None = None)
     suspicious = detect_suspicious_citations(cleaned)
     if suspicious["count"]:
         log.warning(f"suspicious citations detected: {suspicious}")
+        cleaned = strip_suspicious_citation_forms(cleaned)
     log.info(f"answer ok, citations valid={len(valid)} retrieved={len(chunks)}")
     return {
         "answer": cleaned,

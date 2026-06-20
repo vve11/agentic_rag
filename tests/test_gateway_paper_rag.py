@@ -18,12 +18,19 @@ import os
 import sys
 from pathlib import Path
 
-# Discover the deer-flow repo root by walking up from this file.
-# tests/test_gateway_paper_rag.py → paper_rag/ → deer-flow/.
-# Override via env DEER_FLOW_ROOT=/abs/path if the layout differs (e.g. when
-# paper_rag is published as a standalone repo without the deerflow sibling).
-_DEFAULT_ROOT = Path(__file__).resolve().parents[2]
-ROOT = Path(os.environ.get("DEER_FLOW_ROOT", _DEFAULT_ROOT))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_DEFAULT_DEERFLOW_ROOT = REPO_ROOT.parent
+ROOT = Path(os.environ.get("DEER_FLOW_ROOT", _DEFAULT_DEERFLOW_ROOT))
+_REAL_GATEWAY_ROOT = ROOT / "backend/app/gateway"
+if _REAL_GATEWAY_ROOT.exists():
+    AUTH_PATH = _REAL_GATEWAY_ROOT / "middleware/auth.py"
+    PAPER_RAG_ROUTER_PATH = _REAL_GATEWAY_ROOT / "routers/paper_rag.py"
+    METRICS_ROUTER_PATH = _REAL_GATEWAY_ROOT / "routers/metrics.py"
+else:
+    _INTEGRATION_ROOT = REPO_ROOT / "docs/integration"
+    AUTH_PATH = _INTEGRATION_ROOT / "middleware/gateway/auth.py"
+    PAPER_RAG_ROUTER_PATH = _INTEGRATION_ROOT / "router/paper_rag.py"
+    METRICS_ROUTER_PATH = _INTEGRATION_ROOT / "router/metrics.py"
 
 
 def _load(mod_name: str, path: Path):
@@ -37,11 +44,11 @@ def _load(mod_name: str, path: Path):
 
 def _make_app():
     """Build a minimal FastAPI app with paper_rag router + auth middleware."""
-    sys.path.insert(0, str(ROOT / "paper_rag" / "src"))
-    auth = _load("auth_mod", ROOT / "backend/app/gateway/middleware/auth.py")
-    pr = _load("pr_mod", ROOT / "backend/app/gateway/routers/paper_rag.py")
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    auth = _load("auth_mod", AUTH_PATH)
+    pr = _load("pr_mod", PAPER_RAG_ROUTER_PATH)
     sys.modules["app.gateway.routers.paper_rag"] = pr
-    metrics = _load("metrics_mod", ROOT / "backend/app/gateway/routers/metrics.py")
+    metrics = _load("metrics_mod", METRICS_ROUTER_PATH)
 
     from fastapi import FastAPI
 
@@ -54,8 +61,15 @@ def _make_app():
 
 def test_routes_registered():
     """Verify all 5 paper_rag endpoints + /metrics are registered."""
-    app, _ = _make_app()
-    paths = {r.path for r in app.routes}
+    _make_app()
+    pr = sys.modules["pr_mod"]
+    metrics = sys.modules["metrics_mod"]
+    paths = {
+        r.path
+        for router in (pr.router, metrics.router)
+        for r in router.routes
+        if hasattr(r, "path")
+    }
     assert "/metrics" in paths
     for p in (
         "/api/paper_rag/qa",
@@ -103,7 +117,7 @@ def test_paper_rag_endpoints_require_auth():
 
 def test_paper_rag_papers_dev_mode():
     """In DEERFLOW_AUTH_DISABLED mode, /papers returns 200 with system user_id."""
-    os.environ["PAPER_RAG_CONFIG"] = str(ROOT / "paper_rag" / "config" / "local.yaml")
+    os.environ["PAPER_RAG_CONFIG"] = str(REPO_ROOT / "config" / "local.yaml")
     from fastapi.testclient import TestClient
 
     app, auth = _make_app()

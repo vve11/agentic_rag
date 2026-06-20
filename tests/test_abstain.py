@@ -124,6 +124,28 @@ def test_top_chunk_score_reported():
     assert abs(res["evidence_score"] - 0.367) < 1e-2
 
 
+def test_evidence_score_uses_top_scores_not_fused_order():
+    """Hybrid fusion can place sparse-only chunks before stronger dense chunks.
+
+    Abstain should estimate evidence sufficiency from the best high-quality
+    score field, not from the first N fused rows.
+    """
+    chunks = [
+        _ch(score_field="score_dense", value=0.10, chunk_id="sparse_first"),
+        _ch(score_field="score_dense", value=0.20, chunk_id="also_weak"),
+        _ch(score_field="score_dense", value=0.72, chunk_id="dense_good_1"),
+        _ch(score_field="score_dense", value=0.68, chunk_id="dense_good_2"),
+        _ch(score_field="score_dense", value=0.64, chunk_id="dense_good_3"),
+    ]
+
+    res = abstain.decide(chunks, min_chunks=3, threshold_low=0.48, threshold_high=0.58)
+
+    assert res["decision"] == abstain.DECISION_CONFIDENT
+    assert res["score_field"] == "score_dense"
+    assert abs(res["evidence_score"] - 0.68) < 1e-3
+    assert abs(res["top_chunk_score"] - 0.72) < 1e-3
+
+
 def test_min_chunks_respected():
     """min_chunks limits how many top chunks contribute to mean."""
     chunks = [_ch(value=0.90, chunk_id="c0"), _ch(value=0.90, chunk_id="c1")]

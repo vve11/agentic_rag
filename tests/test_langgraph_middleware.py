@@ -31,15 +31,19 @@ if not hasattr(_typing, "override"):
 
 import os
 
-_DEFAULT_ROOT = Path(__file__).resolve().parents[2]
-ROOT = Path(os.environ.get("DEER_FLOW_ROOT", _DEFAULT_ROOT))
-sys.path.insert(0, str(ROOT / "paper_rag" / "src"))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_DEFAULT_DEERFLOW_ROOT = REPO_ROOT.parent
+ROOT = Path(os.environ.get("DEER_FLOW_ROOT", _DEFAULT_DEERFLOW_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 
 def _load(name: str, rel: str):
     if name in sys.modules:
         return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, str(ROOT / rel))
+    path = ROOT / rel
+    if not path.exists():
+        path = REPO_ROOT / "docs/integration/middleware/langgraph" / Path(rel).name
+    spec = importlib.util.spec_from_file_location(name, str(path))
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)

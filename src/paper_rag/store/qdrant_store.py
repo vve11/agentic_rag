@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 from typing import Any, Iterable
 
@@ -11,6 +12,24 @@ from ..utils.logger import get_logger
 log = get_logger("store.qdrant")
 
 _CLIENT = None
+_ATEXIT_REGISTERED = False
+
+
+def close_client() -> None:
+    """Close the cached Qdrant client if one exists.
+
+    Embedded Qdrant can otherwise emit noisy destructor errors during Python
+    shutdown because imports are already torn down by the time ``__del__`` runs.
+    """
+    global _CLIENT
+    client = _CLIENT
+    _CLIENT = None
+    close = getattr(client, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception as e:  # noqa: BLE001
+            log.debug(f"qdrant close skipped: {e}")
 
 
 def get_client():
@@ -21,7 +40,7 @@ def get_client():
       2. Else if `qdrant.local_path` is set OR url starts with "file://" or
          "local://", use embedded mode (single-process, no docker).
     """
-    global _CLIENT
+    global _CLIENT, _ATEXIT_REGISTERED
     if _CLIENT is None:
         from qdrant_client import QdrantClient
 
@@ -38,6 +57,9 @@ def get_client():
         else:
             log.info(f"qdrant client (server) at {url}")
             _CLIENT = QdrantClient(url=url)
+        if not _ATEXIT_REGISTERED:
+            atexit.register(close_client)
+            _ATEXIT_REGISTERED = True
     return _CLIENT
 
 
@@ -68,6 +90,28 @@ def upsert_chunks(items: Iterable[dict[str, Any]], vectors: list[list[float]]) -
     client.upsert(collection_name=coll, points=points, wait=True)
     log.info(f"qdrant upsert {len(points)} -> {coll}")
     return len(points)
+
+
+def delete_chunks_for_paper(paper_id: str) -> None:
+    """Delete all chunk points for one paper from the chunks collection."""
+    from qdrant_client.http import models as qm
+
+    try:
+        client = get_client()
+        coll = cfg.load().qdrant.collection_chunks
+        flt = qm.Filter(
+            must=[
+                qm.FieldCondition(key="paper_id", match=qm.MatchValue(value=paper_id)),
+            ]
+        )
+        client.delete(
+            collection_name=coll,
+            points_selector=qm.FilterSelector(filter=flt),
+            wait=True,
+        )
+        log.info(f"qdrant delete paper_id={paper_id} -> {coll}")
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"qdrant delete degraded for {paper_id}: {type(e).__name__}: {e}")
 
 
 def search(query_vec: list[float], top_k: int = 8, paper_ids: list[str] | None = None,

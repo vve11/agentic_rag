@@ -18,8 +18,15 @@ from __future__ import annotations
 
 _AREAS = {
     "intro": ["abstract", "introduction", "intro"],
-    "method": ["method", "approach", "methodology", "model", "framework", "architecture"],
-    "experiment": ["experiment", "evaluation", "result", "ablation", "analysis"],
+    "method": [
+        "method", "approach", "methodology", "model", "framework", "architecture",
+        "retrieval", "generation", "augmentation", "training", "implementation",
+        "problem formulation",
+    ],
+    "experiment": [
+        "experiment", "experimental", "evaluation", "metric", "result", "ablation",
+        "analysis", "dataset", "task",
+    ],
     "conclusion": ["conclusion", "discussion", "summary", "limitation", "future work"],
 }
 
