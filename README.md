@@ -22,6 +22,19 @@ The beta target is a complete local project experience. Production deployment,
 CI golden gates, monitoring, backups, multi-tenant hardening, and cost
 accounting are deliberately left outside the default setup.
 
+## Course / Resume Project Pack
+
+This repository also includes a course-ready project pack for students who want
+to turn the system into a resume project and defend it in interviews:
+
+| File | Purpose |
+|---|---|
+| [`docs/course/student_quickstart.md`](docs/course/student_quickstart.md) | Student runbook from clone to UI demo |
+| [`docs/course/demo_pack.md`](docs/course/demo_pack.md) | Fixed demo papers, 10+ standard questions, and live demo script |
+| [`docs/course/troubleshooting_faq.md`](docs/course/troubleshooting_faq.md) | Common install/runtime/eval failures and fixes |
+| [`docs/course/paper_rag_agent_project_manual.md`](docs/course/paper_rag_agent_project_manual.md) | Full Chinese technical manual for RAG, DeerFlow, resume, and interview prep |
+| [`output/pdf/paper_rag_agent_project_manual.pdf`](output/pdf/paper_rag_agent_project_manual.pdf) | PDF version of the course manual |
+
 ## What You Get
 
 | Area | Included |
@@ -242,6 +255,8 @@ paper-rag-agent/
 |-- scripts/                               # Setup, ingest, smoke, eval helper scripts
 |-- tests/                                 # Unit/integration/eval tests
 |-- tests/eval/qa_set.golden.jsonl         # Golden regression set
+|-- docs/course/                           # Course runbooks, demo pack, interview manual
+|-- output/pdf/                            # Tracked course PDF manual
 |-- config/local.yaml                      # Docker-free local config
 `-- docs/                                  # Design, integration, operations notes
 ```
