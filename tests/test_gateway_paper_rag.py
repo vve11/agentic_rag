@@ -76,6 +76,10 @@ def test_routes_registered():
         "/api/paper_rag/qa/sync",
         "/api/paper_rag/papers",
         "/api/paper_rag/papers/ingest",
+        "/api/paper_rag/discovery/run",
+        "/api/paper_rag/discovery/runs",
+        "/api/paper_rag/discovery/runs/{run_id}",
+        "/api/paper_rag/discovery/candidates/{candidate_id}/ingest",
         "/api/paper_rag/knowledge/builds",
         "/api/paper_rag/wiki/{paper_id}",
     ):

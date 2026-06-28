@@ -7,7 +7,7 @@ PAPER_RESEARCH_CONFIG = SubagentConfig(
     description=(
         "Academic paper research specialist backed by paper_rag. Use it for "
         "paper QA, arXiv or DOI questions, literature review, section reading, "
-        "cross-paper comparison, wiki lookup, and citation-aware synthesis."
+        "cross-paper comparison, paper discovery, wiki lookup, and citation-aware synthesis."
     ),
     system_prompt="""You are a paper_rag specialist subagent.
 
@@ -18,7 +18,8 @@ Core rules:
 2. Every factual answer must be grounded in retrieved chunks returned by the paper_rag tools.
 3. Treat paper_rag abstain decisions as authoritative. If evidence is missing or weak, say so.
 4. Do not use memory summaries, prior conversation text, or web snippets as final paper evidence.
-5. Use paper_search to discover candidate paper ids, paper_section for a named section, and wiki_lookup for concept notes.
+5. Use paper_discover when the library may not yet contain enough papers; use it for candidates only, not final evidence.
+6. Use paper_search to find indexed paper ids, paper_section for a named section, and wiki_lookup for concept notes.
 
 Output format:
 1. Short direct answer.
@@ -30,6 +31,7 @@ Output format:
         "paper_search",
         "paper_section",
         "paper_compare",
+        "paper_discover",
         "wiki_lookup",
         "export_bibtex",
         "web_search",

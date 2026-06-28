@@ -8,12 +8,13 @@
 
 - 本地 DeerFlow Paper RAG UI 可以打开。
 - Status 显示 LLM、embedding、SQLite、Qdrant 基本可用。
+- 至少用 Discovery Loop 发现 1 组候选论文，并能解释 selected/skipped reason。
 - 至少 ingest 1 篇论文。
 - 至少问 3 个论文相关问题，并看到 citations。
 - 至少问 1 个无关问题，并看到 no-evidence / insufficient evidence。
 - 至少生成 1 个 Wiki entry。
 - 至少提交 1 次 helpful/not-helpful feedback。
-- 能用 3 分钟讲清楚项目架构、DeerFlow Harness 接入和 RAG 主链路。
+- 能用 3 分钟讲清楚项目架构、Paper Discovery Loop、DeerFlow Harness 接入和 RAG 主链路。
 
 ## 2. 环境准备
 
@@ -174,15 +175,30 @@ What's the weather in Beijing tomorrow?
 
 你应该看到系统拒答或提示证据不足，而不是编天气。
 
-### 9.3 Papers
+### 9.3 Discovery Loop
+
+在 Knowledge Builder 顶部输入一个主题：
+
+```text
+agentic rag loop engineering
+```
+
+你应该看到：
+
+- 候选论文列表。
+- `score`、`rank_reason`、`skip_reason`。
+- Discovery Trace。
+- 候选论文默认不会成为 QA 证据，必须手动点 Ingest。
+
+### 9.4 Papers
 
 检查 Papers 列表中是否能看到刚 ingest 的论文。
 
-### 9.4 Wiki
+### 9.5 Wiki
 
 对 Self-RAG 论文生成 Wiki note。截图时要展示标题、摘要或知识点。
 
-### 9.5 Feedback
+### 9.6 Feedback
 
 对一个答案点击 helpful 或 not-helpful。这个动作代表真实产品里的 feedback loop。
 
@@ -207,7 +223,7 @@ make eval-golden-qa
 
 | 材料 | 要求 |
 |---|---|
-| UI 截图 | Status、QA、citations、Papers、Wiki、Feedback |
+| UI 截图 | Status、Discovery、QA、citations、Papers、Wiki、Feedback |
 | 命令截图 | `make eval-golden` 或 smoke test |
 | 简历 bullet | 3-5 条，参考 `paper_rag_agent_project_manual.md` |
 | 架构图 | 手画或截图，说明 browser -> gateway -> paper_rag -> SQLite/Qdrant/LLM |
@@ -217,9 +233,9 @@ make eval-golden-qa
 
 ```text
 这个项目是一个集成到 DeerFlow 工作台里的 Agentic RAG 论文问答系统。
-用户可以 ingest 论文，然后在 UI 里问答、查看 citations、生成 Wiki、提交 feedback。
+用户可以先用 Discovery Loop 发现候选论文，再手动 ingest 论文，然后在 UI 里问答、查看 citations、生成 Wiki、提交 feedback。
 
-技术上，后端用 FastAPI adapter 接入 paper_rag package。paper_rag 负责 PDF parsing、chunk、embedding、SQLite/Qdrant 存储、BM25/FTS5 + dense retrieval、RRF fusion 和 rerank。
+技术上，后端用 FastAPI adapter 接入 paper_rag package。paper_rag 负责 paper discovery、PDF parsing、chunk、embedding、SQLite/Qdrant 存储、BM25/FTS5 + dense retrieval、RRF fusion 和 rerank。
 
 它和普通 RAG 不同的是，系统加入了 query rewrite、HyDE、reflective retrieval、abstain 和 citation validation。证据不足时会拒答，生成后会校验引用是否来自 retrieved chunks。
 

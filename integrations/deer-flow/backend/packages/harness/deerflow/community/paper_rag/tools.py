@@ -143,6 +143,56 @@ def paper_compare_tool(paper_ids: str, dimensions: str = "motivation,method,resu
     return _json_dumps(paper_compare(PaperCompareInput(paper_ids=parsed_ids, dimensions=parsed_dimensions)))
 
 
+@tool("paper_discover", parse_docstring=True)
+def paper_discover_tool(topic: str, max_candidates: int = 10, sources: str | None = None) -> str:
+    """Discover candidate papers for a research topic.
+
+    Use this before deep QA when the indexed library may not contain enough
+    papers. This tool returns candidates, scores, and selection reasons only;
+    candidates must be ingested before they can become final answer evidence.
+
+    Args:
+        topic: Research topic or literature-review query.
+        max_candidates: Maximum number of selected candidates to return.
+        sources: Optional comma-separated source list, e.g. arxiv,semantic_scholar.
+    """
+    _ensure_paper_rag_importable()
+    from paper_rag.discovery import runner
+
+    out = runner.run_discovery(
+        topic,
+        user_id="harness",
+        source_names=_split_csv(sources),
+        max_candidates=max_candidates,
+    )
+    candidates = [
+        {
+            key: candidate.get(key)
+            for key in (
+                "id",
+                "title",
+                "paper_id",
+                "arxiv_id",
+                "doi",
+                "score",
+                "selected",
+                "rank_reason",
+                "skip_reason",
+                "ingest_status",
+            )
+        }
+        for candidate in out.get("candidates", [])[:max_candidates]
+    ]
+    return _json_dumps(
+        {
+            "run": out.get("run", {}),
+            "trace_id": (out.get("trace") or {}).get("trace_id"),
+            "candidates": candidates,
+            "evidence_role": "discovery_only_not_answer_evidence",
+        }
+    )
+
+
 @tool("wiki_lookup", parse_docstring=True)
 def wiki_lookup_tool(concept: str) -> str:
     """Look up a concept in the paper wiki.
@@ -181,6 +231,7 @@ __all__ = [
     "paper_search_tool",
     "paper_section_tool",
     "paper_compare_tool",
+    "paper_discover_tool",
     "wiki_lookup_tool",
     "export_bibtex_tool",
 ]

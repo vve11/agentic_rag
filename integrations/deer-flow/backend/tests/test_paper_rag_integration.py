@@ -39,6 +39,10 @@ def test_paper_rag_router_exposes_expected_routes(monkeypatch):
     assert "/api/paper_rag/qa/sync" in paths
     assert "/api/paper_rag/status" in paths
     assert "/api/paper_rag/papers" in paths
+    assert "/api/paper_rag/discovery/run" in paths
+    assert "/api/paper_rag/discovery/runs" in paths
+    assert "/api/paper_rag/discovery/runs/{run_id}" in paths
+    assert "/api/paper_rag/discovery/candidates/{candidate_id}/ingest" in paths
     assert "/api/paper_rag/wiki/{paper_id}/generate" in paths
     assert "/api/paper_rag/subscriptions" in paths
     assert "/api/paper_rag/inbox" in paths
@@ -231,6 +235,80 @@ def test_ingest_translates_runtime_failures_to_503(monkeypatch):
 
     assert response.status_code == 503
     assert "arxiv package not installed" in response.json()["detail"]
+
+
+def test_discovery_run_delegates_to_paper_rag_runner(monkeypatch):
+    monkeypatch.setenv("PAPER_RAG_HOME", str(PAPER_RAG_HOME))
+    paper_rag._ensure_paper_rag_importable()
+
+    from paper_rag.discovery import runner
+
+    calls = []
+
+    def _fake_run_discovery(topic, **kwargs):
+        calls.append({"topic": topic, **kwargs})
+        return {
+            "run": {"id": 9, "topic": topic, "status": "completed", "stopped_by": "selected_limit"},
+            "trace": {"trace_id": "disc-9", "loop": [{"stage": "search"}]},
+            "candidates": [
+                {
+                    "id": 77,
+                    "title": "Discovery Candidate",
+                    "paper_id": "arxiv:2601.00009",
+                    "score": 0.79,
+                    "selected": True,
+                    "rank_reason": "keyword_overlap=0.44",
+                    "skip_reason": None,
+                    "ingest_status": "pending",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(runner, "run_discovery", _fake_run_discovery)
+    client = TestClient(_make_authenticated_app())
+
+    response = client.post(
+        "/api/paper_rag/discovery/run",
+        json={"topic": "agentic rag", "sources": ["arxiv"], "max_candidates": 3},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["trace"]["trace_id"] == "disc-9"
+    assert body["candidates"][0]["rank_reason"] == "keyword_overlap=0.44"
+    assert calls == [
+        {
+            "topic": "agentic rag",
+            "user_id": "default",
+            "source_names": ["arxiv"],
+            "max_candidates": 3,
+            "search_limit": 25,
+        }
+    ]
+
+
+def test_discovery_candidate_ingest_is_user_scoped(monkeypatch):
+    monkeypatch.setenv("PAPER_RAG_HOME", str(PAPER_RAG_HOME))
+    paper_rag._ensure_paper_rag_importable()
+
+    from paper_rag.discovery import runner
+
+    calls = []
+    monkeypatch.setattr(
+        runner,
+        "ingest_candidate",
+        lambda candidate_id, *, user_id, force=False: calls.append(
+            {"candidate_id": candidate_id, "user_id": user_id, "force": force}
+        )
+        or {"candidate_id": candidate_id, "paper_id": "arxiv:2601.00009", "status": "done", "n_chunks": 8},
+    )
+    client = TestClient(_make_authenticated_app())
+
+    response = client.post("/api/paper_rag/discovery/candidates/77/ingest")
+
+    assert response.status_code == 200
+    assert response.json()["paper_id"] == "arxiv:2601.00009"
+    assert calls == [{"candidate_id": 77, "user_id": "default", "force": False}]
 
 
 def test_subscription_list_includes_paused_items(monkeypatch):

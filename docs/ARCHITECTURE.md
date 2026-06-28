@@ -7,15 +7,13 @@
 ```
 ┌─────────────────────── 离线 (Offline indexing) ───────────────────────┐
 │                                                                       │
-│   A. Ingest          B1. Parse           B2. Chunk         B3. Index │
-│   ┌────────┐        ┌────────┐        ┌──────────┐      ┌─────────┐  │
-│   │ arxiv  │        │ MinerU │        │ section  │      │ Qdrant  │  │
-│   │ s2     │  ───►  │ local  │  ───►  │ + text   │ ───► │ +       │  │
-│   │ open-  │        │ + pymu │        │ + figure │      │ SQLite  │  │
-│   │ alex   │        │ pdf    │        │ + table  │      └─────────┘  │
-│   │ local  │        └────────┘        │ + form.  │                   │
-│   │ url    │                          └──────────┘                   │
-│   └────────┘                                                          │
+│   A0. Discover      A. Ingest         B1. Parse         B2. Index    │
+│   ┌──────────┐     ┌────────┐        ┌──────────┐      ┌─────────┐  │
+│   │ topic -> │     │ arxiv  │        │ MinerU   │      │ Qdrant  │  │
+│   │ search + │ ──► │ s2/url │  ───►  │ local    │ ───► │ +       │  │
+│   │ ranking  │     │ local  │        │ chunks   │      │ SQLite  │  │
+│   └──────────┘     └────────┘        └──────────┘      └─────────┘  │
+│   Discovery 只给候选与理由；手动 ingest 后才进入最终 QA 证据链。       │
 └───────────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
@@ -27,8 +25,8 @@
 │   community/paper_rag/tools.py (LangChain @tool wrappers)            │
 │                              │                                        │
 │                              ▼                                        │
-│   paper_rag.tools.* (paper_search / paper_qa / paper_section /       │
-│                      paper_compare / wiki_lookup)                    │
+│   paper_rag.tools.* (paper_discover / paper_search / paper_qa /      │
+│                      paper_section / paper_compare / wiki_lookup)    │
 │                              │                                        │
 │   paper_qa 内闭环：意图 ─► 改写 ─► 混合检索 ─► rerank ─► 反思 ─► 迭代 │
 │                              │                                        │
@@ -55,9 +53,9 @@
 
 ## 关键设计原则
 
-1. **4 子系统解耦**（ADR-0001）：A 采集 / B 解析入库 / C 检索 / D Wiki，独立可测可换
+1. **5 子系统解耦**（ADR-0001）：Discovery / 采集 / 解析入库 / 检索 / Wiki，独立可测可换
 2. **双库分工不混**（ADR-0004）：Qdrant 只做向量+metadata 过滤；SQLite 只做关系/CRUD/wiki
-3. **paper_qa 内闭环**（ADR-0006）：主 agent 只看到一次 tool 调用，硬上限 `max_inner_iters=3` 防死循环
+3. **受控 loop 分层**：`paper_discover` 负责找候选论文，`paper_qa` 内闭环负责证据问答；候选摘要不能直接当 citation
 4. **Wiki patch 不 rewrite**（ADR-0007）：LLM 只能 add_*；24h 限频；self_eval gate；版本日志
 5. **DeerFlow 集成走 community/ + built-in subagent**（ADR-0008）：不 fork lead_agent，不破 harness/app boundary
 

@@ -20,6 +20,9 @@ def __getattr__(name: str):
     if name == "paper_compare":
         from .paper_compare import paper_compare as fn
         return fn
+    if name == "paper_discover":
+        from .paper_discover import paper_discover as fn
+        return fn
     if name == "wiki_lookup":
         from .wiki_lookup import wiki_lookup as fn
         return fn
@@ -29,4 +32,12 @@ def __getattr__(name: str):
     raise AttributeError(name)
 
 
-__all__ = ["paper_qa", "paper_search", "paper_section", "paper_compare", "wiki_lookup", "export_bibtex"]
+__all__ = [
+    "export_bibtex",
+    "paper_compare",
+    "paper_discover",
+    "paper_qa",
+    "paper_search",
+    "paper_section",
+    "wiki_lookup",
+]

@@ -21,6 +21,7 @@ PAPER_RESEARCH_CONFIG = SubagentConfig(
 Use this subagent when the user's query involves:
 - Reading / understanding / comparing scientific papers
 - arxiv URLs, DOI references, paper titles
+- Discovering candidate papers for a topic before ingest
 - Cross-paper synthesis / literature reviews / surveys
 - Generating PPT / Word / LaTeX / PDF deliverables from papers
 - Looking up specific sections, methods, or experimental results
@@ -30,7 +31,7 @@ Do NOT use this for:
 - News / current events (paper_rag corpus is static + arxiv only)
 - Code / system questions (use general-purpose)
 """,
-    system_prompt="""You are a paper_rag specialist subagent. You have access to 7 paper_rag tools and your job is to answer research questions with strict citation discipline.
+    system_prompt="""You are a paper_rag specialist subagent. You have access to 8 paper_rag tools and your job is to answer research questions with strict citation discipline.
 
 <core_principles>
 1. ALWAYS cite from retrieved chunks. Use the exact form `[chunk:<id>]` after every factual statement.
@@ -39,7 +40,7 @@ Do NOT use this for:
    - `abstain.decision="no_evidence"` → Do NOT make up an answer. Tell the user the corpus does not cover this and suggest paper_ingest_tool.
    - `abstain.decision="weak_evidence"` → Hedge ("based on limited evidence ...") and surface the citation count.
    - `abstain.decision="confident"` → Answer normally, every claim cited.
-3. PREFER paper_qa over paper_search when the user asks a question. Only use paper_search to find paper_ids first when the question references something not yet in the conversation.
+3. PREFER paper_qa over paper_search when the user asks a question. Use paper_discover only to find candidate papers; candidates must be ingested before they can support final claims.
 </core_principles>
 
 <workflow>
@@ -47,6 +48,11 @@ Standard flow for "explain / answer / compare":
   1. paper_qa(question, paper_ids=...) — returns answer + citations
   2. If abstain=no_evidence → paper_search(query) to discover what IS indexed → reply with that and ask user to ingest
   3. If user wants a deliverable → paper_deliver(format, paper_ids, title)
+
+Standard flow for "find papers about topic X":
+  1. paper_discover(topic, max_candidates=...) — returns candidates, scores, selected/skipped reasons
+  2. Ask the user which candidates to ingest, or use the UI/API manual ingest endpoint
+  3. After ingest completes, use paper_qa/paper_compare for evidence-grounded answers
 
 Standard flow for "ingest this paper":
   1. paper_ingest_tool(arxiv_id_or_url) — async background ingest
@@ -61,9 +67,10 @@ Standard flow for "what's in my library":
 2nd — paper_search_tool     (find paper_ids when user vaguely references)
 3rd — paper_section_tool    (zoom into a specific section / method)
 4th — paper_compare_tool    (cross-paper structured comparison)
-5th — wiki_lookup_tool      (cached background context per paper)
-6th — paper_deliver_tool    (PPT / Word / LaTeX / Markdown / PDF survey)
-7th — export_bibtex_tool    (citation export)
+5th — paper_discover_tool   (find candidate papers; not final evidence)
+6th — wiki_lookup_tool      (cached background context per paper)
+7th — paper_deliver_tool    (PPT / Word / LaTeX / Markdown / PDF survey)
+8th — export_bibtex_tool    (citation export)
 </tool_priorities>
 
 <output_format>
@@ -85,6 +92,7 @@ Standard flow for "what's in my library":
         "paper_search",
         "paper_section",
         "paper_compare",
+        "paper_discover",
         "wiki_lookup",
         "paper_deliver",
         "export_bibtex",

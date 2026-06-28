@@ -205,6 +205,17 @@ class SubscriptionToggle(BaseModel):
     enabled: bool
 
 
+class DiscoveryRunRequest(BaseModel):
+    topic: str = Field(..., min_length=1, max_length=500)
+    sources: list[str] | None = None
+    max_candidates: int = Field(10, ge=1, le=20)
+    search_limit: int = Field(25, ge=1, le=100)
+
+
+class DiscoveryCandidateIngestRequest(BaseModel):
+    force: bool = False
+
+
 class PaperRagRuntimeStatus(BaseModel):
     importable: bool
     embedding_available: bool
@@ -677,6 +688,97 @@ def _attach_user_id_to_fetch_meta(fetched: Any, user_id: str) -> None:
     extra = getattr(meta, "extra", None)
     if isinstance(extra, dict):
         extra["user_id"] = user_id
+
+
+@router.post("/discovery/run")
+async def run_discovery(
+    body: DiscoveryRunRequest,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Run a bounded paper discovery loop for a research topic."""
+    _ensure_paper_rag_importable()
+    try:
+        from paper_rag.discovery import runner
+    except ImportError as exc:
+        raise HTTPException(503, f"paper_rag.discovery unavailable: {exc}") from exc
+
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None,
+            lambda: runner.run_discovery(
+                body.topic,
+                user_id=user_id,
+                source_names=body.sources,
+                max_candidates=body.max_candidates,
+                search_limit=body.search_limit,
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("paper_rag discovery failed")
+        raise HTTPException(503, f"paper_rag discovery unavailable: {exc}") from exc
+
+
+@router.get("/discovery/runs")
+async def list_discovery_runs(
+    user_id: str = Depends(get_current_user_id),
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    _ensure_paper_rag_importable()
+    try:
+        from paper_rag.discovery import store
+    except ImportError as exc:
+        raise HTTPException(503, f"paper_rag.discovery unavailable: {exc}") from exc
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: store.list_runs(user_id, limit=limit))
+
+
+@router.get("/discovery/runs/{run_id}")
+async def get_discovery_run(
+    run_id: int,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    _ensure_paper_rag_importable()
+    try:
+        from paper_rag.discovery import store
+    except ImportError as exc:
+        raise HTTPException(503, f"paper_rag.discovery unavailable: {exc}") from exc
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: store.get_run(run_id, user_id=user_id))
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/discovery/candidates/{candidate_id}/ingest")
+async def ingest_discovery_candidate(
+    candidate_id: int,
+    body: DiscoveryCandidateIngestRequest | None = None,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Manually ingest a selected discovery candidate."""
+    _ensure_paper_rag_importable()
+    try:
+        from paper_rag.discovery import runner
+    except ImportError as exc:
+        raise HTTPException(503, f"paper_rag.discovery unavailable: {exc}") from exc
+
+    force = body.force if body else False
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None,
+            lambda: runner.ingest_candidate(candidate_id, user_id=user_id, force=force),
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("paper_rag discovery candidate ingest failed")
+        raise HTTPException(503, f"paper_rag discovery ingest unavailable: {exc}") from exc
 
 
 @router.post("/papers/ingest", response_model=IngestResponse)

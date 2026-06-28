@@ -66,16 +66,18 @@ course/demo_questions.jsonl
 
 1. 打开 `README.md`，说明这是一个 DeerFlow 集成的 Agentic RAG 论文工作台。
 2. 打开 `/workspace/paper-rag`，先展示 Status，确认 LLM、embedding、SQLite、Qdrant 状态。
-3. 展示 Knowledge Builder，说明一篇论文会经过 fetch、parse、chunk、embed、index、wiki 等构建阶段。
-4. 问问题 1，展示 answer + citations。
-5. 展开 Loop Trace，讲 intent、retrieval round、reflect、abstain 和 stopped_by。
-6. 展示 Research Memory，强调它只用于延续研究上下文，不作为最终证据。
-7. 点击 citations，讲“引用不是模型自由生成的 `[1]`，而是 chunk 级证据”。
-8. 问问题 7 或 8，讲 HyDE/rerank 等 RAG 优化点。
-9. 问问题 9，讲跨论文比较需要召回多个 paper 的证据。
-10. 问问题 10，展示 no-evidence 拒答。
-11. 生成一篇 Wiki note，说明系统不是只有 chat，还有知识沉淀。
-12. 点击 helpful/not-helpful，说明 feedback 如何进入 hard cases 和 golden set。
+3. 在 Knowledge Builder 顶部跑一次 Discovery Loop，例如 topic=`agentic rag loop engineering`，展示 candidates、score、rank_reason、skip_reason 和 discovery trace。
+4. 选择一个 selected candidate 点击 Ingest，说明候选论文必须经过 fetch、parse、chunk、embed、index 后才可作为 QA 证据。
+5. 展示 Knowledge Builder，说明一篇论文会经过 fetch、parse、chunk、embed、index、wiki 等构建阶段。
+6. 问问题 1，展示 answer + citations。
+7. 展开 Loop Trace，讲 intent、retrieval round、reflect、abstain 和 stopped_by。
+8. 展示 Research Memory，强调它只用于延续研究上下文，不作为最终证据。
+9. 点击 citations，讲“引用不是模型自由生成的 `[1]`，而是 chunk 级证据”。
+10. 问问题 7 或 8，讲 HyDE/rerank 等 RAG 优化点。
+11. 问问题 9，讲跨论文比较需要召回多个 paper 的证据。
+12. 问问题 10，展示 no-evidence 拒答。
+13. 生成一篇 Wiki note，说明系统不是只有 chat，还有知识沉淀。
+14. 点击 helpful/not-helpful，说明 feedback 如何进入 hard cases 和 golden set。
 
 ## 5. 学生答辩验收标准
 
@@ -85,6 +87,7 @@ course/demo_questions.jsonl
 |---|---|
 | 启动 | backend/frontend 均能启动，UI 可访问 |
 | 数据 | 至少 1 篇论文成功 ingest，推荐 3 篇以上 |
+| Discovery | 能跑一次 topic discovery，并解释 selected/skipped reasons |
 | QA | 至少 3 个相关问题返回答案和 citations |
 | 拒答 | 至少 1 个无关问题触发 no-evidence 或 insufficient evidence |
 | 产品闭环 | 展示 Knowledge Builder、Wiki、Feedback 中至少 2 个非 QA 页面 |
@@ -110,5 +113,5 @@ course/demo_questions.jsonl
 升级版表达：
 
 ```text
-这个 demo 还能展示普通 RAG 项目很少做的三件事：Loop Trace 让 Agentic 决策可见，Research Memory 让多轮研究任务可延续但不污染证据链，Knowledge Builder 让论文从 ingest 到 index 的状态可解释。
+这个 demo 还能展示普通 RAG 项目很少做的四件事：Paper Discovery Loop 让“找论文”变成可解释闭环，Loop Trace 让 Agentic 决策可见，Research Memory 让多轮研究任务可延续但不污染证据链，Knowledge Builder 让论文从 ingest 到 index 的状态可解释。
 ```

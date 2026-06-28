@@ -30,5 +30,11 @@ class PaperCompareInput(BaseModel):
     )
 
 
+class PaperDiscoverInput(BaseModel):
+    topic: str
+    max_candidates: int = Field(10, ge=1, le=20)
+    sources: list[str] | None = None
+
+
 class WikiLookupInput(BaseModel):
     concept: str

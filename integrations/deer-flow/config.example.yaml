@@ -648,6 +648,10 @@ tools:
     group: paper
     use: deerflow.community.paper_rag.tools:paper_compare_tool
 
+  - name: paper_discover
+    group: paper
+    use: deerflow.community.paper_rag.tools:paper_discover_tool
+
   - name: wiki_lookup
     group: paper
     use: deerflow.community.paper_rag.tools:wiki_lookup_tool

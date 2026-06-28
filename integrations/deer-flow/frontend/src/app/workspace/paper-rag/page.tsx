@@ -8,6 +8,7 @@ import {
   Loader2Icon,
   PlusIcon,
   RefreshCwIcon,
+  SearchIcon,
   SendIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
@@ -119,6 +120,43 @@ type KnowledgeBuild = {
   warnings: string[];
 };
 
+type DiscoveryRun = {
+  id: number;
+  topic: string;
+  sources: string[];
+  max_candidates: number;
+  status: string;
+  stopped_by: string;
+  created_at?: string;
+};
+
+type DiscoveryCandidate = {
+  id: number;
+  title?: string | null;
+  paper_id?: string | null;
+  arxiv_id?: string | null;
+  doi?: string | null;
+  score: number;
+  rank?: number | null;
+  selected: boolean;
+  rank_reason?: string | null;
+  skip_reason?: string | null;
+  ingest_status: string;
+};
+
+type DiscoveryTrace = {
+  trace_id?: string;
+  loop?: Array<Record<string, unknown>>;
+  source_errors?: Array<{ source?: string; error?: string }>;
+  evidence_role?: string;
+};
+
+type DiscoveryResponse = {
+  run: DiscoveryRun;
+  trace: DiscoveryTrace;
+  candidates: DiscoveryCandidate[];
+};
+
 type WikiResponse = {
   paper_id: string;
   summary: string;
@@ -206,6 +244,7 @@ function memoryList(values?: string[]) {
 export default function PaperRagPage() {
   const [papers, setPapers] = useState<Paper[]>([]);
   const [builds, setBuilds] = useState<KnowledgeBuild[]>([]);
+  const [discoveryRuns, setDiscoveryRuns] = useState<DiscoveryRun[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
@@ -222,6 +261,8 @@ export default function PaperRagPage() {
   const [newSubscription, setNewSubscription] = useState("");
   const [ingestArxiv, setIngestArxiv] = useState("");
   const [ingestPdfUrl, setIngestPdfUrl] = useState("");
+  const [discoveryTopic, setDiscoveryTopic] = useState("");
+  const [discovery, setDiscovery] = useState<DiscoveryResponse | null>(null);
   const [wiki, setWiki] = useState<WikiResponse | null>(null);
   const [wikiPaperId, setWikiPaperId] = useState<string | null>(null);
   const [wikiError, setWikiError] = useState<string | null>(null);
@@ -230,6 +271,7 @@ export default function PaperRagPage() {
   const [loading, setLoading] = useState(true);
   const [asking, setAsking] = useState(false);
   const [ingesting, setIngesting] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState<"helpful" | "not_helpful" | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -238,9 +280,10 @@ export default function PaperRagPage() {
   async function refresh() {
     setError(null);
     try {
-      const [paperData, buildData, inboxData, subsData, statusData] = await Promise.all([
+      const [paperData, buildData, discoveryData, inboxData, subsData, statusData] = await Promise.all([
         fetchJson<Paper[]>("/api/paper_rag/papers"),
         fetchJson<KnowledgeBuild[]>("/api/paper_rag/knowledge/builds"),
+        fetchJson<DiscoveryRun[]>("/api/paper_rag/discovery/runs"),
         fetchJson<{ items: InboxItem[]; unread_count: number }>(
           "/api/paper_rag/inbox?unread_only=false&limit=50",
         ),
@@ -249,6 +292,7 @@ export default function PaperRagPage() {
       ]);
       setPapers(paperData);
       setBuilds(buildData);
+      setDiscoveryRuns(discoveryData);
       setInbox(inboxData.items ?? []);
       setUnread(inboxData.unread_count ?? 0);
       setSubscriptions(subsData);
@@ -352,6 +396,52 @@ export default function PaperRagPage() {
       setError(err instanceof Error ? err.message : "Ingest failed");
     } finally {
       setIngesting(false);
+    }
+  }
+
+  async function runDiscovery() {
+    const topic = discoveryTopic.trim();
+    if (!topic) return;
+    setDiscovering(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const data = await fetchJson<DiscoveryResponse>("/api/paper_rag/discovery/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic, sources: ["arxiv", "semantic_scholar"], max_candidates: 8 }),
+      });
+      setDiscovery(data);
+      setMessage(`Discovery found ${data.candidates.filter((candidate) => candidate.selected).length} candidates`);
+      const runs = await fetchJson<DiscoveryRun[]>("/api/paper_rag/discovery/runs");
+      setDiscoveryRuns(runs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Discovery failed");
+    } finally {
+      setDiscovering(false);
+    }
+  }
+
+  async function ingestDiscoveryCandidate(candidate: DiscoveryCandidate) {
+    if (!candidate.id) return;
+    setBusyId(`discover:${candidate.id}`);
+    setMessage(null);
+    setError(null);
+    try {
+      const data = await fetchJson<IngestResponse | { paper_id: string; status: string; n_chunks: number }>(
+        `/api/paper_rag/discovery/candidates/${candidate.id}/ingest`,
+        { method: "POST" },
+      );
+      setMessage(ingestMessage({ ...data, title: candidate.title, wiki: null }));
+      await refresh();
+      if (discovery?.run.id) {
+        const refreshed = await fetchJson<DiscoveryResponse>(`/api/paper_rag/discovery/runs/${discovery.run.id}`);
+        setDiscovery(refreshed);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Candidate ingest failed");
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -686,6 +776,113 @@ export default function PaperRagPage() {
             </TabsContent>
 
             <TabsContent value="knowledge" className="space-y-4">
+              <section className="space-y-3 rounded-lg border bg-background p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-sm font-medium">Discovery Loop</h2>
+                    <p className="text-muted-foreground mt-0.5 text-xs">
+                      Find candidate papers first; ingest selected papers before using them as QA evidence.
+                    </p>
+                  </div>
+                  {discoveryRuns.length > 0 && <Badge variant="secondary">{discoveryRuns.length} runs</Badge>}
+                </div>
+                <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                  <Input
+                    value={discoveryTopic}
+                    onChange={(event) => setDiscoveryTopic(event.target.value)}
+                    placeholder="topic, e.g. agentic rag loop engineering"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void runDiscovery();
+                    }}
+                  />
+                  <Button onClick={runDiscovery} disabled={discovering || !discoveryTopic.trim()}>
+                    {discovering ? <Loader2Icon className="animate-spin" /> : <SearchIcon />}
+                    Discover
+                  </Button>
+                </div>
+
+                {discovery && (
+                  <div className="space-y-3 border-t pt-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={statusVariant(discovery.run.status)}>{discovery.run.status}</Badge>
+                      <Badge variant="secondary">stop: {discovery.run.stopped_by}</Badge>
+                      {discovery.trace.trace_id && <Badge variant="outline">{discovery.trace.trace_id}</Badge>}
+                    </div>
+                    {discovery.candidates.length === 0 ? (
+                      <p className="text-muted-foreground text-sm">No candidates returned by the discovery sources.</p>
+                    ) : (
+                      <div className="overflow-hidden rounded-md border">
+                        {discovery.candidates.map((candidate) => (
+                          <div key={candidate.id} className="space-y-2 border-b px-3 py-2 last:border-b-0">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <FileTextIcon className="text-muted-foreground size-4 shrink-0" />
+                                  <p className="truncate text-sm font-medium">{candidate.title ?? candidate.paper_id}</p>
+                                </div>
+                                <div className="text-muted-foreground mt-1 flex flex-wrap gap-1.5 text-xs">
+                                  {candidate.rank && <Badge variant="outline">rank {candidate.rank}</Badge>}
+                                  <Badge variant={candidate.selected ? "default" : "secondary"}>
+                                    {candidate.selected ? "selected" : candidate.skip_reason ?? "skipped"}
+                                  </Badge>
+                                  <Badge variant="secondary">score {candidate.score.toFixed(2)}</Badge>
+                                  {candidate.paper_id && <Badge variant="outline">{candidate.paper_id}</Badge>}
+                                  {candidate.arxiv_id && <Badge variant="secondary">arXiv {candidate.arxiv_id}</Badge>}
+                                  <Badge variant={statusVariant(candidate.ingest_status)}>
+                                    ingest {candidate.ingest_status}
+                                  </Badge>
+                                </div>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void ingestDiscoveryCandidate(candidate)}
+                                disabled={
+                                  !candidate.selected ||
+                                  candidate.ingest_status === "done" ||
+                                  candidate.ingest_status === "skipped" ||
+                                  busyId === `discover:${candidate.id}`
+                                }
+                              >
+                                {busyId === `discover:${candidate.id}` ? (
+                                  <Loader2Icon className="animate-spin" />
+                                ) : (
+                                  <PlusIcon />
+                                )}
+                                Ingest
+                              </Button>
+                            </div>
+                            {candidate.rank_reason && (
+                              <p className="text-muted-foreground break-words text-xs">{candidate.rank_reason}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {(discovery.trace.loop?.length || discovery.trace.source_errors?.length) && (
+                      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-medium">Discovery Trace</h3>
+                          {discovery.trace.evidence_role && (
+                            <Badge variant="outline">{discovery.trace.evidence_role}</Badge>
+                          )}
+                        </div>
+                        {discovery.trace.loop?.map((stage, index) => (
+                          <p key={`${String(stage.stage)}-${index}`} className="text-muted-foreground text-xs">
+                            {String(stage.stage)} {JSON.stringify(stage)}
+                          </p>
+                        ))}
+                        {discovery.trace.source_errors?.map((sourceError) => (
+                          <p key={`${sourceError.source}-${sourceError.error}`} className="text-destructive text-xs">
+                            {sourceError.source}: {sourceError.error}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+
               <div className="grid gap-2 rounded-lg border bg-background p-3 md:grid-cols-[1fr_1fr_auto]">
                 <Input
                   value={ingestArxiv}

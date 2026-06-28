@@ -181,6 +181,58 @@ def paper_compare_tool(paper_ids: str, dimensions: str = "motivation,method,resu
     return json.dumps(res, ensure_ascii=False, indent=2)
 
 
+@tool("paper_discover", parse_docstring=True)
+def paper_discover_tool(topic: str, max_candidates: int = 10, sources: str | None = None) -> str:
+    """Discover candidate papers for a research topic.
+
+    Returns candidates, scores, selected/skipped reasons, and a trace. The
+    candidates are discovery-only; they must be ingested before they can become
+    final paper_qa evidence.
+
+    Usage:
+      User: "Find papers about agentic RAG loops"
+        -> paper_discover(topic="agentic RAG loops", max_candidates=8)
+
+    Args:
+        topic: Research topic or literature-review query.
+        max_candidates: Maximum number of selected candidates to return.
+        sources: Optional comma-separated source list, e.g. arxiv,semantic_scholar.
+    """
+    _ensure_paper_rag_importable()
+    from paper_rag.discovery import runner
+
+    source_names = [item.strip() for item in sources.split(",") if item.strip()] if sources else None
+    out = runner.run_discovery(topic, user_id="harness", source_names=source_names, max_candidates=max_candidates)
+    candidates = [
+        {
+            key: candidate.get(key)
+            for key in (
+                "id",
+                "title",
+                "paper_id",
+                "arxiv_id",
+                "doi",
+                "score",
+                "selected",
+                "rank_reason",
+                "skip_reason",
+                "ingest_status",
+            )
+        }
+        for candidate in out.get("candidates", [])[:max_candidates]
+    ]
+    return json.dumps(
+        {
+            "run": out.get("run", {}),
+            "trace_id": (out.get("trace") or {}).get("trace_id"),
+            "candidates": candidates,
+            "evidence_role": "discovery_only_not_answer_evidence",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 @tool("wiki_lookup", parse_docstring=True)
 def wiki_lookup_tool(concept: str) -> str:
     """Look up a concept in the self-evolving paper wiki.

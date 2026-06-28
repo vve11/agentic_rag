@@ -10,7 +10,9 @@ It can ingest papers, build a local hybrid index, answer literature questions
 with citations, generate wiki-style concept notes, collect feedback, and run a
 small golden-set regression gate. The DeerFlow workspace also exposes the
 internal Agentic RAG loop, a Paper RAG-specific research memory layer, and a
-Knowledge Builder view for paper indexing status.
+Knowledge Builder view for paper indexing status. It also includes a bounded
+Paper Discovery Loop for finding candidate papers before they are ingested into
+the evidence index.
 
 The repository is intended to be useful in two modes:
 
@@ -47,11 +49,12 @@ to turn the system into a resume project and defend it in interviews:
 | Area | Included |
 |---|---|
 | Retrieval | SQLite metadata, FTS5/BM25 sparse search, embedded Qdrant dense search, RRF fusion |
+| Discovery | Topic -> arXiv/Semantic Scholar search, dedup, relevance ranking, selected/skipped reasons, manual ingest |
 | QA | OpenAI-compatible LLM calls, query rewrite, reflect loop, abstain/no-evidence guard, citations |
 | Loop Engineering | Product-readable loop trace for intent, retrieval rounds, reflect, abstain, citations, latency placeholder |
 | Research Memory | Paper RAG-specific compressed memory for research continuity; never used as final evidence |
-| Harness | LangChain tool adapters for `paper_qa`, `paper_search`, `paper_section`, `paper_compare`, `wiki_lookup`, `export_bibtex`, plus a `paper-research` subagent |
-| UI | DeerFlow-style `/workspace/paper-rag` page for QA, Loop Trace, Knowledge Builder, wiki, ingest, feedback, inbox, subscriptions |
+| Harness | LangChain tool adapters for `paper_qa`, `paper_search`, `paper_section`, `paper_compare`, `paper_discover`, `wiki_lookup`, `export_bibtex`, plus a `paper-research` subagent |
+| UI | DeerFlow-style `/workspace/paper-rag` page for QA, Loop Trace, Discovery Loop, Knowledge Builder, wiki, ingest, feedback, inbox, subscriptions |
 | Ingest | arXiv/PDF ingest path with PyMuPDF fallback and optional MinerU parser |
 | Feedback | Helpful/not-helpful events, hard-case collection, eval item suggestions |
 | Evaluation | Retrieval-only and no-judge QA golden-set runners |
@@ -147,6 +150,7 @@ http://127.0.0.1:3000/workspace/paper-rag
 Try:
 
 - Ask: `What is Self-RAG?`
+- Discovery Loop: search a topic such as `agentic rag loop engineering`, inspect scores/reasons, and ingest selected candidates.
 - Loop Trace: inspect intent, retrieval rounds, abstain, and citation state.
 - Research Memory: continue a multi-turn thread and watch compressed memory warm up.
 - Knowledge Builder: confirm the ingested paper moves through fetch, parse, chunk, embed, index, and wiki states.
@@ -253,6 +257,7 @@ Latest local beta baseline:
 paper-rag-agent/
 |-- src/paper_rag/                         # Standalone Python package
 |   |-- rag/                               # QA loop, research memory, abstain, streaming, query rewrite
+|   |-- discovery/                         # Paper discovery loop, candidate ranking, trace, SQLite run store
 |   |-- retrieve/                          # Dense/sparse retrieval, formatting, rerank
 |   |-- store/                             # SQLite + Qdrant ingest/index stores
 |   |-- parse/ and chunk/                  # PDF parsing and chunk construction
@@ -283,6 +288,9 @@ flowchart TB
     GW --> API["paper_rag router<br/>/api/paper_rag/*"]
     LA["DeerFlow Lead Agent"] --> HAR["DeerFlow Harness<br/>paper_rag tools + paper-research subagent"]
     HAR --> QA
+    API --> DISC["paper_rag.discovery<br/>candidate search + ranking"]
+    DISC --> SQL
+    HAR --> DISC
     API --> QA["paper_rag.rag<br/>memory + loop trace + QA + abstain"]
     QA --> MEM[("SQLite<br/>research_memory")]
     QA --> RET["paper_rag.retrieve<br/>BM25 + dense + RRF"]
@@ -292,6 +300,33 @@ flowchart TB
     API --> WIKI["paper_rag.wiki<br/>concept notes"]
     API --> PRO["paper_rag.proactive<br/>inbox + subscriptions"]
     QA --> LLM["OpenAI-compatible<br/>chat provider"]
+```
+
+## Discovery Flow
+
+Discovery is deliberately separate from QA evidence. It helps students and the
+agent find promising papers, but a candidate does not become answer evidence
+until it is ingested, parsed, chunked, embedded, indexed, and later retrieved by
+the QA loop.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant UI as DeerFlow UI
+    participant DISC as Discovery Loop
+    participant KB as Knowledge Builder
+    participant QA as Agentic RAG QA
+
+    U->>UI: Enter research topic
+    UI->>DISC: POST /api/paper_rag/discovery/run
+    DISC-->>UI: candidates + scores + selected/skipped reasons + trace
+    U->>UI: Ingest selected candidate
+    UI->>KB: POST /api/paper_rag/discovery/candidates/{id}/ingest
+    KB-->>UI: fetch/parse/chunk/embed/index status
+    U->>UI: Ask paper question
+    UI->>QA: POST /api/paper_rag/qa/sync
+    QA-->>UI: answer + chunk citations + Loop Trace
 ```
 
 Default local config uses embedded Qdrant at:

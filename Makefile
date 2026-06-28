@@ -7,7 +7,7 @@ DEERFLOW_BACKEND_PY ?= $(CURDIR)/$(DEERFLOW_DIR)/backend/.venv/bin/python
 DEERFLOW_BACKEND_PORT ?= 8001
 DEERFLOW_FRONTEND_PORT ?= 3000
 
-.PHONY: help install install-dev lint format test test-pytest smoke secret-scan mineru-doctor mineru-download-layout rebuild-index validate-metadata \
+.PHONY: help install install-dev lint format test test-pytest smoke secret-scan course-pdf mineru-doctor mineru-download-layout rebuild-index validate-metadata \
         qdrant-up qdrant-down init-store ingest ask eval clean clean-data \
         docker-build docker-build-bake docker-up-proactive docker-cli docker-shell \
         calibrate-abstain hard-cases eval-golden eval-golden-qa verify-p0 deerflow-backend deerflow-frontend deerflow-smoke deerflow-rebuild-index
@@ -23,6 +23,7 @@ help:
 	@echo "  test-middleware  Run gateway + langgraph middleware tests only"
 	@echo "  smoke          Walk all modules and assert importable count"
 	@echo "  secret-scan    Scan source/config/docs for accidental API keys"
+	@echo "  course-pdf     Regenerate the course manual PDF"
 	@echo "  mineru-doctor  Diagnose local MinerU/magic-pdf readiness"
 	@echo "  mineru-download-layout  Download MinerU doclayout_yolo weight"
 	@echo "  rebuild-index  Rebuild SQLite/Qdrant from existing data/parsed files"
@@ -80,6 +81,9 @@ smoke:
 
 secret-scan:
 	@$(PY) scripts/secret_scan.py
+
+course-pdf:
+	@$(PY) scripts/generate_course_pdf.py
 
 mineru-doctor:
 	$(PY) scripts/mineru_doctor.py
