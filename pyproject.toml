@@ -87,11 +87,11 @@ full = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/TongTong0828/paper-rag-agent"
-Repository = "https://github.com/TongTong0828/paper-rag-agent"
-Documentation = "https://github.com/TongTong0828/paper-rag-agent/tree/main/docs"
-Changelog = "https://github.com/TongTong0828/paper-rag-agent/blob/main/CHANGELOG.md"
-"Bug Tracker" = "https://github.com/TongTong0828/paper-rag-agent/issues"
+Homepage = "https://github.com/Ttttt-s/paper-rag-agent"
+Repository = "https://github.com/Ttttt-s/paper-rag-agent"
+Documentation = "https://github.com/Ttttt-s/paper-rag-agent/tree/main/docs"
+Changelog = "https://github.com/Ttttt-s/paper-rag-agent/blob/main/CHANGELOG.md"
+"Bug Tracker" = "https://github.com/Ttttt-s/paper-rag-agent/issues"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

@@ -1,7 +1,7 @@
 # Paper RAG Agent
 
-[![ci](https://github.com/TongTong0828/paper-rag-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/TongTong0828/paper-rag-agent/actions)
-[![codecov](https://codecov.io/gh/TongTong0828/paper-rag-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/TongTong0828/paper-rag-agent)
+[![ci](https://github.com/Ttttt-s/paper-rag-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Ttttt-s/paper-rag-agent/actions)
+[![codecov](https://codecov.io/gh/Ttttt-s/paper-rag-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/Ttttt-s/paper-rag-agent)
 [![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)]()
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -79,7 +79,7 @@ backend declares Python 3.12+, so the recommended setup below uses one Python
 Clone the repository and install the backend/runtime dependencies:
 
 ```bash
-git clone https://github.com/TongTong0828/paper-rag-agent.git
+git clone https://github.com/Ttttt-s/paper-rag-agent.git
 cd paper-rag-agent
 
 # Install uv if needed, then create DeerFlow's backend virtualenv.

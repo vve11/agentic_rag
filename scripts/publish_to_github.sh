@@ -5,7 +5,7 @@
 #   bash scripts/publish_to_github.sh [repo_url] [workdir]
 #
 # Defaults:
-#   repo_url: https://github.com/TongTong0828/paper-rag-agent.git
+#   repo_url: https://github.com/Ttttt-s/paper-rag-agent.git
 #   workdir:  $HOME/paper-rag-agent
 #
 # What it does:
@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-REPO_URL="${1:-https://github.com/TongTong0828/paper-rag-agent.git}"
+REPO_URL="${1:-https://github.com/Ttttt-s/paper-rag-agent.git}"
 WORKDIR="${2:-$HOME/paper-rag-agent}"
 SOURCE="$(cd "$(dirname "$0")/.." && pwd)"
 DEER_FLOW_ROOT="$(cd "$SOURCE/.." && pwd)"

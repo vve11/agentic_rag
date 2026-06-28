@@ -39,7 +39,7 @@ corepack --version
 ## 3. 克隆项目
 
 ```bash
-git clone https://github.com/TongTong0828/paper-rag-agent.git
+git clone https://github.com/Ttttt-s/paper-rag-agent.git
 cd paper-rag-agent
 ```
 
