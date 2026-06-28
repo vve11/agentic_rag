@@ -431,9 +431,13 @@ corepack pnpm exec eslint src/app/workspace/paper-rag/page.tsx
 Focused DeerFlow backend integration checks:
 
 ```bash
-integrations/deer-flow/backend/.venv/bin/python \
-  -m pytest integrations/deer-flow/backend/tests/test_paper_rag_integration.py
+make deerflow-paper-rag-test
 ```
+
+This target intentionally uses `integrations/deer-flow/backend/.venv/bin/python`
+through `DEERFLOW_BACKEND_PY`; the root `.venv` is not a complete DeerFlow
+backend environment. If that interpreter does not exist yet, run
+`cd integrations/deer-flow/backend && uv sync --python 3.12` first.
 
 ## Beta Scope
 

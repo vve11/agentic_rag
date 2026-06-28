@@ -10,7 +10,7 @@ DEERFLOW_FRONTEND_PORT ?= 3000
 .PHONY: help install install-dev lint format test test-pytest smoke secret-scan course-pdf mineru-doctor mineru-download-layout rebuild-index validate-metadata \
         qdrant-up qdrant-down init-store ingest ask eval clean clean-data \
         docker-build docker-build-bake docker-up-proactive docker-cli docker-shell \
-        calibrate-abstain hard-cases eval-golden eval-golden-qa verify-p0 deerflow-backend deerflow-frontend deerflow-smoke deerflow-rebuild-index
+        calibrate-abstain hard-cases eval-golden eval-golden-qa verify-p0 deerflow-backend deerflow-frontend deerflow-smoke deerflow-rebuild-index deerflow-paper-rag-test
 
 help:
 	@echo "Targets:"
@@ -49,6 +49,7 @@ help:
 	@echo "  deerflow-backend   Start embedded DeerFlow gateway with paper_rag"
 	@echo "  deerflow-frontend  Start embedded DeerFlow Next.js UI"
 	@echo "  deerflow-smoke     Check embedded DeerFlow paper_rag endpoints"
+	@echo "  deerflow-paper-rag-test  Run DeerFlow backend paper_rag integration tests"
 	@echo "  deerflow-rebuild-index  Rebuild local embedded Qdrant from parsed papers"
 	@echo "  publish        Publish to GitHub (REPO=... WORKDIR=...)"
 	@echo "  publish-dryrun Preview what would be committed"
@@ -115,6 +116,10 @@ deerflow-frontend:
 
 deerflow-smoke:
 	$(PY) scripts/deerflow_smoke.py --base-url http://127.0.0.1:$(DEERFLOW_BACKEND_PORT)
+
+deerflow-paper-rag-test:
+	PYTHONPATH=$(CURDIR)/$(DEERFLOW_DIR)/backend:$(CURDIR)/$(DEERFLOW_DIR)/backend/packages/harness:$(CURDIR)/src \
+	    $(DEERFLOW_BACKEND_PY) -m pytest -q $(DEERFLOW_DIR)/backend/tests/test_paper_rag_integration.py
 
 deerflow-rebuild-index:
 	PAPER_RAG_CONFIG=$(CURDIR)/config/local.yaml $(DEERFLOW_BACKEND_PY) scripts/init_store.py
