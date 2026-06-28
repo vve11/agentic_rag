@@ -1,8 +1,9 @@
 # DeerFlow Integration Reference
 
 Snapshot of the deerflow-side files that wire `paper_rag` into a DeerFlow
-deployment. Apply manually to a DeerFlow checkout — these files reference
-its internal package layout and are kept here as a design reference.
+deployment. The runnable checkout under `integrations/deer-flow` now contains
+the primary Gateway router, Harness tool adapter, and `paper-research` subagent;
+this folder keeps lightweight reference copies for review and external ports.
 
 | Folder | Purpose |
 |---|---|

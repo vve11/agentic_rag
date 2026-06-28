@@ -21,7 +21,7 @@
                                   ▼
 ┌─────────────────────── 在线 (Agentic RAG) ────────────────────────────┐
 │                                                                       │
-│   DeerFlow Lead Agent  ──►  paper-research SKILL.md                  │
+│   DeerFlow Lead Agent  ──►  paper-research subagent                  │
 │                              │                                        │
 │                              ▼                                        │
 │   community/paper_rag/tools.py (LangChain @tool wrappers)            │
@@ -59,7 +59,7 @@
 2. **双库分工不混**（ADR-0004）：Qdrant 只做向量+metadata 过滤；SQLite 只做关系/CRUD/wiki
 3. **paper_qa 内闭环**（ADR-0006）：主 agent 只看到一次 tool 调用，硬上限 `max_inner_iters=3` 防死循环
 4. **Wiki patch 不 rewrite**（ADR-0007）：LLM 只能 add_*；24h 限频；self_eval gate；版本日志
-5. **DeerFlow 集成走 community/ + SKILL.md**（ADR-0008）：不 fork lead_agent，不破 harness/app boundary
+5. **DeerFlow 集成走 community/ + built-in subagent**（ADR-0008）：不 fork lead_agent，不破 harness/app boundary
 
 ## 状态机（ingest_pipeline）
 
@@ -116,6 +116,7 @@ created → fetched → parsed → chunked → embedded → indexed → done
 
 - `paper_rag` 包永远不导入 `deerflow.*` 或 `app.*`
 - `backend/.../community/paper_rag/tools.py` 通过 `_ensure_paper_rag_importable()` lazy 注入 sys.path
+- `backend/.../subagents/builtins/paper_research.py` 注册 `paper-research` 专家 subagent
 - DeerFlow 不知道 `paper_rag` 的内部 schema；只看 LangChain Tool 的 JSON 字符串
 
 ## 配置生效顺序

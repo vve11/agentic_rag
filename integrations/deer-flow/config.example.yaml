@@ -491,6 +491,7 @@ models:
 
 tool_groups:
   - name: web
+  - name: paper
   - name: file:read
   - name: file:write
   - name: bash
@@ -627,6 +628,33 @@ tools:
     group: web
     use: deerflow.community.image_search.tools:image_search_tool
     max_results: 5
+
+  # Paper RAG tools. These are thin DeerFlow Harness adapters around the
+  # standalone paper_rag package. Keep PAPER_RAG_HOME pointed at this repository
+  # when paper_rag is not installed as a package.
+  - name: paper_qa
+    group: paper
+    use: deerflow.community.paper_rag.tools:paper_qa_tool
+
+  - name: paper_search
+    group: paper
+    use: deerflow.community.paper_rag.tools:paper_search_tool
+
+  - name: paper_section
+    group: paper
+    use: deerflow.community.paper_rag.tools:paper_section_tool
+
+  - name: paper_compare
+    group: paper
+    use: deerflow.community.paper_rag.tools:paper_compare_tool
+
+  - name: wiki_lookup
+    group: paper
+    use: deerflow.community.paper_rag.tools:wiki_lookup_tool
+
+  - name: export_bibtex
+    group: paper
+    use: deerflow.community.paper_rag.tools:export_bibtex_tool
 
   # Image search tool (uses InfoQuest)
   # - name: image_search

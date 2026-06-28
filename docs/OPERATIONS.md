@@ -147,4 +147,6 @@ python scripts/ingest_batch.py --file ids.txt
 export PAPER_RAG_HOME=/abs/path/to/paper_rag
 ```
 
-然后启动 DeerFlow gateway 即可。skill 自动通过 `skills/custom/paper-research/SKILL.md` 注册到 lead agent。
+然后启动 DeerFlow gateway 即可。Paper RAG 会通过
+`deerflow.community.paper_rag.tools` 暴露为 Harness tools，并通过内置
+`paper-research` subagent 进入 DeerFlow lead agent 的委派体系。

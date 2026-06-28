@@ -10,7 +10,7 @@
 
 | 维度 | 数字 |
 |---|---|
-| 代码 | 64 个 Python 模块、5 个工具入口 |
+| 代码 | 64+ 个 Python 模块、6 个 Harness 工具入口 |
 | 文档 | 12 份 ADR、5 份顶层文档（PLAN/STATUS/ARCHITECTURE/OPERATIONS/ACCEPTANCE_REPORT） |
 | 测试 | 34/34 纯逻辑 + 63/63 包可导入 |
 | 真实指标 | paper_recall@k=0.90, mrr=0.90, **cite_existence=1.00**, **suspicious_citations=0**, fpr@k 从 0.75→0.25 |
@@ -34,7 +34,7 @@
 > 4 个回归（ADR-0012）。(1) `arxiv` 包升 v4 删了 `Result.download_pdf`，改用 `client.download_pdf(result, ...)` + httpx 兜底。(2) `qdrant-client` 1.18 弃用 `client.search()`，改用 `query_points()` + 兼容写法。(3) `wiki/store.py` 残留 SyntaxError 被 sqlmodel 缺失掩盖。(4) `init_store.py` 直接 new client 绕过 `get_client` 兜底，加了 `qdrant.local_path` 配置后才发现。所有问题都通过 try/except + 兜底降级吸收，主路径无 `database is locked` / `qdrant unreachable` 异常。
 
 **Q: 怎么跟 DeerFlow 集成的？**
-> 不入侵 harness（ADR-0008）。两处接入：`backend/.../community/paper_rag/tools.py` 用 LangChain `@tool` 包装 5 个工具，`_ensure_paper_rag_importable()` 优先看 `PAPER_RAG_HOME` env，否则向上找 `paper_rag/src/`，sys.path lazy 注入；`skills/custom/paper-research/SKILL.md` 写决策流。验证：5 个 tool 都能被 LangChain 正确解析 + 真实 invoke。
+> 不入侵 harness/app boundary。三处接入：`backend/.../community/paper_rag/tools.py` 用 LangChain `@tool` 包装 6 个工具（paper_qa/search/section/compare/wiki_lookup/export_bibtex）；`backend/.../subagents/builtins/paper_research.py` 注册 `paper-research` 专家 subagent；`config.example.yaml` 把 paper 工具挂到 `paper` tool group。`_ensure_paper_rag_importable()` 优先看 `PAPER_RAG_HOME`，再向上查找仓库 `src/`，保持 lazy import。验证：tool 可 import、subagent 可注册、harness 不反向 import app。
 
 **Q: 怎么防 Wiki 越改越烂？**
 > 五条护栏（ADR-0007）。(1) 频率限制：单 entry 24h 内最多 1 次更新，`lock_until` 字段控制。(2) Patch-only：LLM 只能输出 `add_*` 字段，definition 仅在显式给出新值时覆盖，禁止整条重写。(3) self_eval gate：LLM 同时输出置信度，<0.7 直接丢弃。(4) 版本日志：`wiki_versions` 表每次 upsert 写一条。(5) 默认关闭：`wiki.enabled=false`，先把 RAG 主路径打稳。(6) 一致性 heuristic：`consistency.py` 标 short_def / no_key_papers / self_related。
@@ -50,7 +50,7 @@
 ```
 arxiv/s2/local ─► MinerU/pymupdf ─► section+chunk+modality ─► Qdrant + SQLite
                                                                       │
-DeerFlow Lead Agent ─► paper-research SKILL ─► 5 tools ─► paper_qa ──┤
+DeerFlow Lead Agent ─► paper-research subagent ─► 6 paper tools ─► paper_qa ──┤
                                                               ↓       │
                                        intent → rewrite → hybrid ────┤
                                                   (dense+FTS5 RRF)    │

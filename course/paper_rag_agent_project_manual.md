@@ -91,11 +91,12 @@ User
   -> answer + citations + trace + feedback
 ```
 
-项目里最重要的工程边界有三个：
+项目里最重要的工程边界有四个：
 
 1. `integrations/deer-flow` 是宿主应用。它提供工作台、网关、认证、中间件、线程和工具运行时。
 2. `src/paper_rag` 是可独立运行的 RAG package。它不强依赖 DeerFlow，所以可以 CLI 使用，也可以嵌入网关。
-3. `tests/eval` 和 `scripts` 是验证层。它们让项目从“能跑”变成“可证明地能跑”。
+3. `integrations/deer-flow/backend/packages/harness` 是 DeerFlow Harness。它负责把工具、subagent、memory、middleware、sandbox 和 tracing 组织成可运行的 Agent runtime。
+4. `tests/eval` 和 `scripts` 是验证层。它们让项目从“能跑”变成“可证明地能跑”。
 
 这种拆分对课程很重要：学生不仅学会“实现功能”，还会学会“如何设计模块边界”。在面试里，这比只说用了什么模型更有说服力。
 
@@ -105,6 +106,7 @@ User
 
 - DeerFlow 负责“Agent 应用运行时”：UI、网关、线程、工具、中间件和工作台。
 - paper_rag 负责“论文 RAG 业务能力”：解析、入库、检索、问答、拒答、Wiki、反馈和评测。
+- Harness adapter 负责“把业务能力变成 Agent 工具”：把 `paper_qa`、`paper_search`、`wiki_lookup` 等包装成 LangChain tools，并提供 `paper-research` subagent。
 - scripts/tests 负责“工程可验证性”：初始化、smoke、secret scan、golden eval 和 hard case 收集。
 
 这个边界设计的好处是：如果以后换 UI，`paper_rag` 仍然能作为 Python package 跑；如果以后换 RAG 核心，DeerFlow 工作台也不用重写。
@@ -561,7 +563,54 @@ Router 里有几个很好的工程点：
 
 这会极大降低课程交付时的答疑成本。
 
-### 11.3 Knowledge Builder：把知识库搭建过程产品化
+### 11.3 DeerFlow Harness：从 RAG 服务到 Agent Runtime
+
+Harness 可以理解为“让 Agent 真正跑起来的运行底座”。普通 framework 往往只给一些类、函数和抽象；harness 进一步把模型、工具、子 Agent、memory、middleware、sandbox、tracing 和运行状态都组织好，让业务能力可以被 Agent 稳定调用。
+
+本项目里同时存在三种入口：
+
+| 入口 | 面向对象 | 路径 | 作用 |
+|---|---|---|---|
+| UI 入口 | 普通用户 / 课程演示 | `/workspace/paper-rag` | 完成 QA、Loop Trace、Knowledge Builder、Wiki、Feedback 等产品流程 |
+| API 入口 | 前端 / 脚本 / 自动化 | `/api/paper_rag/*` | 通过 FastAPI router 调用 `paper_rag` package |
+| Harness 入口 | DeerFlow lead agent / subagent | `deerflow.community.paper_rag.tools` | 把 Paper RAG 暴露成 Agent 可调用工具 |
+
+这三种入口不是重复建设，而是服务不同场景：
+
+- UI 入口让项目像完整产品，可以演示给学生和面试官。
+- API 入口让前后端边界清晰，也方便 smoke test 和集成测试。
+- Harness 入口让 Paper RAG 能被 DeerFlow 的普通 Agent 调用，而不是只能在专属页面里使用。
+
+当前 harness adapter 落在：
+
+```text
+integrations/deer-flow/backend/packages/harness/deerflow/community/paper_rag/
+```
+
+它暴露的工具包括：
+
+| Tool | 用途 |
+|---|---|
+| `paper_qa` | 对 indexed paper corpus 做 Agentic RAG QA |
+| `paper_search` | 按 query 找相关论文 |
+| `paper_section` | 读取指定论文的指定章节 |
+| `paper_compare` | 按维度比较多篇论文 |
+| `wiki_lookup` | 查询论文概念 Wiki |
+| `export_bibtex` | 导出 BibTeX 引用 |
+
+此外项目还注册了一个内置 subagent：
+
+```text
+integrations/deer-flow/backend/packages/harness/deerflow/subagents/builtins/paper_research.py
+```
+
+`paper-research` subagent 的价值是把论文研究任务收束到专门上下文里：它知道优先使用 `paper_qa`，知道 no-evidence 时不能硬答，知道 citation 必须来自 retrieved chunks，也知道 memory summary 不能当最终证据。这比把所有提示词都塞进 lead agent 更清晰，也更符合公司项目里的职责边界。
+
+面试时可以这样表达：
+
+> 我没有把 RAG 逻辑直接写进 DeerFlow lead agent，而是把 `paper_rag` 做成独立 package，再通过 FastAPI router 提供产品 API，通过 DeerFlow Harness adapter 提供 Agent tool API。这样 UI、API 和 Agent runtime 三个入口共用同一套 RAG 业务能力，同时保持 harness 不反向依赖 app 层。
+
+### 11.4 Knowledge Builder：把知识库搭建过程产品化
 
 很多 RAG 项目只说“我把文档放进向量库”，但真正可讲的工程链路应该是：
 
@@ -1500,7 +1549,7 @@ What is the weather tomorrow in Shanghai?
 3 分钟版本：
 
 ```text
-项目分三层：第一层是 DeerFlow workspace 和 FastAPI gateway，负责 UI、API、状态和中间件；第二层是 paper_rag Python package，负责解析、chunk、embedding、SQLite/Qdrant、混合检索和 QA；第三层是 eval 和 smoke，负责验证系统是否真的可靠。RAG 主链路采用 dense + sparse + RRF + rerank，并在 LLM 前做 abstain 判断，生成后做 citation validation。这样既能回答论文问题，也能在没有证据时拒答。
+项目分四层：第一层是 DeerFlow workspace 和 FastAPI gateway，负责 UI、API、状态和中间件；第二层是 DeerFlow Harness，负责 tools、subagent、memory、middleware 和 agent runtime；第三层是 paper_rag Python package，负责解析、chunk、embedding、SQLite/Qdrant、混合检索和 QA；第四层是 eval 和 smoke，负责验证系统是否真的可靠。RAG 主链路采用 dense + sparse + RRF + rerank，并在 LLM 前做 abstain 判断，生成后做 citation validation。这样既能回答论文问题，也能在没有证据时拒答。
 ```
 
 10 分钟版本：
@@ -1534,9 +1583,9 @@ What is the weather tomorrow in Shanghai?
 | 检查项 | 合格表现 |
 |---|---|
 | 项目定位 | 能用一句话说明这是“论文 Agentic RAG 工作台”，不是普通聊天机器人 |
-| 技术主线 | 能从 ingest、retrieval、generation、evaluation 四层讲清楚链路 |
-| 简历 bullet | 至少包含 DeerFlow 集成、混合检索、拒答/引用校验、golden set eval |
-| 架构图 | 能手画 browser -> gateway -> paper_rag -> SQLite/Qdrant/LLM |
+| 技术主线 | 能从 ingest、retrieval、generation、harness、evaluation 讲清楚链路 |
+| 简历 bullet | 至少包含 DeerFlow Harness 集成、混合检索、拒答/引用校验、golden set eval |
+| 架构图 | 能手画 browser -> gateway -> harness/router -> paper_rag -> SQLite/Qdrant/LLM |
 | RAG 深挖 | 能解释 dense/sparse/RRF/rerank 的职责和取舍 |
 | Agentic 深挖 | 能解释 query rewrite、HyDE、reflect、abstain 为什么算决策点 |
 | 可靠性 | 能说明 citation validation 和 no-evidence 如何降低 hallucination |

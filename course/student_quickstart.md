@@ -13,7 +13,7 @@
 - 至少问 1 个无关问题，并看到 no-evidence / insufficient evidence。
 - 至少生成 1 个 Wiki entry。
 - 至少提交 1 次 helpful/not-helpful feedback。
-- 能用 3 分钟讲清楚项目架构和 RAG 主链路。
+- 能用 3 分钟讲清楚项目架构、DeerFlow Harness 接入和 RAG 主链路。
 
 ## 2. 环境准备
 

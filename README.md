@@ -19,6 +19,10 @@ The repository is intended to be useful in two modes:
 - **Embedded DeerFlow App**: a modified DeerFlow checkout under
   `integrations/deer-flow` that hosts the Paper RAG API and the
   `/workspace/paper-rag` Next.js UI.
+- **DeerFlow Harness Extension**: Paper RAG tools and a `paper-research`
+  subagent registered under DeerFlow's harness runtime, so the lead agent can
+  call the same research capability through tools instead of only through the
+  dedicated UI page.
 
 The beta target is a complete local project experience. Production deployment,
 CI golden gates, monitoring, backups, multi-tenant hardening, and cost
@@ -46,6 +50,7 @@ to turn the system into a resume project and defend it in interviews:
 | QA | OpenAI-compatible LLM calls, query rewrite, reflect loop, abstain/no-evidence guard, citations |
 | Loop Engineering | Product-readable loop trace for intent, retrieval rounds, reflect, abstain, citations, latency placeholder |
 | Research Memory | Paper RAG-specific compressed memory for research continuity; never used as final evidence |
+| Harness | LangChain tool adapters for `paper_qa`, `paper_search`, `paper_section`, `paper_compare`, `wiki_lookup`, `export_bibtex`, plus a `paper-research` subagent |
 | UI | DeerFlow-style `/workspace/paper-rag` page for QA, Loop Trace, Knowledge Builder, wiki, ingest, feedback, inbox, subscriptions |
 | Ingest | arXiv/PDF ingest path with PyMuPDF fallback and optional MinerU parser |
 | Feedback | Helpful/not-helpful events, hard-case collection, eval item suggestions |
@@ -255,6 +260,9 @@ paper-rag-agent/
 |   |-- proactive/                         # Inbox, subscriptions, digests
 |   `-- feedback/                          # Feedback event storage
 |-- integrations/deer-flow/                # Embedded runnable DeerFlow app
+|   |-- backend/packages/harness/deerflow/
+|   |   |-- community/paper_rag/            # DeerFlow Harness tool adapters
+|   |   `-- subagents/builtins/             # paper-research subagent config
 |   |-- backend/app/gateway/routers/
 |   |   `-- paper_rag.py                   # Paper RAG FastAPI adapter
 |   `-- frontend/src/app/workspace/paper-rag/
@@ -273,6 +281,8 @@ paper-rag-agent/
 flowchart TB
     FE["DeerFlow Next.js UI<br/>/workspace/paper-rag"] --> GW["DeerFlow Gateway<br/>FastAPI"]
     GW --> API["paper_rag router<br/>/api/paper_rag/*"]
+    LA["DeerFlow Lead Agent"] --> HAR["DeerFlow Harness<br/>paper_rag tools + paper-research subagent"]
+    HAR --> QA
     API --> QA["paper_rag.rag<br/>memory + loop trace + QA + abstain"]
     QA --> MEM[("SQLite<br/>research_memory")]
     QA --> RET["paper_rag.retrieve<br/>BM25 + dense + RRF"]
