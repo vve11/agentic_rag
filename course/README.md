@@ -24,17 +24,17 @@ course/paper_rag_agent_project_manual.pdf
 
 1. 按 `student_quickstart.md` 跑通本地 DeerFlow UI。
 2. 按 `demo_pack.md` ingest 至少 1-3 篇论文。
-3. 用标准问题完成 QA、citations、no-evidence、Wiki、Feedback 演示。
+3. 用标准问题完成 QA、citations、Loop Trace、Research Memory、no-evidence、Wiki、Feedback 演示。
 4. 跑通 `make eval-golden`。
 5. 参考技术手册写出 3-5 条简历 bullet。
-6. 能用 3 分钟讲清系统架构、RAG 主链路、Agentic 决策和可靠性设计。
+6. 能用 3 分钟讲清系统架构、RAG 主链路、Agentic 决策、记忆压缩边界和可靠性设计。
 
 ## 讲师建议
 
 - 第一节课只要求跑通，不要求理解所有源码。
-- 第二节课讲 ingest、chunk、embedding、SQLite/Qdrant。
-- 第三节课讲 dense/sparse、RRF、rerank、query rewrite、HyDE。
-- 第四节课讲 abstain、citation validation、feedback、golden set。
+- 第二节课讲 Knowledge Builder、ingest、chunk、embedding、SQLite/Qdrant。
+- 第三节课讲 dense/sparse、RRF、rerank、query rewrite、HyDE 和 Loop Trace。
+- 第四节课讲 research memory compression、abstain、citation validation、feedback、golden set。
 - 最后一节课做答辩：UI 演示 + 架构图 + 简历 bullet + 面试追问。
 
 课程目标不是让学生背答案，而是让学生能解释：为什么这样设计、替代方案是什么、这个设计解决了什么失败模式。

@@ -8,7 +8,9 @@
 An open-source academic-paper RAG agent with a runnable DeerFlow workspace UI.
 It can ingest papers, build a local hybrid index, answer literature questions
 with citations, generate wiki-style concept notes, collect feedback, and run a
-small golden-set regression gate.
+small golden-set regression gate. The DeerFlow workspace also exposes the
+internal Agentic RAG loop, a Paper RAG-specific research memory layer, and a
+Knowledge Builder view for paper indexing status.
 
 The repository is intended to be useful in two modes:
 
@@ -41,8 +43,10 @@ to turn the system into a resume project and defend it in interviews:
 | Area | Included |
 |---|---|
 | Retrieval | SQLite metadata, FTS5/BM25 sparse search, embedded Qdrant dense search, RRF fusion |
-| QA | OpenAI-compatible LLM calls, query rewrite, abstain/no-evidence guard, citations |
-| UI | DeerFlow-style `/workspace/paper-rag` page for QA, papers, wiki, ingest, feedback, inbox, subscriptions |
+| QA | OpenAI-compatible LLM calls, query rewrite, reflect loop, abstain/no-evidence guard, citations |
+| Loop Engineering | Product-readable loop trace for intent, retrieval rounds, reflect, abstain, citations, latency placeholder |
+| Research Memory | Paper RAG-specific compressed memory for research continuity; never used as final evidence |
+| UI | DeerFlow-style `/workspace/paper-rag` page for QA, Loop Trace, Knowledge Builder, wiki, ingest, feedback, inbox, subscriptions |
 | Ingest | arXiv/PDF ingest path with PyMuPDF fallback and optional MinerU parser |
 | Feedback | Helpful/not-helpful events, hard-case collection, eval item suggestions |
 | Evaluation | Retrieval-only and no-judge QA golden-set runners |
@@ -138,7 +142,9 @@ http://127.0.0.1:3000/workspace/paper-rag
 Try:
 
 - Ask: `What is Self-RAG?`
-- Papers: confirm the ingested paper appears.
+- Loop Trace: inspect intent, retrieval rounds, abstain, and citation state.
+- Research Memory: continue a multi-turn thread and watch compressed memory warm up.
+- Knowledge Builder: confirm the ingested paper moves through fetch, parse, chunk, embed, index, and wiki states.
 - Wiki: generate a concept note for an indexed paper.
 - Feedback: click helpful/not helpful after an answer.
 - Subscriptions: add, pause, resume, and delete a topic subscription.
@@ -241,7 +247,7 @@ Latest local beta baseline:
 ```text
 paper-rag-agent/
 |-- src/paper_rag/                         # Standalone Python package
-|   |-- rag/                               # QA loop, abstain, streaming, query rewrite
+|   |-- rag/                               # QA loop, research memory, abstain, streaming, query rewrite
 |   |-- retrieve/                          # Dense/sparse retrieval, formatting, rerank
 |   |-- store/                             # SQLite + Qdrant ingest/index stores
 |   |-- parse/ and chunk/                  # PDF parsing and chunk construction
@@ -267,10 +273,12 @@ paper-rag-agent/
 flowchart TB
     FE["DeerFlow Next.js UI<br/>/workspace/paper-rag"] --> GW["DeerFlow Gateway<br/>FastAPI"]
     GW --> API["paper_rag router<br/>/api/paper_rag/*"]
-    API --> QA["paper_rag.rag<br/>query rewrite + QA + abstain"]
+    API --> QA["paper_rag.rag<br/>memory + loop trace + QA + abstain"]
+    QA --> MEM[("SQLite<br/>research_memory")]
     QA --> RET["paper_rag.retrieve<br/>BM25 + dense + RRF"]
     RET --> SQL[("SQLite<br/>papers, chunks, feedback")]
     RET --> QDR[("Embedded Qdrant<br/>vectors")]
+    API --> KB["Knowledge Builder<br/>ingest/index/wiki status"]
     API --> WIKI["paper_rag.wiki<br/>concept notes"]
     API --> PRO["paper_rag.proactive<br/>inbox + subscriptions"]
     QA --> LLM["OpenAI-compatible<br/>chat provider"]
@@ -294,12 +302,15 @@ sequenceDiagram
     participant UI as DeerFlow UI
     participant GW as Gateway
     participant RAG as Paper RAG
+    participant MEM as Research Memory
     participant RET as Retriever
     participant LLM as LLM
 
     U->>UI: Ask a paper question
     UI->>GW: POST /api/paper_rag/qa/sync
     GW->>RAG: Dispatch with local config
+    RAG->>MEM: Load compressed research memory
+    MEM-->>RAG: Query context only, not evidence
     RAG->>RET: Rewrite, retrieve, fuse, rerank
     RET-->>RAG: Top chunks with paper/chunk citations
     RAG->>RAG: Abstain decision
@@ -310,7 +321,8 @@ sequenceDiagram
         LLM-->>RAG: Answer
         RAG-->>UI: Answer + citations + confidence
     end
-    UI-->>U: Render answer, citations, feedback controls
+    RAG->>MEM: Append turn and compress when threshold is reached
+    UI-->>U: Render answer, citations, Loop Trace, Research Memory, feedback controls
 ```
 
 ## Common Troubleshooting
@@ -385,7 +397,7 @@ Complete for the local beta:
 - Real Paper RAG runtime with local index and OpenAI-compatible LLM.
 - DeerFlow gateway adapter and DeerFlow-style Paper RAG workspace UI.
 - QA, citations, loading/error/no-evidence states.
-- Papers, Wiki, Ingest, Feedback, Inbox, and Subscription workflows.
+- Knowledge Builder, Wiki, Ingest, Feedback, Inbox, and Subscription workflows.
 - Golden-set baseline and RAG tuning hooks.
 - Local secret scanning and runtime-data ignore rules.
 

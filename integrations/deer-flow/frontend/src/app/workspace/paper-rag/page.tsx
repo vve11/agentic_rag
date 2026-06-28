@@ -54,6 +54,69 @@ type QASyncResponse = {
   abstain: { decision?: string };
   trace_id?: string;
   n_chunks?: number;
+  trace?: {
+    loop?: LoopTrace;
+    memory?: ResearchMemoryTrace;
+    memory_before?: ResearchMemoryTrace;
+  };
+  memory?: ResearchMemoryTrace | null;
+};
+
+type LoopIteration = {
+  query?: string;
+  n_retrieved?: number;
+  reflect?: {
+    sufficiency?: string;
+    follow_up?: string;
+    reason?: string;
+  } | null;
+};
+
+type LoopTrace = {
+  intent?: string;
+  stopped_by?: string;
+  iterations?: LoopIteration[];
+  citations?: string[];
+  n_chunks?: number;
+  latency_ms?: number;
+  cost?: { note?: string; llm_calls?: number | null; tokens?: number | null };
+};
+
+type ResearchMemoryTrace = {
+  conversation_id?: string | null;
+  recent_turns?: Array<{ question?: string; answer_preview?: string; citations?: string[] }>;
+  session_summary?: string;
+  research_memory?: {
+    current_topics?: string[];
+    read_papers?: string[];
+    confirmed_findings?: string[];
+    open_questions?: string[];
+    preferences?: string[];
+  };
+  turn_count?: number;
+  has_compressed_memory?: boolean;
+  memory_role?: string;
+};
+
+type KnowledgeBuildStage = {
+  name: string;
+  status: string;
+  error?: string | null;
+  finished_at?: string | null;
+};
+
+type KnowledgeBuild = {
+  paper_id: string;
+  title?: string | null;
+  arxiv_id?: string | null;
+  status: string;
+  error?: string | null;
+  n_chunks: number;
+  ingested_at?: string | null;
+  stages: KnowledgeBuildStage[];
+  wiki_status: string;
+  qdrant_status: string;
+  warnings: string[];
 };
 
 type WikiResponse = {
@@ -129,12 +192,30 @@ function ingestMessage(data: IngestResponse) {
   return `Ingested ${data.paper_id} (${data.n_chunks} chunks${wikiQueued})`;
 }
 
+function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "ok" || status === "ready" || status === "done" || status === "online") return "default";
+  if (status === "error" || status === "failed" || status === "offline") return "destructive";
+  if (status === "pending" || status === "empty" || status === "skipped") return "secondary";
+  return "outline";
+}
+
+function memoryList(values?: string[]) {
+  return values?.filter(Boolean).slice(0, 4) ?? [];
+}
+
 export default function PaperRagPage() {
   const [papers, setPapers] = useState<Paper[]>([]);
+  const [builds, setBuilds] = useState<KnowledgeBuild[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [unread, setUnread] = useState(0);
+  const [conversationId] = useState(() => {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return crypto.randomUUID();
+    }
+    return `paper-rag-${Date.now()}`;
+  });
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<QASyncResponse | null>(null);
   const [answerQuestion, setAnswerQuestion] = useState("");
@@ -157,8 +238,9 @@ export default function PaperRagPage() {
   async function refresh() {
     setError(null);
     try {
-      const [paperData, inboxData, subsData, statusData] = await Promise.all([
+      const [paperData, buildData, inboxData, subsData, statusData] = await Promise.all([
         fetchJson<Paper[]>("/api/paper_rag/papers"),
+        fetchJson<KnowledgeBuild[]>("/api/paper_rag/knowledge/builds"),
         fetchJson<{ items: InboxItem[]; unread_count: number }>(
           "/api/paper_rag/inbox?unread_only=false&limit=50",
         ),
@@ -166,6 +248,7 @@ export default function PaperRagPage() {
         fetchJson<RuntimeStatus>("/api/paper_rag/status"),
       ]);
       setPapers(paperData);
+      setBuilds(buildData);
       setInbox(inboxData.items ?? []);
       setUnread(inboxData.unread_count ?? 0);
       setSubscriptions(subsData);
@@ -193,7 +276,7 @@ export default function PaperRagPage() {
       const data = await fetchJson<QASyncResponse>("/api/paper_rag/qa/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmed }),
+        body: JSON.stringify({ question: trimmed, conversation_id: conversationId }),
       });
       setAnswer(data);
       setAnswerQuestion(trimmed);
@@ -426,7 +509,7 @@ export default function PaperRagPage() {
           <Tabs defaultValue="ask" className="gap-4">
             <TabsList variant="line" className="flex h-auto flex-wrap justify-start">
               <TabsTrigger value="ask">Ask</TabsTrigger>
-              <TabsTrigger value="papers">Papers</TabsTrigger>
+              <TabsTrigger value="knowledge">Knowledge Builder</TabsTrigger>
               <TabsTrigger value="inbox">Inbox</TabsTrigger>
               <TabsTrigger value="subscriptions">Subscriptions</TabsTrigger>
             </TabsList>
@@ -472,6 +555,108 @@ export default function PaperRagPage() {
                         ))}
                       </div>
                     )}
+                    {answer.trace?.loop && (
+                      <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-medium">Loop Trace</h3>
+                          {answer.trace.loop.intent && (
+                            <Badge variant="outline">{answer.trace.loop.intent}</Badge>
+                          )}
+                          {answer.trace.loop.stopped_by && (
+                            <Badge variant="secondary">stop: {answer.trace.loop.stopped_by}</Badge>
+                          )}
+                          {typeof answer.trace.loop.latency_ms === "number" && (
+                            <Badge variant="secondary">{answer.trace.loop.latency_ms} ms</Badge>
+                          )}
+                        </div>
+                        {answer.trace.loop.iterations?.length ? (
+                          <div className="space-y-2">
+                            {answer.trace.loop.iterations.map((iteration, index) => (
+                              <div key={`${iteration.query ?? "iter"}-${index}`} className="text-sm">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge variant="outline">round {index + 1}</Badge>
+                                  {typeof iteration.n_retrieved === "number" && (
+                                    <Badge variant="secondary">{iteration.n_retrieved} retrieved</Badge>
+                                  )}
+                                  {iteration.reflect?.sufficiency && (
+                                    <Badge variant="secondary">reflect: {iteration.reflect.sufficiency}</Badge>
+                                  )}
+                                </div>
+                                {iteration.query && (
+                                  <p className="text-muted-foreground mt-1 break-words">{iteration.query}</p>
+                                )}
+                                {iteration.reflect?.follow_up && (
+                                  <p className="text-muted-foreground mt-1 break-words">
+                                    follow-up: {iteration.reflect.follow_up}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground text-sm">No loop iterations were recorded.</p>
+                        )}
+                        {answer.trace.loop.cost?.note && (
+                          <p className="text-muted-foreground border-t pt-2 text-xs">{answer.trace.loop.cost.note}</p>
+                        )}
+                      </div>
+                    )}
+                    {(answer.memory ?? answer.trace?.memory) && (
+                      <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                        {(() => {
+                          const memory = answer.memory ?? answer.trace?.memory;
+                          const research = memory?.research_memory;
+                          return (
+                            <>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-sm font-medium">Research Memory</h3>
+                                <Badge variant={memory?.has_compressed_memory ? "default" : "secondary"}>
+                                  {memory?.has_compressed_memory ? "compressed" : "warming up"}
+                                </Badge>
+                                {typeof memory?.turn_count === "number" && (
+                                  <Badge variant="secondary">{memory.turn_count} turns</Badge>
+                                )}
+                              </div>
+                              {memory?.session_summary ? (
+                                <p className="whitespace-pre-wrap text-sm leading-6">{memory.session_summary}</p>
+                              ) : (
+                                <p className="text-muted-foreground text-sm">
+                                  Memory will compress after several turns. It guides query context only, not evidence.
+                                </p>
+                              )}
+                              <div className="grid gap-2 text-sm md:grid-cols-2">
+                                {[
+                                  ["Topics", memoryList(research?.current_topics)],
+                                  ["Read papers", memoryList(research?.read_papers)],
+                                  ["Findings", memoryList(research?.confirmed_findings)],
+                                  ["Open questions", memoryList(research?.open_questions)],
+                                ].map(([label, values]) => (
+                                  <div key={label as string} className="min-w-0">
+                                    <div className="text-muted-foreground text-xs">{label as string}</div>
+                                    {(values as string[]).length ? (
+                                      <div className="mt-1 flex flex-wrap gap-1">
+                                        {(values as string[]).map((value) => (
+                                          <Badge key={value} variant="outline" className="max-w-full truncate">
+                                            {value}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-muted-foreground mt-1 text-xs">empty</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                              {memory?.memory_role && (
+                                <p className="text-muted-foreground border-t pt-2 text-xs">
+                                  {memory.memory_role}
+                                </p>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
                     {answer.trace_id && (
                       <div className="flex flex-wrap items-center gap-2 border-t pt-3">
                         <Button
@@ -500,7 +685,7 @@ export default function PaperRagPage() {
               )}
             </TabsContent>
 
-            <TabsContent value="papers" className="space-y-4">
+            <TabsContent value="knowledge" className="space-y-4">
               <div className="grid gap-2 rounded-lg border bg-background p-3 md:grid-cols-[1fr_1fr_auto]">
                 <Input
                   value={ingestArxiv}
@@ -522,36 +707,55 @@ export default function PaperRagPage() {
               {loading ? (
                 <div className="text-muted-foreground flex h-32 items-center justify-center gap-2 text-sm">
                   <Loader2Icon className="size-4 animate-spin" />
-                  Loading papers
+                  Loading knowledge builds
                 </div>
-              ) : papers.length === 0 ? (
+              ) : builds.length === 0 ? (
                 <div className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
-                  No indexed papers yet.
+                  No knowledge builds yet.
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-lg border bg-background">
-                  {papers.map((paper, index) => (
+                  {builds.map((build, index) => (
                     <div
-                      key={paper.paper_id}
-                      className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 last:border-b-0"
+                      key={build.paper_id}
+                      className="space-y-3 border-b px-4 py-3 last:border-b-0"
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <FileTextIcon className="text-muted-foreground size-4 shrink-0" />
-                          <p className="truncate text-sm font-medium">{paper.title ?? paper.paper_id}</p>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <FileTextIcon className="text-muted-foreground size-4 shrink-0" />
+                            <p className="truncate text-sm font-medium">{build.title ?? build.paper_id}</p>
+                          </div>
+                          <div className="text-muted-foreground mt-1 flex flex-wrap gap-1.5 text-xs">
+                            <Badge variant="outline" className="max-w-full truncate">
+                              {build.paper_id}
+                            </Badge>
+                            {build.arxiv_id && <Badge variant="secondary">arXiv {build.arxiv_id}</Badge>}
+                            <Badge variant={statusVariant(build.status)}>{build.status}</Badge>
+                            <Badge variant="secondary">{build.n_chunks} chunks</Badge>
+                            <Badge variant={statusVariant(build.qdrant_status)}>qdrant {build.qdrant_status}</Badge>
+                            <span className="sr-only">knowledge build row {index + 1}</span>
+                          </div>
                         </div>
-                        <div className="text-muted-foreground mt-1 flex flex-wrap gap-1.5 text-xs">
-                          <Badge variant="outline" className="max-w-full truncate">
-                            {paper.paper_id}
-                          </Badge>
-                          {paper.arxiv_id && <Badge variant="secondary">arXiv {paper.arxiv_id}</Badge>}
-                          <Badge variant="secondary">{paper.n_chunks} chunks</Badge>
-                          <span className="sr-only">paper row {index + 1}</span>
-                        </div>
+                        <Button variant="outline" size="sm" onClick={() => void loadWiki(build.paper_id)}>
+                          Wiki
+                        </Button>
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => void loadWiki(paper.paper_id)}>
-                        Wiki
-                      </Button>
+                      <div className="flex flex-wrap gap-1.5">
+                        {build.stages.map((stage) => (
+                          <Badge key={stage.name} variant={statusVariant(stage.status)} className="max-w-full">
+                            {stage.name}: {stage.status}
+                          </Badge>
+                        ))}
+                      </div>
+                      {build.error && <p className="text-destructive text-sm">{build.error}</p>}
+                      {build.warnings.length > 0 && (
+                        <ul className="text-muted-foreground list-disc space-y-1 pl-4 text-xs">
+                          {build.warnings.map((warning) => (
+                            <li key={warning}>{warning}</li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   ))}
                 </div>

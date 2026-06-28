@@ -209,3 +209,51 @@ def test_abstain_weak_evidence_calls_llm_with_hint():
         qa_agentic._retrieve_round = saved_retrieve
         qa_agentic.chat = saved_chat
         qa_agentic.classify = saved_classify
+
+
+def test_qa_agentic_returns_structured_loop_and_memory_trace(monkeypatch, tmp_path):
+    """QA trace should be product-readable: loop state + memory state.
+
+    The memory payload is query context only; citations still come from chunks.
+    """
+    from sqlalchemy import create_engine
+
+    from paper_rag.rag import qa_agentic, research_memory
+    from paper_rag.store import sqlite_store
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'qa_trace.db'}")
+    monkeypatch.setattr(sqlite_store, "get_engine", lambda: engine)
+    research_memory._TABLE_READY = False
+
+    def fake_retrieve(query, paper_ids, top_k):
+        return [
+            {
+                "chunk_id": "abc1234567",
+                "paper_id": "arxiv:2310.11511",
+                "text": "Self-RAG uses reflection tokens.",
+                "score_rerank": 0.91,
+            }
+        ]
+
+    monkeypatch.setattr(qa_agentic, "_retrieve_round", fake_retrieve)
+    monkeypatch.setattr(
+        qa_agentic,
+        "classify",
+        lambda q: {"intent": "factual", "top_k": 3, "max_iter": 1, "rrf_k": 60},
+    )
+    monkeypatch.setattr(
+        qa_agentic,
+        "chat",
+        lambda messages, **kwargs: "Self-RAG uses reflection tokens [chunk:abc1234567].",
+    )
+
+    out = qa_agentic.answer("What is Self-RAG?", conversation_id="conv-loop")
+    trace = out["trace"]
+
+    assert out["citations"] == ["abc1234567"]
+    assert trace["loop"]["intent"] == "factual"
+    assert trace["loop"]["stopped_by"] == "answered"
+    assert trace["loop"]["iterations"][0]["query"] == "What is Self-RAG?"
+    assert trace["loop"]["citations"] == ["abc1234567"]
+    assert trace["memory"]["conversation_id"] == "conv-loop"
+    assert trace["memory"]["memory_role"] == "query_context_only_not_evidence"

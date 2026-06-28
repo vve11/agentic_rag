@@ -60,7 +60,7 @@ def _make_app():
 
 
 def test_routes_registered():
-    """Verify all 5 paper_rag endpoints + /metrics are registered."""
+    """Verify core paper_rag endpoints + /metrics are registered."""
     _make_app()
     pr = sys.modules["pr_mod"]
     metrics = sys.modules["metrics_mod"]
@@ -76,6 +76,7 @@ def test_routes_registered():
         "/api/paper_rag/qa/sync",
         "/api/paper_rag/papers",
         "/api/paper_rag/papers/ingest",
+        "/api/paper_rag/knowledge/builds",
         "/api/paper_rag/wiki/{paper_id}",
     ):
         assert p in paths, f"missing route: {p}"
@@ -133,6 +134,104 @@ def test_paper_rag_papers_dev_mode():
         sample = data[0]
         for required in ("paper_id", "title", "n_chunks"):
             assert required in sample, f"missing field in response: {required}"
+
+
+def test_knowledge_builds_dev_mode_returns_stage_status(tmp_path):
+    """Knowledge Builder should expose ingest/index/wiki status for the UI."""
+    import json
+    import sqlite3
+
+    from fastapi.testclient import TestClient
+
+    db = tmp_path / "knowledge.sqlite"
+    con = sqlite3.connect(str(db))
+    con.executescript(
+        """
+        CREATE TABLE paper (
+            paper_id TEXT PRIMARY KEY,
+            title TEXT,
+            arxiv_id TEXT,
+            status TEXT,
+            error TEXT,
+            user_id TEXT,
+            created_at TEXT
+        );
+        CREATE TABLE chunk (
+            chunk_id TEXT PRIMARY KEY,
+            paper_id TEXT,
+            text TEXT
+        );
+        CREATE TABLE ingest_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            paper_id TEXT,
+            step TEXT,
+            status TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            error TEXT
+        );
+        CREATE TABLE wiki_entries (
+            entry_id TEXT PRIMARY KEY,
+            name TEXT,
+            key_papers_json TEXT,
+            definition TEXT,
+            updated_at TEXT
+        );
+        """
+    )
+    con.execute(
+        "INSERT INTO paper VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("arxiv:2310.11511", "Self-RAG", "2310.11511", "done", None, "system", "2026-01-01"),
+    )
+    con.executemany(
+        "INSERT INTO chunk VALUES (?, ?, ?)",
+        [("c1", "arxiv:2310.11511", "text"), ("c2", "arxiv:2310.11511", "text")],
+    )
+    con.executemany(
+        "INSERT INTO ingest_runs (paper_id, step, status, finished_at, error) VALUES (?, ?, ?, ?, ?)",
+        [
+            ("arxiv:2310.11511", "parse", "ok", "2026-01-01", None),
+            ("arxiv:2310.11511", "chunk", "ok", "2026-01-01", None),
+            ("arxiv:2310.11511", "embed", "ok", "2026-01-01", None),
+            ("arxiv:2310.11511", "index", "ok", "2026-01-01", None),
+        ],
+    )
+    con.execute(
+        "INSERT INTO wiki_entries VALUES (?, ?, ?, ?, ?)",
+        (
+            "self-rag",
+            "Self-RAG",
+            json.dumps(["arxiv:2310.11511"]),
+            "Self-RAG concept note.",
+            "2026-01-01",
+        ),
+    )
+    con.commit()
+    con.close()
+
+    app, auth = _make_app()
+    pr = sys.modules["pr_mod"]
+    pr._resolve_sqlite_path = lambda: str(db)
+    pr._count_qdrant_points = lambda collection: (None, "qdrant offline")
+    auth._AUTH_DISABLED = True
+    auth._DEV_USER_ID = "system"
+
+    r = TestClient(app).get("/api/paper_rag/knowledge/builds")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data[0]["paper_id"] == "arxiv:2310.11511"
+    assert data[0]["n_chunks"] == 2
+    assert data[0]["wiki_status"] == "ready"
+    assert data[0]["qdrant_status"] == "offline"
+    stages = {stage["name"]: stage["status"] for stage in data[0]["stages"]}
+    assert stages == {
+        "fetch": "ok",
+        "parse": "ok",
+        "chunk": "ok",
+        "embed": "ok",
+        "index": "ok",
+        "wiki": "ready",
+    }
 
 
 def test_touch_paper_access_extracts_unique_ids(tmp_path=None):

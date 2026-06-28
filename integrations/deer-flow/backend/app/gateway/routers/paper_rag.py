@@ -102,6 +102,8 @@ class QASyncResponse(BaseModel):
     abstain: dict[str, Any]
     trace_id: str
     n_chunks: int
+    trace: dict[str, Any] = Field(default_factory=dict)
+    memory: dict[str, Any] | None = None
 
 
 class IngestRequest(BaseModel):
@@ -127,6 +129,27 @@ class PaperRow(BaseModel):
     arxiv_id: str | None = None
     n_chunks: int
     ingested_at: str | None = None
+
+
+class KnowledgeBuildStage(BaseModel):
+    name: str
+    status: str
+    error: str | None = None
+    finished_at: str | None = None
+
+
+class KnowledgeBuildStatus(BaseModel):
+    paper_id: str
+    title: str | None = None
+    arxiv_id: str | None = None
+    status: str
+    error: str | None = None
+    n_chunks: int
+    ingested_at: str | None = None
+    stages: list[KnowledgeBuildStage]
+    wiki_status: str
+    qdrant_status: str
+    warnings: list[str] = Field(default_factory=list)
 
 
 class WikiResponse(BaseModel):
@@ -385,6 +408,8 @@ async def qa_sync(
         abstain=trace.get("abstain", {}),
         trace_id=trace.get("trace_id", ""),
         n_chunks=len(chunks_used),
+        trace=trace,
+        memory=trace.get("memory"),
     )
 
 
@@ -461,6 +486,182 @@ def _resolve_sqlite_path() -> str:
     from paper_rag import config as cfg
 
     return cfg.load().paths.sqlite_path
+
+
+@router.get("/knowledge/builds", response_model=list[KnowledgeBuildStatus])
+async def list_knowledge_builds(
+    user_id: str = Depends(get_current_user_id),
+    limit: int = 100,
+) -> list[KnowledgeBuildStatus]:
+    """Return product-facing paper knowledge-base build status."""
+    _ensure_paper_rag_importable()
+    try:
+        from paper_rag import config as cfg
+    except ImportError as exc:
+        raise HTTPException(503, f"paper_rag unavailable: {exc}") from exc
+
+    qdrant_points, qdrant_warning = _count_qdrant_points(cfg.load().qdrant.collection_chunks)
+    qdrant_status = "online" if qdrant_points is not None else "offline"
+    loop = asyncio.get_running_loop()
+    rows = await loop.run_in_executor(
+        None,
+        _list_knowledge_builds_for_user,
+        user_id,
+        limit,
+        qdrant_status,
+        qdrant_warning,
+    )
+    return [KnowledgeBuildStatus(**row) for row in rows]
+
+
+def _list_knowledge_builds_for_user(
+    user_id: str,
+    limit: int,
+    qdrant_status: str,
+    qdrant_warning: str | None,
+) -> list[dict[str, Any]]:
+    sqlite_path = _resolve_sqlite_path()
+    if not Path(sqlite_path).exists():
+        return []
+
+    con = sqlite3.connect(str(sqlite_path))
+    con.row_factory = sqlite3.Row
+    try:
+        tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        papers_table = "paper" if "paper" in tables else "papers"
+        chunks_table = "chunk" if "chunk" in tables else "chunks"
+        if papers_table not in tables:
+            return []
+
+        paper_cols = {row[1] for row in con.execute(f"PRAGMA table_info({papers_table})")}
+        select_cols = [
+            "paper_id",
+            "title",
+            "arxiv_id",
+            "created_at",
+            "status" if "status" in paper_cols else "NULL AS status",
+            "error" if "error" in paper_cols else "NULL AS error",
+        ]
+        if "user_id" in paper_cols:
+            cur = con.execute(
+                f"SELECT {', '.join(select_cols)} FROM {papers_table} "
+                "WHERE user_id = ? OR user_id = 'system' OR user_id IS NULL "
+                "ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
+            )
+        else:
+            cur = con.execute(
+                f"SELECT {', '.join(select_cols)} FROM {papers_table} "
+                "ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+
+        out: list[dict[str, Any]] = []
+        for row in cur:
+            paper_id = row["paper_id"]
+            n_chunks = _count_chunks_for_paper(con, tables, chunks_table, paper_id)
+            ingest_steps = _latest_ingest_steps(con, tables, paper_id)
+            wiki_status = _wiki_status_for_paper(con, tables, paper_id)
+            stages = _knowledge_stages(row, ingest_steps, wiki_status)
+            warnings = []
+            if qdrant_warning:
+                warnings.append(qdrant_warning)
+            if wiki_status == "empty":
+                warnings.append("Wiki entry has not been generated for this paper.")
+            out.append(
+                {
+                    "paper_id": paper_id,
+                    "title": row["title"],
+                    "arxiv_id": row["arxiv_id"],
+                    "status": row["status"] or "unknown",
+                    "error": row["error"],
+                    "n_chunks": n_chunks,
+                    "ingested_at": str(row["created_at"]) if row["created_at"] is not None else None,
+                    "stages": stages,
+                    "wiki_status": wiki_status,
+                    "qdrant_status": qdrant_status,
+                    "warnings": warnings,
+                }
+            )
+        return out
+    finally:
+        con.close()
+
+
+def _count_chunks_for_paper(con: sqlite3.Connection, tables: set[str], chunks_table: str, paper_id: str) -> int:
+    if chunks_table not in tables:
+        return 0
+    row = con.execute(
+        f"SELECT COUNT(*) AS n FROM {chunks_table} WHERE paper_id = ?",
+        (paper_id,),
+    ).fetchone()
+    return int(row["n"] or 0)
+
+
+def _latest_ingest_steps(con: sqlite3.Connection, tables: set[str], paper_id: str) -> dict[str, dict[str, Any]]:
+    if "ingest_runs" not in tables:
+        return {}
+    rows = list(
+        con.execute(
+            """
+            SELECT step, status, error, finished_at
+            FROM ingest_runs
+            WHERE paper_id = ?
+            ORDER BY id ASC
+            """,
+            (paper_id,),
+        )
+    )
+    steps: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        steps[row["step"]] = {
+            "status": row["status"] or "pending",
+            "error": row["error"],
+            "finished_at": str(row["finished_at"]) if row["finished_at"] else None,
+        }
+    return steps
+
+
+def _wiki_status_for_paper(con: sqlite3.Connection, tables: set[str], paper_id: str) -> str:
+    if "wiki_entries" not in tables:
+        return "empty"
+    try:
+        rows = list(con.execute("SELECT key_papers_json FROM wiki_entries"))
+    except sqlite3.Error:
+        return "empty"
+    for row in rows:
+        try:
+            key_papers = json.loads(row["key_papers_json"] or "[]")
+        except Exception:
+            key_papers = []
+        if paper_id in key_papers:
+            return "ready"
+    return "empty"
+
+
+def _knowledge_stages(row: sqlite3.Row, ingest_steps: dict[str, dict[str, Any]], wiki_status: str) -> list[dict[str, Any]]:
+    paper_status = row["status"] or "unknown"
+    paper_error = row["error"]
+    stages: list[dict[str, Any]] = [
+        {
+            "name": "fetch",
+            "status": "error" if paper_status == "failed" and paper_error else "ok",
+            "error": paper_error if paper_status == "failed" and paper_error else None,
+            "finished_at": str(row["created_at"]) if row["created_at"] else None,
+        }
+    ]
+    for name in ("parse", "chunk", "embed", "index"):
+        step = ingest_steps.get(name)
+        if step:
+            stages.append({"name": name, **step})
+        elif paper_status == "done":
+            stages.append({"name": name, "status": "ok", "error": None, "finished_at": None})
+        elif paper_status == "failed":
+            stages.append({"name": name, "status": "pending", "error": None, "finished_at": None})
+        else:
+            stages.append({"name": name, "status": "pending", "error": None, "finished_at": None})
+    stages.append({"name": "wiki", "status": wiki_status, "error": None, "finished_at": None})
+    return stages
 
 
 def _attach_user_id_to_fetch_meta(fetched: Any, user_id: str) -> None:

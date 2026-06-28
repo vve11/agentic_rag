@@ -32,7 +32,7 @@ Paper RAG Agent 是一个集成在 DeerFlow 工作台里的 Agentic RAG 学术�
 
 三十秒版本：
 
-这个项目解决的是“让大模型可靠阅读和回答论文问题”。后端用 Python 实现论文解析、chunk 构建、BGE-M3 embedding、SQLite/FTS5 和 Qdrant 混合检索，再通过 query rewrite、HyDE、rerank、reflect 和 abstain 组成 Agentic RAG 主路径。前端嵌入 DeerFlow 的 Next.js 工作台，提供 QA、Papers、Wiki、Ingest、Feedback、Inbox 和 Subscription 工作流。项目还提供 smoke test、secret scan 和 golden set eval，用来证明效果不是只靠肉眼演示。
+这个项目解决的是“让大模型可靠阅读和回答论文问题”。后端用 Python 实现论文解析、chunk 构建、BGE-M3 embedding、SQLite/FTS5 和 Qdrant 混合检索，再通过 query rewrite、HyDE、rerank、reflect 和 abstain 组成 Agentic RAG 主路径。前端嵌入 DeerFlow 的 Next.js 工作台，提供 QA、Knowledge Builder、Wiki、Ingest、Feedback、Inbox 和 Subscription 工作流。项目还提供 smoke test、secret scan 和 golden set eval，用来证明效果不是只靠肉眼演示。
 
 简历版本：
 
@@ -358,6 +358,65 @@ retrieve -> evidence -> reflect
 - 系统需要判断是否证据不足。
 - 需要返回可追踪的中间决策。
 
+## 8A. Loop Engineering：让 Agentic RAG 可观察
+
+很多 Agent 项目只展示最终答案，面试官很难判断系统到底有没有“Agentic”能力。这个项目把内部 RAG loop 产品化为 Loop Trace，让用户能看到一次 QA 里发生了什么：
+
+```text
+intent classify
+  -> research memory context
+  -> query rewrite / HyDE variants
+  -> retrieve + rerank
+  -> reflect sufficiency
+  -> abstain decision
+  -> answer with citations
+  -> feedback / golden set
+```
+
+Loop Trace 不是为了把复杂性丢给普通用户，而是为了教学、debug 和面试表达。它能回答几个关键问题：
+
+| Trace 字段 | 能解释什么 |
+|---|---|
+| intent | 系统把问题当成 factual、reasoning 还是 explore |
+| iterations | 检索跑了几轮，每轮 query 是什么，召回了多少 chunks |
+| reflect | 当前 evidence 是否足够，是否生成 follow-up query |
+| abstain | 为什么回答、弱答或拒答 |
+| citations | 最终答案引用了哪些 chunk |
+| stopped_by | loop 是正常回答、无证据、缓存命中还是达到上限 |
+
+面试里可以这样讲：
+
+> 我没有把 Agentic RAG 做成不可解释的黑盒，而是把内部循环做成可观察 trace。这样调 RAG 不是只看最终答案，而是能定位问题出在 query rewrite、retrieval、rerank、reflect、abstain 还是 generation。
+
+这就是所谓 Loop Engineering：不是让 Agent 无限循环，而是给循环设计明确的状态、上限、停止条件和观测点。
+
+## 8B. Research Memory Compression：记忆压缩但不污染证据链
+
+普通多轮 RAG 经常有两个极端：要么把所有历史塞进 prompt，导致上下文越来越长；要么只保留最近几轮，用户一换说法系统就失去研究连续性。本项目新增 Paper RAG 专属 Research Memory Compression，分三层处理：
+
+| 层级 | 内容 | 作用 |
+|---|---|---|
+| recent turns | 最近几轮 question/answer/citations | 支持短期 follow-up |
+| session summary | 压缩后的会话摘要 | 让长研究线程不断片 |
+| research memory | 当前主题、已读论文、已确认结论、待验证问题、偏好 | 辅助 query rewrite 和 paper scope |
+
+核心边界非常重要：
+
+> Research Memory 只用于改写问题和延续研究上下文，不能作为最终答案证据。最终答案仍然必须重新检索 paper chunks，并通过 citation validation 绑定 chunk id。
+
+为什么要这样设计？
+
+- memory summary 可能有压缩误差，不能当真相来源。
+- 论文问答需要可追溯证据，summary 没有 chunk-level provenance。
+- 如果把 memory 当 evidence，会把“模型总结”变成新的幻觉入口。
+- 把 memory 限定在 query context，可以获得多轮体验，同时保持证据链干净。
+
+可以这样回答面试追问：
+
+问：你做了记忆压缩，那记忆会不会导致幻觉？
+
+答：会有这个风险，所以项目明确把 memory 和 evidence 分开。Research Memory 只影响 query rewrite 和研究上下文，不直接进入 final answer 的证据集合。答案阶段仍然只使用 retrieved chunks，并且 citation 必须来自本轮检索结果。也就是说，memory 解决“用户在研究什么”，RAG chunks 解决“答案凭什么成立”。
+
 ## 9. Abstain：为什么拒答是高级能力
 
 RAG 项目最容易翻车的地方不是“答不出来”，而是“证据不足还硬答”。本项目的 abstain 模块在 LLM 前做三档判断：
@@ -502,6 +561,38 @@ Router 里有几个很好的工程点：
 
 这会极大降低课程交付时的答疑成本。
 
+### 11.3 Knowledge Builder：把知识库搭建过程产品化
+
+很多 RAG 项目只说“我把文档放进向量库”，但真正可讲的工程链路应该是：
+
+```text
+paper source
+  -> fetch
+  -> parse
+  -> chunk
+  -> embed
+  -> index
+  -> wiki/concept note
+  -> QA retrieval
+```
+
+本项目把这个过程封装成 Knowledge Builder，而不是只放一个 papers list。每篇论文在 UI 中都能看到构建阶段：
+
+| 阶段 | 作用 | 常见失败 |
+|---|---|---|
+| fetch | 从 arXiv/PDF URL 获取论文和 metadata | 网络失败、PDF 不可访问 |
+| parse | 用 MinerU 或 PyMuPDF 解析正文 | 双栏、公式、表格解析不稳 |
+| chunk | 按 section 和 token budget 构建 chunks | chunk 太碎或上下文不足 |
+| embed | 用 embedding 模型生成向量 | FlagEmbedding 未安装、模型下载慢 |
+| index | 写入 SQLite metadata 和 Qdrant vectors | Qdrant offline、向量数量为 0 |
+| wiki | 生成概念笔记 | LLM 不可用、无有效 text chunks |
+
+这让“知识库搭建”从黑盒变成可解释工作流。学生演示时不要只说“我用了向量数据库”，而要说清楚：数据是如何进入系统、如何被切块、如何被索引、如何暴露失败状态，以及为什么这些状态会影响最终 QA。
+
+面试表达：
+
+> 我把知识库搭建拆成 fetch、parse、chunk、embed、index、wiki 六个阶段，并在 DeerFlow UI 中展示状态。这样 RAG 失败时可以定位是数据源问题、解析问题、embedding 问题还是索引问题，而不是只看到“回答不好”。
+
 ## 12. DeerFlow 中间件知识点
 
 DeerFlow 的中间件可以分为两层：Gateway 中间件和 Agent runtime 中间件。
@@ -590,7 +681,7 @@ ToolErrorHandlingMiddleware：
 | 功能 | 价值 |
 |---|---|
 | QA | 直接回答论文问题 |
-| Papers | 查看已入库论文和 chunk 情况 |
+| Knowledge Builder | 查看论文 fetch、parse、chunk、embed、index 和 wiki 构建状态 |
 | Wiki | 把论文概念沉淀成知识条目 |
 | Ingest | 从 UI 触发论文入库 |
 | Feedback | 收集用户对答案的质量反馈 |
@@ -600,7 +691,7 @@ ToolErrorHandlingMiddleware：
 这个闭环适合课程展示，因为学生可以演示一个真实 workflow：
 
 1. 入库一篇论文。
-2. 在 Papers 看到它。
+2. 在 Knowledge Builder 看到构建阶段和索引状态。
 3. 提问并得到带 citation 的答案。
 4. 生成 Wiki。
 5. 点反馈。
@@ -612,7 +703,7 @@ ToolErrorHandlingMiddleware：
 闭环的意思是：用户行为会反过来改善系统，而不是一次性问答。
 
 ```text
-Ingest -> Papers -> QA -> Feedback -> Hard cases -> Golden set -> RAG tuning -> Better QA
+Ingest -> Knowledge Builder -> QA -> Feedback -> Hard cases -> Golden set -> RAG tuning -> Better QA
 ```
 
 Wiki 和 Subscription 则把系统从“被动问答”扩展到“知识沉淀”和“主动提醒”：
@@ -630,7 +721,7 @@ Subscription -> Matcher -> Inbox -> User action
 
 - loading：请求进行中，避免用户重复点击。
 - success：答案、citations、chunks、trace 可读。
-- empty：没有 papers、没有 inbox、没有 wiki 时要有解释。
+- empty：没有 indexed papers、没有 inbox、没有 wiki 时要有解释。
 - error：后端 503、LLM missing、Qdrant missing 时要能提示下一步。
 
 这些看似前端细节，其实是项目能否交付给普通学生使用的关键。
@@ -772,6 +863,8 @@ Agentic RAG：
 - HyDE。
 - Reflective retrieval。
 - Multi-step internal trace。
+- Loop Trace 的可观察性设计。
+- Research Memory Compression 的作用和边界。
 - Tool/runtime 和普通函数调用的边界。
 - 什么时候需要 Agent，什么时候普通 RAG 足够。
 
@@ -781,6 +874,7 @@ Agentic RAG：
 - Pydantic request/response model。
 - SSE streaming。
 - Next.js 产品页面。
+- Knowledge Builder 状态建模。
 - Local config 和 `.env` 安全。
 - SQLite/Qdrant 双存储。
 - graceful fallback。
@@ -808,7 +902,7 @@ Agentic RAG：
 - 画出 ingest pipeline。
 - 画出 QA request flow。
 - 解释 dense/sparse/RRF/rerank。
-- 解释 abstain 和 citation validation。
+- 解释 Loop Trace、Research Memory、abstain 和 citation validation。
 
 第三阶段：优化
 
@@ -855,9 +949,10 @@ Paper RAG Agent - 基于 DeerFlow 的 Agentic RAG 学术论文研读系统
 
 ```text
 Paper RAG Agent - Agentic RAG 学术论文问答系统
-- 基于 DeerFlow + FastAPI + Next.js 构建论文研读工作台，完成 QA、Papers、Wiki、Ingest、Feedback、Inbox、Subscription 等产品闭环。
+- 基于 DeerFlow + FastAPI + Next.js 构建论文研读工作台，完成 QA、Loop Trace、Research Memory、Knowledge Builder、Wiki、Feedback、Inbox、Subscription 等产品闭环。
 - 设计 BM25/FTS5 + Qdrant dense retrieval + RRF fusion + BGE rerank 的混合检索链路，提升论文术语、方法名和语义问题的召回稳定性。
 - 引入 query rewrite、HyDE、reflective retrieval 和三档 abstain 决策，将固定 RAG chain 扩展为可根据证据状态调整策略的 Agentic RAG pipeline。
+- 设计 Paper RAG 专属研究记忆压缩层，支持多轮研究上下文延续，同时保证最终答案仍回到 retrieved chunks 和 citation validation。
 - 实现 chunk 级 citation validation、伪引用清理和 no-evidence 拒答，降低无证据回答、错引和 hallucination 风险。
 - 建立 JSONL golden set、retrieval-only eval、QA no-judge eval、secret scan 和 smoke gate，用数据回归验证 RAG 优化效果。
 ```
@@ -865,9 +960,9 @@ Paper RAG Agent - Agentic RAG 学术论文问答系统
 如果简历空间有限，可以压缩成三条：
 
 ```text
-- 构建 DeerFlow 集成的论文 Agentic RAG 工作台，支持论文入库、QA、Wiki、反馈和订阅管理。
+- 构建 DeerFlow 集成的论文 Agentic RAG 工作台，支持论文入库、QA、Loop Trace、Knowledge Builder、Wiki、反馈和订阅管理。
 - 实现 BM25/FTS5 + Qdrant + RRF + BGE rerank 的混合检索，并加入 query rewrite、HyDE、reflect 和 abstain。
-- 设计 citation validation、no-evidence 拒答、golden set eval 和 smoke gate，提升问答可信度与可回归验证能力。
+- 设计 Research Memory、citation validation、no-evidence 拒答、golden set eval 和 smoke gate，提升问答可信度与可回归验证能力。
 ```
 
 ### 17.2 不同学生水平的简历版本
@@ -887,7 +982,7 @@ Paper RAG Agent - Agentic RAG 学术论文问答系统
 高级版，适合希望投递 AI 应用开发、Agent 工程、LLM 平台岗位的学生：
 
 ```text
-基于 DeerFlow runtime 封装 Agentic RAG 论文研读系统，设计 FastAPI adapter、同步/流式 QA、runtime readiness、工作台 UI、反馈闭环和评测 gate；重点解决混合检索召回、证据拒答、chunk 级引用校验、依赖降级和本地开箱即用问题。
+基于 DeerFlow runtime 封装 Loop-Engineered Agentic RAG 论文研读系统，设计 FastAPI adapter、同步/流式 QA、Loop Trace、Research Memory、Knowledge Builder、runtime readiness、反馈闭环和评测 gate；重点解决混合检索召回、证据拒答、chunk 级引用校验、记忆不污染证据链、依赖降级和本地开箱即用问题。
 ```
 
 更偏后端工程的版本：
@@ -899,13 +994,19 @@ Paper RAG Agent - Agentic RAG 学术论文问答系统
 更偏算法/LLM 应用的版本：
 
 ```text
-围绕论文问答场景实现 Agentic RAG pipeline：query rewrite 扩展召回意图，HyDE 构造假设答案增强语义检索，RRF 融合 dense/sparse 结果，reranker 精排候选证据，并通过 abstain 与 citation validation 控制 hallucination。
+围绕论文问答场景实现 Agentic RAG pipeline：query rewrite 扩展召回意图，HyDE 构造假设答案增强语义检索，RRF 融合 dense/sparse 结果，reranker 精排候选证据，通过 Loop Trace 暴露检索/反思/拒答状态，并用 abstain 与 citation validation 控制 hallucination。
 ```
 
 更偏产品闭环的版本：
 
 ```text
-将论文 RAG 从 CLI 能力封装为 DeerFlow 工作台产品，补齐 QA、Papers、Wiki、Ingest、Feedback、Inbox、Subscription 和 runtime status 页面状态，覆盖 loading、error、empty、success 和 retry 等关键交互。
+将论文 RAG 从 CLI 能力封装为 DeerFlow 工作台产品，补齐 QA、Loop Trace、Research Memory、Knowledge Builder、Wiki、Feedback、Inbox、Subscription 和 runtime status 页面状态，覆盖 loading、error、empty、success 和 retry 等关键交互。
+```
+
+更偏 Agent 工程设计的版本：
+
+```text
+设计 Paper RAG 专属 Research Memory Compression 层，将 recent turns、session summary 和 research memory 分离，用于多轮研究任务的 query context；最终答案仍强制回到 retrieved chunks 和 citation validation，避免记忆摘要污染证据链。
 ```
 
 ### 17.3 STAR 讲述模板
@@ -915,7 +1016,7 @@ Paper RAG Agent - Agentic RAG 学术论文问答系统
 ```text
 S - 场景：普通 LLM 很难可靠回答论文问题，因为答案需要来自论文证据，并且要能追溯引用。
 T - 任务：我希望构建一个能入库论文、检索证据、生成答案、校验引用、拒答无关问题的 Agentic RAG 工作台。
-A - 行动：我把系统拆成 DeerFlow 工作台、FastAPI adapter、paper_rag package 和 eval scripts；检索侧使用 dense/sparse hybrid + RRF + rerank，生成侧加入 rewrite、HyDE、reflect、abstain 和 citation validation。
+A - 行动：我把系统拆成 DeerFlow 工作台、FastAPI adapter、paper_rag package 和 eval scripts；检索侧使用 dense/sparse hybrid + RRF + rerank，生成侧加入 rewrite、HyDE、reflect、abstain 和 citation validation，并用 Loop Trace、Research Memory 和 Knowledge Builder 让运行过程可观察。
 R - 结果：系统可以通过本地 UI 完成论文 QA、Wiki、反馈和订阅管理，并用 golden set 和 smoke gate 回归验证核心链路。
 ```
 
@@ -929,6 +1030,8 @@ R - 结果：系统可以通过本地 UI 完成论文 QA、Wiki、反馈和订�
 | MRR | 正确证据排名是否靠前 | rerank 是否有效 |
 | Citation validity | 生成引用是否都来自 retrieved chunks | 是否控制伪引用 |
 | Abstain precision | 无证据问题是否拒答 | 是否减少 hallucination |
+| Memory compression turns | 多少轮后触发摘要 | 是否有长会话设计 |
+| Build stage success | fetch/parse/chunk/embed/index/wiki 是否完成 | 知识库搭建是否可解释 |
 | Latency | p50/p95 QA 延迟 | 工程性能意识 |
 | Coverage | golden set 问题类型分布 | 测试是否只覆盖 demo |
 
@@ -968,9 +1071,9 @@ R - 结果：系统可以通过本地 UI 完成论文 QA、Wiki、反馈和订�
 可以这样开场：
 
 ```text
-这个项目是一个面向学术论文阅读的 Agentic RAG 系统。我没有只做一个简单 chat demo，而是把它做成 DeerFlow 工作台里的完整产品：用户可以入库论文、查看论文列表、发起 QA、生成 Wiki、提交反馈和管理订阅。
+这个项目是一个面向学术论文阅读的 Loop-Engineered Agentic RAG 系统。我没有只做一个简单 chat demo，而是把它做成 DeerFlow 工作台里的完整产品：用户可以入库论文、查看 Knowledge Builder、发起 QA、查看 Loop Trace、使用 Research Memory 延续研究上下文、生成 Wiki、提交反馈和管理订阅。
 
-技术上，后端把 paper_rag 做成独立 Python package，再通过 FastAPI router 接到 DeerFlow gateway；检索侧使用 SQLite/FTS5 的 sparse retrieval 和 Qdrant 的 dense retrieval，经过 RRF fusion 和 BGE rerank 得到证据；生成侧加入 query rewrite、HyDE、reflective retrieval、abstain 和 citation validation，避免无证据回答和伪引用。
+技术上，后端把 paper_rag 做成独立 Python package，再通过 FastAPI router 接到 DeerFlow gateway；检索侧使用 SQLite/FTS5 的 sparse retrieval 和 Qdrant 的 dense retrieval，经过 RRF fusion 和 BGE rerank 得到证据；生成侧加入 research memory context、query rewrite、HyDE、reflective retrieval、abstain 和 citation validation，避免无证据回答和伪引用。
 
 工程上，我补了 runtime status、smoke test、secret scan 和 golden set eval。这样项目不是只在一个问题上能演示，而是可以通过测试和评测证明核心链路可复现。
 ```
@@ -981,10 +1084,11 @@ R - 结果：系统可以通过本地 UI 完成论文 QA、Wiki、反馈和订�
 |---|---|---|
 | 架构 | 是套模板还是理解边界 | DeerFlow host, FastAPI adapter, paper_rag package, eval layer |
 | RAG | 是否懂检索质量 | chunk, dense/sparse, RRF, rerank, query rewrite, HyDE |
-| Agentic | 是否真有 Agent 决策 | intent, rewrite, retrieve, reflect, abstain, trace |
+| Agentic | 是否真有 Agent 决策 | intent, rewrite, retrieve, reflect, abstain, Loop Trace |
+| Memory | 是否懂长会话上下文 | recent turns, session summary, query context only, not evidence |
 | 可信度 | 是否控制 hallucination | grounding, citation validation, no-evidence, suspicious citation |
 | 工程 | 是否能交付 | config, status, fallback, tests, smoke, secret scan |
-| 产品 | 是否只是 API | QA, Papers, Wiki, Ingest, Feedback, Inbox, Subscription |
+| 产品 | 是否只是 API | QA, Knowledge Builder, Wiki, Ingest, Feedback, Inbox, Subscription |
 
 ### 18.3 Agentic RAG 类问题
 
@@ -993,7 +1097,7 @@ R - 结果：系统可以通过本地 UI 完成论文 QA、Wiki、反馈和订�
 专业回答：
 
 ```text
-普通 RAG 通常是固定链路：用户问题 -> 检索 -> 拼 prompt -> 生成。这个项目里的 Agentic 体现在链路会根据问题和证据状态做决策：先判断是否属于论文问答，再做 query rewrite 和 HyDE 扩展召回，检索后根据证据强弱决定是否继续 reflect/retrieve，最后通过 abstain 决定回答还是拒答。它不是让模型自由调用工具，而是把可控的决策点工程化。
+普通 RAG 通常是固定链路：用户问题 -> 检索 -> 拼 prompt -> 生成。这个项目里的 Agentic 体现在链路会根据问题和证据状态做决策：先结合 Research Memory 理解研究上下文，再判断是否属于论文问答，随后做 query rewrite 和 HyDE 扩展召回，检索后根据证据强弱决定是否继续 reflect/retrieve，最后通过 abstain 决定回答还是拒答。它不是让模型自由调用工具，而是把可控的决策点工程化，并通过 Loop Trace 暴露出来。
 ```
 
 可以补一句权衡：
@@ -1016,6 +1120,14 @@ R - 结果：系统可以通过本地 UI 完成论文 QA、Wiki、反馈和订�
 
 ```text
 因为这个项目的核心不是让 Agent 自由调用工具，而是要让论文 QA 链路可控、可调试、可评测。自由 Agent 的轨迹可能每次不同，难以做 citation validation 和 golden set 回归。这里把关键步骤显式拆出来，能记录 trace，也能单独评估 retrieval、rerank、abstain 和 generation。
+```
+
+问：你加了 Research Memory，为什么还要每次重新检索？
+
+答：
+
+```text
+Research Memory 解决的是长会话里的研究连续性，比如用户正在比较哪些论文、已经确认过哪些方向、接下来想追问什么。但 memory summary 本身不是原始证据，压缩过程也可能丢细节，所以不能直接当答案来源。项目里 memory 只辅助 query rewrite 和 paper scope，最终回答仍然必须重新检索 chunks，并且 citation 必须来自本轮 retrieved set。
 ```
 
 ### 18.4 Retrieval 类问题
@@ -1236,7 +1348,7 @@ Agent 就是能自己思考。
 2. 启动 backend 和 frontend。
 3. 打开 `/workspace/paper-rag`。
 4. 在 Status 里确认 `llm-ready; embed-ok; qdrant-ok`。
-5. Ingest 一篇论文或展示已有 Papers。
+5. Ingest 一篇论文或展示 Knowledge Builder 中已有 indexed papers。
 6. 提问一个论文相关问题，讲 citations。
 7. 提问一个无关问题，比如天气，展示 no-evidence。
 8. 生成 Wiki，说明知识沉淀。
@@ -1256,7 +1368,7 @@ What is the weather tomorrow in Shanghai?
 
 打开 UI 时：
 
-> 这个页面不是普通聊天页，它把论文 RAG 做成了工作台：左边是问题和运行状态，后面还有 papers、wiki、ingest、feedback、inbox 和 subscriptions。它展示的是一个产品闭环，不只是一个模型 API。
+> 这个页面不是普通聊天页，它把论文 RAG 做成了工作台：左边是问题和运行状态，后面还有 Knowledge Builder、wiki、ingest、feedback、inbox 和 subscriptions。它展示的是一个产品闭环，不只是一个模型 API。
 
 展示 citations 时：
 
@@ -1300,7 +1412,7 @@ What is the weather tomorrow in Shanghai?
 | 本地运行 | 20 | backend/frontend/status/QA 全部跑通 |
 | 数据入库 | 15 | 能 ingest 新论文并解释 chunk 和 index |
 | RAG 理解 | 20 | 能解释 dense/sparse/RRF/rerank/abstain |
-| 产品演示 | 15 | QA、Papers、Wiki、Feedback 至少四个流程可演示 |
+| 产品演示 | 15 | QA、Knowledge Builder、Wiki、Feedback 至少四个流程可演示 |
 | 评测意识 | 15 | 新增 golden set 并跑 eval |
 | 面试表达 | 15 | 能回答 5 个核心追问 |
 
@@ -1319,7 +1431,7 @@ What is the weather tomorrow in Shanghai?
 
 - 真实 RAG runtime。
 - DeerFlow gateway 和 workspace UI。
-- QA/Papers/Wiki/Ingest/Feedback/Inbox/Subscription 闭环。
+- QA/Knowledge Builder/Wiki/Ingest/Feedback/Inbox/Subscription 闭环。
 - Golden set 和基础 RAG 优化。
 - 本地安全和 smoke gate。
 
@@ -1398,7 +1510,7 @@ What is the weather tomorrow in Shanghai?
 - 再讲检索链路：query rewrite -> dense/sparse -> RRF -> rerank -> diversify。
 - 再讲 Agentic：intent、reflect loop、abstain、trace。
 - 再讲可靠性：no-evidence、citation validation、fallback、secret scan。
-- 再讲产品闭环：QA、Papers、Wiki、Ingest、Feedback、Inbox、Subscriptions。
+- 再讲产品闭环：QA、Knowledge Builder、Wiki、Ingest、Feedback、Inbox、Subscriptions。
 - 最后讲评测：golden set、no-judge metrics、hard cases 和后续优化。
 
 ### 22.2 交付前自检清单

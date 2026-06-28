@@ -18,6 +18,8 @@ Output:
 
 from __future__ import annotations
 
+from time import perf_counter
+
 from .. import config as cfg
 from ..retrieve.format import format_evidence
 from ..retrieve.pipeline import retrieve_round as _retrieve_round
@@ -301,6 +303,93 @@ def _persist_history(
         log.warning(f"history.append failed (non-fatal): {e}")
 
 
+def _maybe_rewrite_with_research_memory(
+    question: str,
+    conversation_id: str | None,
+) -> tuple[str, dict]:
+    """Use compressed research memory as query context, never as evidence."""
+    if not conversation_id:
+        return question, {
+            "conversation_id": conversation_id,
+            "memory_role": "query_context_only_not_evidence",
+            "has_compressed_memory": False,
+        }
+    try:
+        from . import research_memory
+
+        rewritten, memory = research_memory.rewrite_with_memory(question, conversation_id)
+        if rewritten != question:
+            log.info(f"research memory rewrite: {question!r} -> {rewritten!r}")
+        return rewritten, memory
+    except Exception as e:
+        log.warning(f"research memory rewrite failed (non-fatal): {e}")
+        return question, {
+            "conversation_id": conversation_id,
+            "memory_role": "query_context_only_not_evidence",
+            "has_compressed_memory": False,
+            "error": type(e).__name__,
+        }
+
+
+def _attach_loop_trace(out: dict, *, latency_ms: int) -> None:
+    """Normalize existing debug trace into a product-readable loop trace."""
+    trace = out.setdefault("trace", {})
+    intent_cfg = trace.get("intent") or {}
+    intent_name = intent_cfg.get("intent") if isinstance(intent_cfg, dict) else str(intent_cfg)
+    iterations = trace.get("iters") or []
+    chunks = out.get("chunks") or []
+    trace["loop"] = {
+        "intent": intent_name or "unknown",
+        "intent_config": intent_cfg,
+        "iterations": iterations,
+        "stopped_by": trace.get("stopped_by", "unknown"),
+        "abstain": trace.get("abstain") or {},
+        "citations": out.get("citations", []),
+        "n_chunks": len(chunks),
+        "latency_ms": latency_ms,
+        "cost": {
+            "llm_calls": None,
+            "tokens": None,
+            "note": "placeholder; provider usage accounting is not wired in v1",
+        },
+    }
+
+
+def _persist_research_memory(
+    conversation_id: str | None,
+    question: str,
+    out: dict,
+) -> dict:
+    if not conversation_id:
+        return {
+            "conversation_id": conversation_id,
+            "memory_role": "query_context_only_not_evidence",
+            "has_compressed_memory": False,
+        }
+    try:
+        from . import research_memory
+
+        trace_for_memory = {
+            **(out.get("trace") or {}),
+            "chunks": out.get("chunks") or [],
+        }
+        return research_memory.append(
+            conversation_id,
+            question,
+            out.get("answer", ""),
+            out.get("citations", []),
+            trace=trace_for_memory,
+        )
+    except Exception as e:
+        log.warning(f"research_memory.append failed (non-fatal): {e}")
+        return {
+            "conversation_id": conversation_id,
+            "memory_role": "query_context_only_not_evidence",
+            "has_compressed_memory": False,
+            "error": type(e).__name__,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Public entrypoint
 # ---------------------------------------------------------------------------
@@ -315,7 +404,10 @@ def answer(
     from ..observability import histogram, new_trace_id
 
     trace_id = new_trace_id()
+    original_question = question
+    question, memory_before = _maybe_rewrite_with_research_memory(question, conversation_id)
     timer = histogram("paper_rag_qa_latency_seconds")
+    started = perf_counter()
     with timer.time():
         out = _answer_impl(
             question,
@@ -323,7 +415,12 @@ def answer(
             trace_id=trace_id,
             conversation_id=conversation_id,
         )
-    _persist_history(conversation_id, question, out)
+    latency_ms = int((perf_counter() - started) * 1000)
+    _attach_loop_trace(out, latency_ms=latency_ms)
+    memory_after = _persist_research_memory(conversation_id, original_question, out)
+    out.setdefault("trace", {})["memory_before"] = memory_before
+    out.setdefault("trace", {})["memory"] = memory_after
+    _persist_history(conversation_id, original_question, out)
     return out
 
 
