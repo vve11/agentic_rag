@@ -36,6 +36,9 @@ tests/eval/qa_set.private.jsonl
 tests/eval/qa_set.jsonl
 tests/eval/hard_cases.jsonl
 
+# ── marketing / sales collateral (local-only, do not publish with repo) ──────
+marketing/
+
 # ── Python build / cache ─────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
