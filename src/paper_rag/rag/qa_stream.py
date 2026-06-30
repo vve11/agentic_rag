@@ -31,6 +31,7 @@ from .citation_check import (
     strip_suspicious_citation_forms,
     validate_citations,
 )
+from .evidence_select import select_evidence
 from .intent_classifier import classify
 from .query_rewrite import rewrite  # re-exported so tests can monkey-patch qa_stream.rewrite
 from .reflect import reflect
@@ -128,13 +129,21 @@ def stream_answer(question: str, *, paper_ids: list[str] | None = None) -> Gener
         }}
         return
 
+    evidence_chunks, evidence_selection = select_evidence(
+        question,
+        final_chunks,
+        intent=intent_cfg.get("intent"),
+    )
+
     # Stream the answer token by token.
     allowed_citations = " ".join(
-        f"[chunk:{ch['chunk_id']}]" for ch in final_chunks if ch.get("chunk_id")
+        f"[chunk:{ch['chunk_id']}]" for ch in evidence_chunks if ch.get("chunk_id")
     )
     user = (
-        f"Question: {question}\n\nEvidence:\n{format_evidence(final_chunks)}\n\n"
+        f"Question: {question}\n\nEvidence:\n{format_evidence(evidence_chunks)}\n\n"
         f"Allowed citation tokens: {allowed_citations}\n\n"
+        "Use at most 2 citations. Choose the chunks that most directly support "
+        "the answer; do not cite background chunks just because they are available.\n\n"
         "Answer (copy citation tokens EXACTLY from the allowed list; never invent "
         "[chunk:1], [chunk:2], [1], or (Author 2020) citations; ≤200 words):"
     )
@@ -149,7 +158,7 @@ def stream_answer(question: str, *, paper_ids: list[str] | None = None) -> Gener
         yield {"event": "error", "data": {"message": f"chat stream failed: {e}"}}
         return
 
-    cleaned, valid = validate_citations(full, final_chunks)
+    cleaned, valid = validate_citations(full, evidence_chunks)
     suspicious = detect_suspicious_citations(cleaned)
     if suspicious["count"]:
         cleaned = strip_suspicious_citation_forms(cleaned)
@@ -160,6 +169,8 @@ def stream_answer(question: str, *, paper_ids: list[str] | None = None) -> Gener
         "suspicious": suspicious,
         "abstain": abstain_result,
         "n_chunks": len(final_chunks),
+        "evidence_chunks": evidence_chunks,
+        "evidence_selection": evidence_selection,
         "paper_ids": paper_ids_used,
     }}
 

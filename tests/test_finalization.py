@@ -103,3 +103,54 @@ def test_stream_event_shape_when_no_evidence():
         assert events[-1]["data"].get("degraded") == "no_chunks"
     finally:
         qa_stream._retrieve_round, qa_stream.classify, qa_stream.rewrite = saved
+
+
+def test_stream_answer_uses_selected_evidence_for_done_payload():
+    from paper_rag.rag import qa_stream
+
+    captured = {"prompt": ""}
+
+    def fake_retrieve(q, p, k):
+        return (
+            [
+                {
+                    "chunk_id": f"{i:010x}",
+                    "paper_id": "paper-a",
+                    "text": f"direct evidence {i}",
+                    "score_rerank": 0.9 - i * 0.01,
+                }
+                for i in range(5)
+            ],
+            {"dense_queries": [q], "bm25_query": q},
+        )
+
+    def fake_stream(system, user):
+        captured["prompt"] = user
+        yield "answer [chunk:0000000000] [chunk:0000000004]"
+
+    saved = (
+        qa_stream._retrieve_round,
+        qa_stream.classify,
+        qa_stream.rewrite,
+        qa_stream._stream_chat,
+    )
+    qa_stream._retrieve_round = fake_retrieve
+    qa_stream.classify = lambda q: {"intent": "factual", "top_k": 5, "max_iter": 1, "rrf_k": 60}
+    qa_stream.rewrite = lambda q: {"dense_queries": [q], "bm25_query": q, "raw": {}}
+    qa_stream._stream_chat = fake_stream
+    try:
+        events = list(qa_stream.stream_answer("Q", paper_ids=None))
+        done = events[-1]["data"]
+        assert [c["chunk_id"] for c in done["evidence_chunks"]] == [
+            "0000000000",
+            "0000000001",
+        ]
+        assert done["citations"] == ["0000000000"]
+        assert "[chunk:0000000004]" not in captured["prompt"]
+    finally:
+        (
+            qa_stream._retrieve_round,
+            qa_stream.classify,
+            qa_stream.rewrite,
+            qa_stream._stream_chat,
+        ) = saved

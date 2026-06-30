@@ -30,6 +30,7 @@ from .citation_check import (
     strip_suspicious_citation_forms,
     validate_citations,
 )
+from .evidence_select import select_evidence
 from .intent_classifier import classify
 from .llm import chat
 from .reflect import reflect
@@ -236,6 +237,8 @@ def _build_user_prompt(question: str, final_chunks: list[dict], abstain_result: 
     user = (
         f"Question: {question}\n\nEvidence:\n{evidence}\n\n"
         f"Allowed citation tokens: {allowed_citations}\n\n"
+        "Use at most 2 citations. Choose the chunks that most directly support "
+        "the answer; do not cite background chunks just because they are available.\n\n"
         "Answer (copy citation tokens EXACTLY from the allowed list; never invent "
         "[chunk:1], [chunk:2], [1], or (Author 2020) citations):"
     )
@@ -251,6 +254,8 @@ def _chat_failed_response(
     trace: list[dict],
     stopped: str,
     final_chunks: list[dict],
+    evidence_chunks: list[dict],
+    evidence_selection: dict,
     trace_id: str,
     err: Exception,
 ) -> dict:
@@ -265,12 +270,14 @@ def _chat_failed_response(
         "answer": "(LLM unavailable; see chunks for evidence)",
         "citations": [],
         "chunks": final_chunks,
+        "evidence_chunks": evidence_chunks,
         "suspicious_citations": _EMPTY_SUSPICIOUS,
         "trace": {
             "intent": intent_cfg,
             "iters": trace,
             "stopped_by": stopped,
             "degraded": f"chat_error:{type(err).__name__}",
+            "evidence_selection": evidence_selection,
             "trace_id": trace_id,
         },
     }
@@ -338,6 +345,7 @@ def _attach_loop_trace(out: dict, *, latency_ms: int) -> None:
     intent_name = intent_cfg.get("intent") if isinstance(intent_cfg, dict) else str(intent_cfg)
     iterations = trace.get("iters") or []
     chunks = out.get("chunks") or []
+    evidence_chunks = out.get("evidence_chunks") or chunks
     trace["loop"] = {
         "intent": intent_name or "unknown",
         "intent_config": intent_cfg,
@@ -346,6 +354,7 @@ def _attach_loop_trace(out: dict, *, latency_ms: int) -> None:
         "abstain": trace.get("abstain") or {},
         "citations": out.get("citations", []),
         "n_chunks": len(chunks),
+        "n_evidence_chunks": len(evidence_chunks),
         "latency_ms": latency_ms,
         "cost": {
             "llm_calls": None,
@@ -467,8 +476,13 @@ def _answer_impl(
             intent_cfg, trace, abstain_result, abstain_cfg, final_chunks, trace_id
         )
 
-    # Stage 6 — LLM call + citation cleanup.
-    user = _build_user_prompt(question, final_chunks, abstain_result)
+    # Stage 6 — deterministic evidence selection + LLM call + citation cleanup.
+    evidence_chunks, evidence_selection = select_evidence(
+        question,
+        final_chunks,
+        intent=intent_cfg.get("intent"),
+    )
+    user = _build_user_prompt(question, evidence_chunks, abstain_result)
     try:
         raw = chat(
             [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
@@ -477,9 +491,18 @@ def _answer_impl(
         )
     except Exception as e:
         log.warning(f"chat failed, returning evidence-only: {e}")
-        return _chat_failed_response(intent_cfg, trace, stopped, final_chunks, trace_id, e)
+        return _chat_failed_response(
+            intent_cfg,
+            trace,
+            stopped,
+            final_chunks,
+            evidence_chunks,
+            evidence_selection,
+            trace_id,
+            e,
+        )
 
-    cleaned, valid = validate_citations(raw, final_chunks)
+    cleaned, valid = validate_citations(raw, evidence_chunks)
     suspicious = detect_suspicious_citations(cleaned)
     if suspicious["count"]:
         log.warning(f"suspicious citations detected: {suspicious}")
@@ -497,12 +520,14 @@ def _answer_impl(
         "answer": cleaned,
         "citations": valid,
         "chunks": final_chunks,
+        "evidence_chunks": evidence_chunks,
         "suspicious_citations": suspicious,
         "trace": {
             "intent": intent_cfg,
             "iters": trace,
             "stopped_by": stopped,
             "abstain": abstain_result,
+            "evidence_selection": evidence_selection,
             "trace_id": trace_id,
         },
     }

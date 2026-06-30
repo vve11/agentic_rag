@@ -43,18 +43,40 @@ def test_mrr():
     assert mrr(["x"], ["a"]) == 0.0
 
 
+def test_ndcg_at_k_binary_relevance():
+    from eval.metrics import ndcg_at_k
+
+    assert ndcg_at_k(["a", "b", "c"], ["a", "c"], k=3) == 0.92
+    assert ndcg_at_k(["x", "a"], ["a"], k=2) == 0.631
+    assert ndcg_at_k(["x"], ["a"], k=5) == 0.0
+    assert ndcg_at_k(["a"], [], k=5) is None
+
+
 def test_citation_precision_and_existence():
-    from eval.metrics import citation_existence_rate, citation_precision
+    from eval.metrics import (
+        citation_existence_rate,
+        citation_paper_precision,
+        citation_precision,
+        citation_recall,
+    )
 
     # GT not provided -> None
     assert citation_precision(["c1"], []) is None
+    assert citation_recall(["c1"], []) is None
+    assert citation_precision([], ["c1"]) is None
     # GT provided
     assert citation_precision(["c1", "c2"], ["c1"]) == 0.5
+    assert citation_recall(["c1"], ["c1", "c2"]) == 0.5
+    assert citation_recall([], ["c1", "c2"]) == 0.0
     # existence: against retrieved set
     assert citation_existence_rate(["c1", "c2"], ["c1", "c2", "c3"]) == 1.0
     assert citation_existence_rate(["c1", "ghost"], ["c1"]) == 0.5
     # empty citations -> 1.0 (no fakes)
     assert citation_existence_rate([], ["c1"]) == 1.0
+    # paper-level citation precision distinguishes wrong paper from right-paper/wrong-chunk.
+    assert citation_paper_precision(["paper-a", "paper-b"], ["paper-a"]) == 0.5
+    assert citation_paper_precision([], ["paper-a"]) == 1.0
+    assert citation_paper_precision(["paper-a"], []) is None
 
 
 def test_must_contain_and_violations():

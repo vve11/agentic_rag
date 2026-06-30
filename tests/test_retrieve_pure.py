@@ -133,3 +133,52 @@ def test_query_rewrite_heuristic_expands_retrieval_metric_query():
     )
 
     assert any("RAG retrieval evaluation metrics" in v for v in variants)
+
+
+def test_query_rewrite_heuristic_expands_rag_sequence_and_optimization_terms():
+    from paper_rag.rag.query_rewrite import _heuristic_variants
+
+    seq_variants = _heuristic_variants(
+        "What is the difference between RAG-Sequence and RAG-Token?"
+    )
+    opt_variants = _heuristic_variants(
+        "What pre-retrieval and post-retrieval optimizations are discussed?"
+    )
+
+    assert any("same retrieved document" in v for v in seq_variants)
+    assert any("different retrieved documents" in v for v in seq_variants)
+    assert any("pre-retrieval post-retrieval optimization" in v for v in opt_variants)
+
+
+def test_query_rewrite_can_force_local_fallback(monkeypatch):
+    from types import SimpleNamespace
+
+    from paper_rag.rag import query_rewrite
+
+    fake_config = SimpleNamespace(
+        rag=SimpleNamespace(enable_hyde=True),
+        llm=SimpleNamespace(
+            chat_model="deepseek-chat",
+            api_key="test-key",
+            base_url="https://api.example.test",
+            temperatures=SimpleNamespace(rewrite=0.3),
+        ),
+    )
+
+    monkeypatch.setenv("PAPER_RAG_FORCE_LOCAL_REWRITE", "1")
+    monkeypatch.setattr(query_rewrite.cfg, "load", lambda: fake_config)
+    calls = []
+
+    def fake_chat(*args, **kwargs):
+        calls.append((args, kwargs))
+        return '{"variants": ["online variant"], "keywords": "online", "hyde": "online"}'
+
+    monkeypatch.setattr(query_rewrite, "chat", fake_chat)
+
+    out = query_rewrite.rewrite(
+        "Why is recall@k more important than precision@k for retrieval?"
+    )
+
+    assert out["bm25_query"].startswith("Why is recall@k")
+    assert any("RAG retrieval evaluation metrics" in q for q in out["dense_queries"])
+    assert calls == []

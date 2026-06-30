@@ -1,17 +1,27 @@
 # paper_rag 评测说明
 
-## 何时用什么模式
+这个目录是课程/面试级 RAG Eval Harness。它不是只跑一个 demo
+question，而是把“检索是否找到证据、生成是否绑定证据、无证据是否拒答”
+拆开评估。
 
 ## 评测集分层
 
-- `qa_set.golden.jsonl`：严格回归集，只放当前论文证据能支撑的问题。优化 RAG、做 release gate、比较 baseline 时优先跑它。
-- `qa_set.real.jsonl`：探索/压力测试集，保留更宽的问题形态，也可能包含需要重新标注或不适合做 hard gate 的题。用来发现新问题，不直接当成唯一验收线。
+- `qa_set.golden.jsonl`：60 条稳定回归集，45 条正例带 chunk-level 标注，15 条 no-evidence。用于 release gate、检索改动回归、课程演示。
+- `qa_set.real.jsonl`：40 条 real/stress 集，覆盖更宽的问题形态、模糊问题和压力样本。用于发现问题，不直接作为唯一 hard gate。
+- `qa_set.example.jsonl`：最小模板，适合新环境 smoke。
 
-| 阶段 | 命令 | 评什么 | 需要 |
+## 三档运行模式
+
+| 模式 | 命令 | 评什么 | 是否需要 chat API |
 |---|---|---|---|
-| 没装 LLM、刚入完库 | `--retrieval-only` | 召回@k、MRR | Qdrant + bge-m3 + 已 ingest 的论文 |
-| 想看完整 RAG 但不花 LLM-judge 钱 | `--no-judge` | 上面 + 引用准确率 + must_contain | 加上 LLM API |
-| 完整端到端 | （默认）| 上面 + judge_faithful/complete/concise | 加上 gold_answer |
+| Retrieval-only | `make eval-golden` | paper/chunk recall、MRR、precision、nDCG、FPR、latency | 不需要 |
+| QA no-judge | `make eval-golden-qa` | 上面 + citation existence/precision/recall、must-contain、no-answer | 需要，用于答案生成 |
+| Citation audit | `make eval-citation-audit` | 逐条解释 citation 命中、错引论文、同论文错 chunk | 需要，用于答案生成 |
+| Judge | `python tests/eval/run_eval.py --file ...` | 上面 + faithful/complete/concise LLM judge | 需要，手动质量报告 |
+
+`make eval-golden` 会设置 `PAPER_RAG_FORCE_LOCAL_REWRITE=1`，即使
+`.env` 里配置了 DeepSeek/OpenAI，也不会调用 chat completion。它只比较
+retrieval 输出的 paper/chunk id 和 golden label。
 
 ## 评测集 schema
 
@@ -21,9 +31,12 @@
 {
   "qid": "q001",
   "question": "...",
+  "category": "factual|method|evaluation|compare|ambiguous|no_evidence",
   "intent": "factual|reasoning|explore",
-  "relevant_paper_ids": ["arxiv:..."],   // paper-level GT，必填
-  "relevant_chunk_ids": ["..."],          // chunk-level GT，可选（有就能算 cite_precision）
+  "relevant_paper_ids": ["arxiv:..."],   // paper-level GT；no-evidence 时为空
+  "relevant_chunk_ids": ["..."],          // retrieval GT；用于 chunk recall/MRR
+  "citation_chunk_ids": ["..."],          // citation GT；为空时回退到 relevant_chunk_ids
+  "irrelevant_paper_ids": ["arxiv:..."],  // 明确危险误召回；只统计 first evidence 之前的泄漏
   "must_contain": ["关键术语"],            // 答案必须出现的子串
   "must_not_contain": ["错误数字"],        // 答案不能出现的子串
   "gold_answer": "...",                   // 给 LLM-judge 用，可选
@@ -31,19 +44,75 @@
 }
 ```
 
+无 chunk label 时，`chunk_recall`、`cite_precision`、`cite_recall` 会显示
+为 skipped/null，不再聚合成误导性的 `0.0`。没有任何 citation 时，
+`cite_precision` 也会 skipped，漏引由 `cite_recall` 暴露。
+
+## 指标定义
+
+| 指标 | 含义 |
+|---|---|
+| `positive_paper_recall@k` | 正例里，目标论文是否出现在 top-k |
+| `positive_paper_mrr` | 目标论文越靠前越好，第一名为 1.0 |
+| `positive_chunk_recall@k` | 标注过的证据 chunk 是否进入 top-k |
+| `paper/chunk_precision@k` | top-k 中有多少是标注相关 id |
+| `paper/chunk_ndcg@k` | 相关结果排得越靠前越好 |
+| `fpr@k` | 明确标注的危险误召回是否出现在第一个正确 evidence 之前 |
+| `cite_existence` | 生成答案里的 citation id 是否都来自本轮 selected evidence chunks |
+| `cite_precision` | citation 是否命中 `citation_chunk_ids` |
+| `cite_paper_precision` | citation 是否至少来自相关论文，用于区分错论文和同论文错 chunk |
+| `cite_recall` | 标注过的 citation chunks 有多少被答案引用 |
+| `no_answer_success_rate` | no-evidence 问题是否拒答或明确证据不足 |
+
+## Strict gate
+
+阈值在 `gates.strict.json`：
+
+```text
+positive_paper_recall@10 >= 0.95
+positive_chunk_recall@10 >= 0.75
+positive_paper_mrr       >= 0.85
+fpr@10                   <= 0.05
+errors                   == 0
+```
+
+最新本地 baseline：`positive_paper_recall@10=0.989`，
+`positive_chunk_recall@10=0.811`，`positive_paper_mrr=0.989`，
+`fpr@10=0.000`。
+
+最新 QA no-judge baseline：`cite_existence=1.000`，
+`cite_precision=0.867`，`cite_paper_precision=0.922`，
+`must_contain=0.933`，`no_answer_success_rate=1.000`，
+`no_answer_abstain_rate=0.933`。
+
+最新 ablation：
+
+| Strategy | Positive paper recall@10 | Positive paper MRR | Positive chunk recall@10 | Avg latency |
+|---|---:|---:|---:|---:|
+| dense_only | 0.922 | 0.974 | 0.767 | 198.22 ms |
+| sparse_only | 0.956 | 0.782 | 0.567 | 2.19 ms |
+| hybrid_rrf | 0.944 | 0.959 | 0.811 | 152.66 ms |
+| hybrid_rerank_no_rewrite | 0.989 | 0.959 | 0.733 | 156.95 ms |
+| hybrid_rerank_rewrite | 0.989 | 0.989 | 0.811 | 220.52 ms |
+
 ## 标注流程建议（成本最低）
 
-1. 选 5~10 篇你最熟悉的论文，先 `python scripts/ingest_one.py` 入库
-2. 每篇出 3~5 个问题，覆盖 factual / reasoning，先**只填 paper_id 和 must_contain**
-3. 跑 `--retrieval-only` 看 paper_recall@k；recall 上得去再做下一步
-4. 加 1~2 个 explore 问题（多文献综合）
-5. 重要的题再补 gold_answer，跑完整 judge
+1. 选 5~10 篇你最熟悉的论文，先 ingest 入库。
+2. 每篇出 5~8 个问题，覆盖 factual、method、evaluation、compare。
+3. 先填 `relevant_paper_ids`，跑 retrieval-only 看 paper recall。
+4. 对核心问题补 1~2 个 `relevant_chunk_ids`，再看 chunk recall。
+5. 加 no-evidence、错误前提、时间敏感问题，验证拒答。
+6. 最后再补 `gold_answer` 和 `must_contain`，跑 QA/no-judge 或 judge。
 
-**先跑 retrieval-only，把检索调到 ≥0.7 再上完整 RAG**——不然评测的全是 LLM 抖动而不是检索能力。日常优化建议先跑：
+**先跑 retrieval-only，再跑 QA**。如果检索本身没找到证据，生成结果再漂亮也
+只是幻觉风险。
 
 ```bash
-python tests/eval/run_eval.py --file tests/eval/qa_set.golden.jsonl --retrieval-only --top-k 10
-python tests/eval/run_eval.py --file tests/eval/qa_set.golden.jsonl --no-judge --top-k 10
+make eval-golden
+make eval-report
+make eval-citation-audit
+make eval-ablation
+make eval-golden-qa
 ```
 
 ## 输出
@@ -51,14 +120,9 @@ python tests/eval/run_eval.py --file tests/eval/qa_set.golden.jsonl --no-judge -
 - 每条一行简报（recall/mrr/cites/must_contain/cite_p）
 - 末尾 aggregate 表
 - 完整 JSON 落到 `data/index/eval_runs/<timestamp>.json`，方便 diff 历次实验
-
-## 验收线（阶段 2.5 目标）
-
-- `paper_recall@k` ≥ 0.7（检索能拿到对的论文）
-- `cite_existence` = 1.0（不应该有伪造引用，qa_agentic 已带校验）
-- `cite_precision` ≥ 0.6（如有 chunk-level GT）
-- `must_contain` ≥ 0.8（关键词覆盖）
-- `judge_faithful` ≥ 4.0（如有 gold_answer）
+- `make eval-report` 额外生成 `docs/RAG_EVAL_REPORT.md`
+- `make eval-citation-audit` 额外生成 `docs/RAG_CITATION_AUDIT.md`
+- `make eval-ablation` 输出不同检索策略对比 JSON
 
 ## 加大评测规模时
 

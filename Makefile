@@ -10,7 +10,7 @@ DEERFLOW_FRONTEND_PORT ?= 3000
 .PHONY: help install install-dev lint format test test-pytest smoke secret-scan course-pdf mineru-doctor mineru-download-layout rebuild-index validate-metadata \
         qdrant-up qdrant-down init-store ingest ask eval clean clean-data \
         docker-build docker-build-bake docker-up-proactive docker-cli docker-shell \
-        calibrate-abstain hard-cases eval-golden eval-golden-qa verify-p0 deerflow-backend deerflow-frontend deerflow-smoke deerflow-rebuild-index deerflow-paper-rag-test
+        calibrate-abstain hard-cases eval-golden eval-golden-qa eval-report eval-citation-audit eval-ablation verify-p0 deerflow-backend deerflow-frontend deerflow-smoke deerflow-rebuild-index deerflow-paper-rag-test
 
 help:
 	@echo "Targets:"
@@ -36,6 +36,9 @@ help:
 	@echo "  eval           Run retrieval-only eval on example set"
 	@echo "  eval-golden    Run retrieval-only eval on the strict golden set"
 	@echo "  eval-golden-qa Run full QA no-judge eval on the strict golden set"
+	@echo "  eval-report    Run golden retrieval eval and write Markdown report"
+	@echo "  eval-citation-audit Run QA eval and write citation audit Markdown"
+	@echo "  eval-ablation  Compare retrieval strategies on the golden set"
 	@echo "  verify-p0      Run lint, focused tests, smoke, secret scan, golden retrieval"
 	@echo "  calibrate-abstain  Re-run threshold calibration (offline mode)"
 	@echo "  hard-cases     Collect hard cases from feedback events"
@@ -148,24 +151,61 @@ eval:
 eval-golden:
 	set -a; [ ! -f .env ] || . ./.env; set +a; \
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
+	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
 	    $(DEERFLOW_BACKEND_PY) tests/eval/run_eval.py \
 	        --file tests/eval/qa_set.golden.jsonl \
 	        --retrieval-only \
-	        --top-k $${EVAL_TOP_K:-10}
+	        --top-k $${EVAL_TOP_K:-10} \
+	        --gate tests/eval/gates.strict.json
 
 eval-golden-qa:
 	set -a; [ ! -f .env ] || . ./.env; set +a; \
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
+	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
 	    $(DEERFLOW_BACKEND_PY) tests/eval/run_eval.py \
 	        --file tests/eval/qa_set.golden.jsonl \
 	        --no-judge \
-	        --top-k $${EVAL_TOP_K:-10}
+	        --top-k $${EVAL_TOP_K:-10} \
+	        --gate tests/eval/gates.strict.json
+
+eval-report:
+	set -a; [ ! -f .env ] || . ./.env; set +a; \
+	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
+	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
+	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
+	    $(DEERFLOW_BACKEND_PY) tests/eval/run_eval.py \
+	        --file tests/eval/qa_set.golden.jsonl \
+	        --retrieval-only \
+	        --top-k $${EVAL_TOP_K:-10} \
+	        --gate tests/eval/gates.strict.json \
+	        --report-md $${EVAL_REPORT_MD:-docs/RAG_EVAL_REPORT.md}
+
+eval-citation-audit:
+	set -a; [ ! -f .env ] || . ./.env; set +a; \
+	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
+	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
+	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
+	    $(DEERFLOW_BACKEND_PY) tests/eval/run_eval.py \
+	        --file tests/eval/qa_set.golden.jsonl \
+	        --no-judge \
+	        --top-k $${EVAL_TOP_K:-10} \
+	        --citation-audit-md $${EVAL_CITATION_AUDIT_MD:-docs/RAG_CITATION_AUDIT.md}
+
+eval-ablation:
+	set -a; [ ! -f .env ] || . ./.env; set +a; \
+	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
+	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
+	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
+	    $(DEERFLOW_BACKEND_PY) tests/eval/run_ablation.py \
+	        --file tests/eval/qa_set.golden.jsonl \
+	        --top-k $${EVAL_TOP_K:-10} \
+	        --out $${EVAL_ABLATION_OUT:-data/index/eval_runs/ablation_latest.json}
 
 verify-p0:
-	$(DEERFLOW_BACKEND_PY) -m ruff check src/paper_rag/rag/abstain.py src/paper_rag/rag/query_rewrite.py tests/test_abstain.py tests/test_m5_fixes.py tests/eval/run_eval.py scripts/secret_scan.py
-	$(DEERFLOW_BACKEND_PY) -m pytest tests/test_abstain.py tests/test_m5_fixes.py tests/test_eval_metrics.py
+	$(DEERFLOW_BACKEND_PY) -m ruff check src/paper_rag/rag/abstain.py src/paper_rag/rag/query_rewrite.py src/paper_rag/rag/evidence_select.py tests/test_abstain.py tests/test_m5_fixes.py tests/test_eval_metrics.py tests/test_eval_harness.py tests/test_evidence_selection.py tests/eval/run_eval.py scripts/secret_scan.py
+	$(DEERFLOW_BACKEND_PY) -m pytest tests/test_abstain.py tests/test_m5_fixes.py tests/test_eval_metrics.py tests/test_eval_harness.py tests/test_evidence_selection.py tests/test_chaos.py::test_qa_agentic_uses_selected_evidence_for_prompt_and_trace tests/test_finalization.py::test_stream_answer_uses_selected_evidence_for_done_payload
 	PYTHONPATH=src $(DEERFLOW_BACKEND_PY) scripts/_run_smoke.py
 	$(DEERFLOW_BACKEND_PY) scripts/secret_scan.py
 	$(MAKE) eval-golden

@@ -257,3 +257,62 @@ def test_qa_agentic_returns_structured_loop_and_memory_trace(monkeypatch, tmp_pa
     assert trace["loop"]["citations"] == ["abc1234567"]
     assert trace["memory"]["conversation_id"] == "conv-loop"
     assert trace["memory"]["memory_role"] == "query_context_only_not_evidence"
+
+
+def test_qa_agentic_uses_selected_evidence_for_prompt_and_trace(monkeypatch):
+    from paper_rag.rag import qa_agentic
+
+    captured = {"prompt": ""}
+
+    def fake_retrieve(query, paper_ids, top_k):
+        return [
+            {
+                "chunk_id": f"{i:010x}",
+                "paper_id": "paper-a",
+                "text": f"Self-RAG direct evidence {i}",
+                "score_rerank": 0.9 - i * 0.01,
+            }
+            for i in range(5)
+        ]
+
+    def fake_chat(messages, **kwargs):
+        captured["prompt"] = messages[-1]["content"]
+        return "Self-RAG uses evidence [chunk:0000000000] [chunk:0000000003]."
+
+    monkeypatch.setattr(qa_agentic, "_retrieve_round", fake_retrieve)
+    monkeypatch.setattr(
+        qa_agentic,
+        "classify",
+        lambda q: {"intent": "factual", "top_k": 5, "max_iter": 1, "rrf_k": 60},
+    )
+    monkeypatch.setattr(qa_agentic, "chat", fake_chat)
+
+    out = qa_agentic.answer("What is Self-RAG?")
+
+    assert len(out["chunks"]) == 5
+    assert [c["chunk_id"] for c in out["evidence_chunks"]] == ["0000000000", "0000000001"]
+    assert out["citations"] == ["0000000000"]
+    assert "[chunk:0000000000]" in captured["prompt"]
+    assert "[chunk:0000000001]" in captured["prompt"]
+    assert "[chunk:0000000003]" not in captured["prompt"]
+    assert out["trace"]["evidence_selection"]["selected_chunk_ids"] == [
+        "0000000000",
+        "0000000001",
+    ]
+
+
+def test_qa_prompt_limits_citations_to_direct_evidence():
+    from paper_rag.rag import qa_agentic
+
+    prompt = qa_agentic._build_user_prompt(
+        "What is Self-RAG?",
+        [
+            {"chunk_id": "abc1234567", "text": "Self-RAG retrieves."},
+            {"chunk_id": "def1234567", "text": "Self-RAG critiques."},
+            {"chunk_id": "fed1234567", "text": "Extra background."},
+        ],
+        {"decision": "confident"},
+    )
+
+    assert "Use at most 2 citations" in prompt
+    assert "most directly support" in prompt

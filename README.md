@@ -8,7 +8,7 @@
 An open-source academic-paper RAG agent with a runnable DeerFlow workspace UI.
 It can ingest papers, build a local hybrid index, answer literature questions
 with citations, generate wiki-style concept notes, collect feedback, and run a
-small golden-set regression gate. The DeerFlow workspace also exposes the
+course/interview-grade RAG Eval Harness. The DeerFlow workspace also exposes the
 internal Agentic RAG loop, a Paper RAG-specific research memory layer, and a
 Knowledge Builder view for paper indexing status. It also includes a bounded
 Paper Discovery Loop for finding candidate papers before they are ingested into
@@ -57,7 +57,7 @@ to turn the system into a resume project and defend it in interviews:
 | UI | DeerFlow-style `/workspace/paper-rag` page for QA, Loop Trace, Discovery Loop, Knowledge Builder, wiki, ingest, feedback, inbox, subscriptions |
 | Ingest | arXiv/PDF ingest path with PyMuPDF fallback and optional MinerU parser |
 | Feedback | Helpful/not-helpful events, hard-case collection, eval item suggestions |
-| Evaluation | Retrieval-only and no-judge QA golden-set runners |
+| Evaluation | 60-item strict golden set, 40-item real/stress set, chunk labels, strict gates, Markdown reports, retrieval ablation |
 | Safety | `.env` and runtime data ignored, local secret scanner, evidence-only fallback |
 
 ## Prerequisites
@@ -222,6 +222,9 @@ DeerFlow integration layer:
 make verify-p0
 make eval-golden
 make eval-golden-qa
+make eval-report
+make eval-citation-audit
+make eval-ablation
 ```
 
 What they mean:
@@ -229,27 +232,65 @@ What they mean:
 | Command | Purpose |
 |---|---|
 | `make verify-p0` | Focused lint, focused tests, import smoke, secret scan, retrieval golden set |
-| `make eval-golden` | Retrieval-only strict golden set, no LLM generation |
-| `make eval-golden-qa` | Full QA no-judge golden set, requires provider credentials |
+| `make eval-golden` | Retrieval-only strict golden set; no chat API call, deterministic local rewrite |
+| `make eval-golden-qa` | Full QA no-judge golden set; uses provider credentials for answer generation |
+| `make eval-report` | Retrieval-only strict golden set plus `docs/RAG_EVAL_REPORT.md` |
+| `make eval-citation-audit` | Full QA no-judge run plus `docs/RAG_CITATION_AUDIT.md` with per-citation diagnosis |
+| `make eval-ablation` | Compare dense-only, sparse-only, hybrid RRF, hybrid+rerank, rewrite on/off |
 | `make secret-scan` | Local scan for accidentally committed API keys |
 | `make hard-cases` | Turn feedback events into candidate eval items |
 
-The main strict set is:
+The evaluation split is:
 
 ```text
-tests/eval/qa_set.golden.jsonl
+tests/eval/qa_set.golden.jsonl  # 60 stable regression items, 45 chunk-labeled positives, 15 no-evidence
+tests/eval/qa_set.real.jsonl    # 40 real/stress items for exploration and hard-case mining
 ```
 
-Latest local beta baseline:
+The retrieval-only gate works like a search-engine test: each item has expected
+paper/chunk IDs, the runner retrieves top-k chunks, and the metrics compare IDs
+directly. It does not ask a model to judge semantic quality. The QA/no-judge
+runner then adds answer/citation/no-answer checks. It separates
+`relevant_chunk_ids` for retrieval recall from `citation_chunk_ids` for chunks
+that can directly support answer citations. The optional LLM judge is reserved
+for manual quality reports.
+
+Latest local strict retrieval baseline (`make eval-golden`, top-k=10):
 
 | Metric | Value |
 |---|---:|
-| Positive paper recall@10 | 1.0 |
-| Positive paper MRR | 0.947 |
-| Citation existence | 1.0 |
-| Must-contain coverage | 1.0 |
-| No-answer success | 1.0 |
-| No-answer direct abstain | 1.0 |
+| Positive paper recall@10 | 0.989 |
+| Positive paper MRR | 0.989 |
+| Positive chunk recall@10 | 0.811 |
+| Chunk label coverage | 1.000 |
+| FPR@10 before first evidence | 0.000 |
+| Errors | 0 |
+
+Latest local strict QA/no-judge baseline (`make eval-golden-qa`, top-k=10):
+
+| Metric | Value |
+|---|---:|
+| Citation existence | 1.000 |
+| Citation precision | 0.867 |
+| Citation paper precision | 0.922 |
+| Must-contain coverage | 0.933 |
+| No-answer success | 1.000 |
+| No-answer direct abstain | 0.933 |
+| Errors | 0 |
+
+QA generation uses deterministic evidence selection before calling the LLM:
+the full retrieval window is still returned as `chunks`, but only the compact
+`evidence_chunks` set is placed in the prompt and allowed citation list.
+
+Latest retrieval ablation (`make eval-ablation`, positive items only):
+
+| Strategy | Paper recall@10 | Paper MRR | Chunk recall@10 | Avg latency |
+|---|---:|---:|---:|---:|
+| Dense only | 0.922 | 0.974 | 0.767 | 198.22 ms |
+| Sparse only | 0.956 | 0.782 | 0.567 | 2.19 ms |
+| Hybrid RRF | 0.944 | 0.959 | 0.811 | 152.66 ms |
+| Hybrid + rerank, no rewrite | 0.989 | 0.959 | 0.733 | 156.95 ms |
+| Hybrid + rerank + local rewrite | 0.989 | 0.989 | 0.811 | 220.52 ms |
 
 ## Repository Layout
 

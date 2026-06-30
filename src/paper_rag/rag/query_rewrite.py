@@ -9,6 +9,7 @@ Given a user question, produce:
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from .. import config as cfg
@@ -16,6 +17,7 @@ from ..utils.logger import get_logger
 from .llm import chat
 
 log = get_logger("rag.query_rewrite")
+_FORCE_LOCAL_REWRITE_ENV = "PAPER_RAG_FORCE_LOCAL_REWRITE"
 
 _ORIGINAL_ALIAS_RE = re.compile(
     r"\b(?:the\s+)?(?:original|first|earliest)\s+([A-Za-z][A-Za-z0-9-]{1,20})"
@@ -43,7 +45,10 @@ def rewrite(question: str) -> dict:
     c = cfg.load()
     enable = c.rag.enable_hyde
     data = {}
-    if c.llm.chat_model and c.llm.api_key and c.llm.base_url:
+    force_local = _truthy_env(_FORCE_LOCAL_REWRITE_ENV)
+    if force_local:
+        log.debug("rewrite forced to local fallback by PAPER_RAG_FORCE_LOCAL_REWRITE")
+    elif c.llm.chat_model and c.llm.api_key and c.llm.base_url:
         try:
             raw = chat(
                 [{"role": "user", "content": _PROMPT.replace("{q}", question)}],
@@ -64,6 +69,10 @@ def rewrite(question: str) -> dict:
     if hyde:
         queries_dense.append(hyde)
     return {"dense_queries": queries_dense, "bm25_query": keywords, "raw": data}
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _dedupe(items: list[str]) -> list[str]:
@@ -108,6 +117,18 @@ def _heuristic_variants(question: str) -> list[str]:
             "retrieval latency reranking dense retriever latency cost",
             "BEIR retrieval latency reranking dense retrieval efficiency",
             "RAG higher latency retrieval augmentation rerank chunks",
+        ])
+    if "rag-sequence" in qlow and "rag-token" in qlow:
+        variants.extend([
+            "RAG-Sequence uses the same retrieved document for the whole sequence",
+            "RAG-Token can use different retrieved documents for each target token",
+            "RAG-Sequence RAG-Token latent documents per sequence per token model difference",
+        ])
+    if "pre-retrieval" in qlow or "post-retrieval" in qlow:
+        variants.extend([
+            "Advanced RAG pre-retrieval post-retrieval optimization strategies indexing retrieval generation",
+            "RAG survey pre-retrieval optimization data indexing query optimization",
+            "RAG survey post-retrieval processing reranking context compression optimization",
         ])
     for m in _ORIGINAL_ALIAS_RE.finditer(question):
         alias = m.group(1).upper()

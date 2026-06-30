@@ -16,6 +16,10 @@ class EvalItem(BaseModel):
     qid: str = Field(..., description="Stable id for the question")
     question: str
     intent: Literal["factual", "reasoning", "explore"] = "reasoning"
+    category: str | None = Field(
+        None,
+        description="Optional reporting bucket, e.g. compare, evaluation, ambiguous, no_evidence.",
+    )
 
     relevant_paper_ids: list[str] = Field(
         default_factory=list,
@@ -24,6 +28,11 @@ class EvalItem(BaseModel):
     relevant_chunk_ids: list[str] = Field(
         default_factory=list,
         description="Optional chunk-level ground truth for tighter recall@k.",
+    )
+    citation_chunk_ids: list[str] = Field(
+        default_factory=list,
+        description="Optional chunk ids that directly support answer citations. "
+                    "Falls back to relevant_chunk_ids when empty.",
     )
     irrelevant_paper_ids: list[str] = Field(
         default_factory=list,

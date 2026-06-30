@@ -820,20 +820,73 @@ Subscription -> Matcher -> Inbox -> User action
 ```bash
 make eval-golden
 make eval-golden-qa
+make eval-report
+make eval-citation-audit
+make eval-ablation
 make hard-cases
 make verify-p0
 ```
 
-当前 baseline：
+当前数据集：
+
+- `qa_set.golden.jsonl`：60 条 strict regression，其中 45 条正例带 chunk-level retrieval/citation 标注，15 条 no-evidence。
+- `qa_set.real.jsonl`：40 条 real/stress，用于探索失败模式和补充 hard cases。
+
+当前 retrieval-only baseline（不调用 chat API）：
 
 | Metric | Value |
 |---|---:|
-| Positive paper recall@10 | 1.0 |
-| Positive paper MRR | 0.947 |
-| Citation existence | 1.0 |
-| Must-contain coverage | 1.0 |
-| No-answer success | 1.0 |
-| No-answer direct abstain | 1.0 |
+| Positive paper recall@10 | 0.989 |
+| Positive paper MRR | 0.989 |
+| Positive chunk recall@10 | 0.811 |
+| Chunk label coverage | 1.000 |
+| FPR@10 before first evidence | 0.000 |
+| Errors | 0 |
+
+当前 QA no-judge baseline（调用 chat API 生成答案，但不用 LLM judge 打分）：
+
+| Metric | Value |
+|---|---:|
+| Citation existence | 1.000 |
+| Citation precision | 0.867 |
+| Citation paper precision | 0.922 |
+| Must-contain coverage | 0.933 |
+| No-answer success | 1.000 |
+| No-answer direct abstain | 0.933 |
+| Errors | 0 |
+
+这里的 `relevant_chunk_ids` 和 `citation_chunk_ids` 是分开的：
+
+- `relevant_chunk_ids` 用于检索评测，回答“系统有没有找到核心证据”。
+- `citation_chunk_ids` 用于生成评测，回答“最终引用的 chunk 是否可以直接支撑答案”。
+- 如果没有 citation label，runner 会回退到 relevant chunk label；如果答案没有任何 citation，precision 会 skipped，漏引由 recall 暴露。
+
+生成前还会做 deterministic evidence selection：完整检索窗口继续作为 `chunks` 返回给 UI 和 trace，但 prompt 里的 evidence 和 allowed citation tokens 只来自更小的 `evidence_chunks`。这能减少背景 chunk 被模型随手引用。
+
+当前 retrieval ablation：
+
+| Strategy | Paper recall@10 | Paper MRR | Chunk recall@10 | Avg latency |
+|---|---:|---:|---:|---:|
+| Dense only | 0.922 | 0.974 | 0.767 | 198.22 ms |
+| Sparse only | 0.956 | 0.782 | 0.567 | 2.19 ms |
+| Hybrid RRF | 0.944 | 0.959 | 0.811 | 152.66 ms |
+| Hybrid + rerank, no rewrite | 0.989 | 0.959 | 0.733 | 156.95 ms |
+| Hybrid + rerank + local rewrite | 0.989 | 0.989 | 0.811 | 220.52 ms |
+
+为什么 `make eval-golden` 不需要 API key：
+
+```text
+它评的是检索系统，不评语言生成。
+
+流程是：
+question -> local rewrite heuristic -> dense/sparse/hybrid/rerank -> top-k chunk ids
+然后把 top-k 的 paper_id/chunk_id 和 golden label 做精确对比。
+
+这像搜索引擎离线评测：标准答案是“应该找到哪篇论文、哪几个 chunk”，
+不是让另一个模型主观判断答案好不好。
+```
+
+`make eval-golden-qa` 才需要 API key，因为它会调用模型生成答案，然后检查 citation existence、citation precision、must-contain 和 no-answer success。`make eval-citation-audit` 会额外输出 `docs/RAG_CITATION_AUDIT.md`，逐条解释 citation 是 direct support、right-paper/wrong-chunk，还是 wrong-paper。LLM judge 只建议做手动质量报告，不放进快速 gate。
 
 面试追问：
 
@@ -846,8 +899,13 @@ make verify-p0
 | 指标 | 说明 | 为什么重要 |
 |---|---|---|
 | positive paper recall@k | 正样本问题是否召回相关论文 | 没召回就不可能答对 |
+| positive chunk recall@k | 标注证据 chunk 是否进入 top-k | 证明不是只找到论文，而是找到可引用证据 |
 | MRR | 相关论文排名是否靠前 | 越靠前越容易进入 LLM context |
-| citation existence | 引用是否来自 retrieved chunks | 防止伪引用 |
+| nDCG@k | 相关结果是否排在前面 | 比 recall 更关注排序质量 |
+| FPR@k | 危险误召回是否出现在第一个正确证据之前 | 防止模型优先看到错误证据 |
+| citation existence | 引用是否来自 selected evidence chunks | 防止伪引用 |
+| citation precision/recall | 引用是否命中 citation 标注证据 | 证明引用真的支撑答案 |
+| citation paper precision | 引用是否至少来自相关论文 | 区分错论文和同论文错 chunk |
 | must-contain coverage | 答案是否包含关键概念 | 粗粒度检查答案完整性 |
 | no-answer success | 无关问题是否拒答 | 防止系统乱答 |
 | no-answer direct abstain | 是否在 LLM 前拒答 | 降低成本和幻觉 |
@@ -1119,7 +1177,10 @@ R - 结果：系统可以通过本地 UI 完成论文 QA、Wiki、反馈和订�
 可以写成：
 
 ```text
-基于自建 golden set 对 retrieval recall、citation validity 和 abstain cases 做回归评估，避免只凭单次演示调 prompt。
+基于 60 条 strict golden set 和 40 条 real/stress set 建立 RAG Eval Harness，
+离线评估 paper recall@10、chunk recall@10、MRR、nDCG、FPR 和 latency，
+并在 QA no-judge 模式下检查 citation existence/precision、must-contain 与 no-answer success，
+避免只凭单次演示调 prompt。
 ```
 
 ### 17.5 不推荐写法和原因
@@ -1344,7 +1405,7 @@ RAG 本地项目经常失败在环境，而不是业务代码，比如 FlagEmbed
 答：
 
 ```text
-golden set 不能只放简单问题，至少要覆盖事实查找、方法总结、跨 chunk 问题、跨论文比较、缩写/术语问题、无答案问题和错误引用风险。每条样本应该包含 question、expected paper/chunk、answer key points、should_abstain 和 tags。这样才能知道优化影响了哪类问题。
+golden set 不能只放简单问题，至少要覆盖 factual、method、evaluation、compare、ambiguous 和 no-evidence。每条样本应该包含 question、expected paper/chunk、must_contain、must_not_contain、gold_answer、category 和 notes。正例先保证 paper-level label，再给核心样本补 chunk-level label；无证据题要包含无关领域、错误前提、超出语料和时间敏感问题。这样才能知道优化影响了哪类问题。
 ```
 
 问：如何判断一次 RAG 优化有效？
