@@ -57,7 +57,7 @@ to turn the system into a resume project and defend it in interviews:
 | UI | DeerFlow-style `/workspace/paper-rag` page for QA, Loop Trace, Discovery Loop, Knowledge Builder, wiki, ingest, feedback, inbox, subscriptions |
 | Ingest | arXiv/PDF ingest path with PyMuPDF fallback and optional MinerU parser |
 | Feedback | Helpful/not-helpful events, hard-case collection, eval item suggestions |
-| Evaluation | 60-item strict golden set, 40-item real/stress set, chunk labels, strict gates, Markdown reports, retrieval ablation |
+| Evaluation | 60-item strict golden set, 40-item real/stress set, 40-item claim set, chunk/claim labels, strict gates, Markdown reports, retrieval and LLM-recall ablation |
 | Safety | `.env` and runtime data ignored, local secret scanner, evidence-only fallback |
 
 ## Prerequisites
@@ -225,6 +225,9 @@ make eval-golden-qa
 make eval-report
 make eval-citation-audit
 make eval-ablation
+make eval-claims
+make eval-claims-report
+make eval-llm-recall
 ```
 
 What they mean:
@@ -237,6 +240,9 @@ What they mean:
 | `make eval-report` | Retrieval-only strict golden set plus `docs/RAG_EVAL_REPORT.md` |
 | `make eval-citation-audit` | Full QA no-judge run plus `docs/RAG_CITATION_AUDIT.md` with per-citation diagnosis |
 | `make eval-ablation` | Compare dense-only, sparse-only, hybrid RRF, hybrid+rerank, rewrite on/off |
+| `make eval-claims` | Claim-level QA no-judge gate for semantic answer coverage and grounded claims |
+| `make eval-claims-report` | Claim eval plus `docs/RAG_CLAIM_EVAL_REPORT.md` with missing-claim diagnosis |
+| `make eval-llm-recall` | Compare baseline retrieval, local rewrite/HyDE, and LLM rewrite/HyDE recall |
 | `make secret-scan` | Local scan for accidentally committed API keys |
 | `make hard-cases` | Turn feedback events into candidate eval items |
 
@@ -245,15 +251,22 @@ The evaluation split is:
 ```text
 tests/eval/qa_set.golden.jsonl  # 60 stable regression items, 45 chunk-labeled positives, 15 no-evidence
 tests/eval/qa_set.real.jsonl    # 40 real/stress items for exploration and hard-case mining
+tests/eval/qa_set.claims.jsonl  # 40 claim-level items, 30 positives with 90 expected claims, 10 no-evidence
 ```
 
-The retrieval-only gate works like a search-engine test: each item has expected
-paper/chunk IDs, the runner retrieves top-k chunks, and the metrics compare IDs
-directly. It does not ask a model to judge semantic quality. The QA/no-judge
-runner then adds answer/citation/no-answer checks. It separates
-`relevant_chunk_ids` for retrieval recall from `citation_chunk_ids` for chunks
-that can directly support answer citations. The optional LLM judge is reserved
-for manual quality reports.
+The harness is intentionally split into three deterministic layers:
+
+1. Retrieval recall: expected paper/chunk IDs are compared with top-k retrieval
+   results, like a search-engine offline eval.
+2. Citation precision: generated citations must point to real selected
+   evidence chunks and preferably to `citation_chunk_ids` that directly support
+   the answer.
+3. Claim recall: final answers are checked against hand-labeled
+   `expected_claims`; `grounded_claim_recall` only counts claims whose citation
+   hits a supporting chunk.
+
+The optional LLM judge is reserved for manual quality reports. It is not part
+of the fast default gate, so local eval remains reproducible and cost-controlled.
 
 Latest local strict retrieval baseline (`make eval-golden`, top-k=10):
 
@@ -282,6 +295,17 @@ QA generation uses deterministic evidence selection before calling the LLM:
 the full retrieval window is still returned as `chunks`, but only the compact
 `evidence_chunks` set is placed in the prompt and allowed citation list.
 
+Latest claim-level QA baseline (`make eval-claims-report`, top-k=10):
+
+| Metric | Value |
+|---|---:|
+| Claim recall | 0.811 |
+| Grounded claim recall | 0.722 |
+| No-answer success | 1.000 |
+| Forbidden claim violations | 0 |
+| Claim-labeled items | 30 / 40 |
+| Errors | 0 |
+
 Latest retrieval ablation (`make eval-ablation`, positive items only):
 
 | Strategy | Paper recall@10 | Paper MRR | Chunk recall@10 | Avg latency |
@@ -291,6 +315,19 @@ Latest retrieval ablation (`make eval-ablation`, positive items only):
 | Hybrid RRF | 0.944 | 0.959 | 0.811 | 152.66 ms |
 | Hybrid + rerank, no rewrite | 0.989 | 0.959 | 0.733 | 156.95 ms |
 | Hybrid + rerank + local rewrite | 0.989 | 0.989 | 0.811 | 220.52 ms |
+
+Latest LLM-assisted recall comparison (`make eval-llm-recall`,
+`qa_set.claims.jsonl`, top-k=10):
+
+| Strategy | Paper recall@10 | Chunk recall@10 | Rewrite gain | Harm rate | Avg latency |
+|---|---:|---:|---:|---:|---:|
+| Baseline, no rewrite | 0.983 | 0.717 | 0 | 0.000 | 246.08 ms |
+| Local rewrite + HyDE | 0.983 | 0.817 | 4 | 0.025 | 215.31 ms |
+| LLM rewrite + HyDE | 1.000 | 0.933 | 10 | 0.050 | 3467.58 ms |
+
+`eval-llm-recall` measures whether LLM-assisted rewrite/HyDE improves
+retrieval recall. It is not an LLM judge: the labels are still paper/chunk IDs
+from the claim set.
 
 ## Repository Layout
 

@@ -28,15 +28,15 @@
 
 一句话版本：
 
-Paper RAG Agent 是一个集成在 DeerFlow 工作台里的 Agentic RAG 学术论文问答系统，支持论文发现、论文入库、混合检索、证据驱动问答、引用校验、拒答机制、反馈闭环和 golden set 回归评测。
+Paper RAG Agent 是一个集成在 DeerFlow 工作台里的 Agentic RAG 学术论文问答系统，支持论文发现、论文入库、混合检索、证据驱动问答、引用校验、拒答机制、反馈闭环和三层 RAG Eval 回归评测。
 
 三十秒版本：
 
-这个项目解决的是“让大模型可靠发现、阅读和回答论文问题”。后端用 Python 实现 topic discovery、论文解析、chunk 构建、BGE-M3 embedding、SQLite/FTS5 和 Qdrant 混合检索，再通过 query rewrite、HyDE、rerank、reflect 和 abstain 组成 Agentic RAG 主路径。前端嵌入 DeerFlow 的 Next.js 工作台，提供 Discovery Loop、QA、Knowledge Builder、Wiki、Ingest、Feedback、Inbox 和 Subscription 工作流。项目还提供 smoke test、secret scan 和 golden set eval，用来证明效果不是只靠肉眼演示。
+这个项目解决的是“让大模型可靠发现、阅读和回答论文问题”。后端用 Python 实现 topic discovery、论文解析、chunk 构建、BGE-M3 embedding、SQLite/FTS5 和 Qdrant 混合检索，再通过 query rewrite、HyDE、rerank、reflect 和 abstain 组成 Agentic RAG 主路径。前端嵌入 DeerFlow 的 Next.js 工作台，提供 Discovery Loop、QA、Knowledge Builder、Wiki、Ingest、Feedback、Inbox 和 Subscription 工作流。项目还提供 smoke test、secret scan、retrieval/citation/claim 三层 eval 和 LLM-assisted recall 对比，用来证明效果不是只靠肉眼演示。
 
 简历版本：
 
-构建了一个面向学术论文的 Agentic RAG 系统，并集成到 DeerFlow 工作台中。系统采用 BM25/FTS5 + Qdrant dense retrieval + RRF fusion + BGE rerank 的混合检索架构，引入 query rewrite、HyDE、反思式多轮检索、三档 abstain 拒答、chunk 级引用校验和反馈驱动的 hard-case 数据闭环。实现了 FastAPI 网关、Next.js 工作台 UI、黄金集评测和本地 smoke gate，支持真实论文问答、Wiki 生成、论文入库和订阅管理。
+构建了一个面向学术论文的 Agentic RAG 系统，并集成到 DeerFlow 工作台中。系统采用 BM25/FTS5 + Qdrant dense retrieval + RRF fusion + BGE rerank 的混合检索架构，引入 query rewrite、HyDE、反思式多轮检索、三档 abstain 拒答、chunk 级引用校验和反馈驱动的 hard-case 数据闭环。实现了 FastAPI 网关、Next.js 工作台 UI、retrieval/citation/claim 三层评测和本地 smoke gate，支持真实论文问答、Wiki 生成、论文入库和订阅管理。
 
 ## 3. 技术栈总览
 
@@ -823,6 +823,9 @@ make eval-golden-qa
 make eval-report
 make eval-citation-audit
 make eval-ablation
+make eval-claims
+make eval-claims-report
+make eval-llm-recall
 make hard-cases
 make verify-p0
 ```
@@ -831,6 +834,8 @@ make verify-p0
 
 - `qa_set.golden.jsonl`：60 条 strict regression，其中 45 条正例带 chunk-level retrieval/citation 标注，15 条 no-evidence。
 - `qa_set.real.jsonl`：40 条 real/stress，用于探索失败模式和补充 hard cases。
+- `qa_set.claims.jsonl`：40 条 claim-level eval，其中 30 条正例带 90 个 expected claims，10 条 no-evidence。
+- `qa_set.example.jsonl`：最小 smoke 模板，用于新环境理解 schema 和验证 runner。
 
 当前 retrieval-only baseline（不调用 chat API）：
 
@@ -855,6 +860,17 @@ make verify-p0
 | No-answer direct abstain | 0.933 |
 | Errors | 0 |
 
+当前 claim-level QA baseline（调用 chat API 生成答案，但不用 LLM judge 打分）：
+
+| Metric | Value |
+|---|---:|
+| Claim recall | 0.811 |
+| Grounded claim recall | 0.722 |
+| No-answer success | 1.000 |
+| Forbidden claim violations | 0 |
+| Claim-labeled items | 30 / 40 |
+| Errors | 0 |
+
 这里的 `relevant_chunk_ids` 和 `citation_chunk_ids` 是分开的：
 
 - `relevant_chunk_ids` 用于检索评测，回答“系统有没有找到核心证据”。
@@ -873,6 +889,17 @@ make verify-p0
 | Hybrid + rerank, no rewrite | 0.989 | 0.959 | 0.733 | 156.95 ms |
 | Hybrid + rerank + local rewrite | 0.989 | 0.989 | 0.811 | 220.52 ms |
 
+当前 LLM-assisted recall 对比：
+
+| Strategy | Paper recall@10 | Chunk recall@10 | Rewrite gain | Harm rate | Avg latency |
+|---|---:|---:|---:|---:|---:|
+| Baseline, no rewrite | 0.983 | 0.717 | 0 | 0.000 | 246.08 ms |
+| Local rewrite + HyDE | 0.983 | 0.817 | 4 | 0.025 | 215.31 ms |
+| LLM rewrite + HyDE | 1.000 | 0.933 | 10 | 0.050 | 3467.58 ms |
+
+这组实验评的是“LLM-assisted rewrite/HyDE 是否提升召回”，不是让
+LLM judge 评价答案。评分仍然是 paper_id/chunk_id 的确定性命中。
+
 为什么 `make eval-golden` 不需要 API key：
 
 ```text
@@ -886,7 +913,11 @@ question -> local rewrite heuristic -> dense/sparse/hybrid/rerank -> top-k chunk
 不是让另一个模型主观判断答案好不好。
 ```
 
-`make eval-golden-qa` 才需要 API key，因为它会调用模型生成答案，然后检查 citation existence、citation precision、must-contain 和 no-answer success。`make eval-citation-audit` 会额外输出 `docs/RAG_CITATION_AUDIT.md`，逐条解释 citation 是 direct support、right-paper/wrong-chunk，还是 wrong-paper。LLM judge 只建议做手动质量报告，不放进快速 gate。
+`make eval-golden-qa` 才需要 API key，因为它会调用模型生成答案，然后检查 citation existence、citation precision、must-contain 和 no-answer success。`make eval-citation-audit` 会额外输出 `docs/RAG_CITATION_AUDIT.md`，逐条解释 citation 是 direct support、right-paper/wrong-chunk，还是 wrong-paper。
+
+`make eval-claims` 也需要 API key，因为它要生成最终答案，但评分仍然不是 LLM judge。它用人工标注的 `expected_claims` 和 `accept_patterns` 检查答案是否覆盖关键语义点，再用 `supporting_chunk_ids` 检查这些 claim 是否真的被 citation grounding。`make eval-llm-recall` 用同一批 claim set 对比 baseline、local rewrite/HyDE 和 LLM rewrite/HyDE 的召回收益。LLM 在这里只参与 query rewrite，不参与打分。
+
+LLM judge 只建议做手动质量报告，不放进快速 gate。
 
 面试追问：
 
@@ -906,6 +937,10 @@ question -> local rewrite heuristic -> dense/sparse/hybrid/rerank -> top-k chunk
 | citation existence | 引用是否来自 selected evidence chunks | 防止伪引用 |
 | citation precision/recall | 引用是否命中 citation 标注证据 | 证明引用真的支撑答案 |
 | citation paper precision | 引用是否至少来自相关论文 | 区分错论文和同论文错 chunk |
+| claim recall | 答案覆盖了多少 expected claims | 检查答案有没有漏掉关键语义结论 |
+| grounded claim recall | 覆盖 claim 且 citation 命中 supporting chunks | 检查语义结论是否真的被证据支撑 |
+| missing claims | 未覆盖 claim 列表 | 告诉学生下一步该补答案、补检索还是补标注 |
+| rewrite gain/harm | rewrite/HyDE 相对 baseline 的召回增益和伤害 | 证明 LLM-assisted retrieval 不是堆概念 |
 | must-contain coverage | 答案是否包含关键概念 | 粗粒度检查答案完整性 |
 | no-answer success | 无关问题是否拒答 | 防止系统乱答 |
 | no-answer direct abstain | 是否在 LLM 前拒答 | 降低成本和幻觉 |
@@ -1082,7 +1117,7 @@ Paper RAG Agent - 基于 DeerFlow 的 Agentic RAG 学术论文研读系统
 | 动作 | 做了 RAG | 设计并实现论文 ingest、retrieval、generation、feedback 全链路 |
 | 技术 | 用了向量库 | 采用 BM25/FTS5 + Qdrant dense retrieval + RRF + BGE rerank |
 | 结果 | 可以问答 | 支持真实论文问答、chunk 级引用、no-evidence 拒答和 Wiki 生成 |
-| 验证 | 跑起来了 | 接入 smoke test、secret scan、golden set eval 和 hard-case 反馈 |
+| 验证 | 跑起来了 | 接入 smoke test、secret scan、retrieval/citation/claim 三层 eval 和 hard-case 反馈 |
 
 推荐写法：
 
@@ -1093,7 +1128,7 @@ Paper RAG Agent - Agentic RAG 学术论文问答系统
 - 引入 query rewrite、HyDE、reflective retrieval 和三档 abstain 决策，将固定 RAG chain 扩展为可根据证据状态调整策略的 Agentic RAG pipeline。
 - 设计 Paper RAG 专属研究记忆压缩层，支持多轮研究上下文延续，同时保证最终答案仍回到 retrieved chunks 和 citation validation。
 - 实现 chunk 级 citation validation、伪引用清理和 no-evidence 拒答，降低无证据回答、错引和 hallucination 风险。
-- 建立 JSONL golden set、retrieval-only eval、QA no-judge eval、secret scan 和 smoke gate，用数据回归验证 RAG 优化效果。
+- 建立 JSONL golden/claim set、retrieval-only eval、QA no-judge eval、citation audit、claim-level eval、secret scan 和 smoke gate，用数据回归验证 RAG 优化效果。
 ```
 
 如果简历空间有限，可以压缩成三条：
@@ -1101,7 +1136,7 @@ Paper RAG Agent - Agentic RAG 学术论文问答系统
 ```text
 - 构建 DeerFlow 集成的论文 Agentic RAG 工作台，支持论文发现、论文入库、QA、Loop Trace、Knowledge Builder、Wiki、反馈和订阅管理。
 - 实现 BM25/FTS5 + Qdrant + RRF + BGE rerank 的混合检索，并加入 query rewrite、HyDE、reflect 和 abstain。
-- 设计 Research Memory、citation validation、no-evidence 拒答、golden set eval 和 smoke gate，提升问答可信度与可回归验证能力。
+- 设计 Research Memory、citation validation、no-evidence 拒答、三层 RAG Eval 和 smoke gate，提升问答可信度与可回归验证能力。
 ```
 
 ### 17.2 不同学生水平的简历版本
@@ -1168,6 +1203,9 @@ R - 结果：系统可以通过本地 UI 完成论文 QA、Wiki、反馈和订�
 | Recall@k | gold chunk 是否进入 top-k | 检索是否找得到证据 |
 | MRR | 正确证据排名是否靠前 | rerank 是否有效 |
 | Citation validity | 生成引用是否都来自 retrieved chunks | 是否控制伪引用 |
+| Claim recall | 答案是否覆盖 expected claims | 是否漏掉关键语义结论 |
+| Grounded claim recall | 覆盖 claim 且 citation 命中 supporting chunks | 语义结论是否被证据支撑 |
+| Rewrite gain/harm | LLM rewrite/HyDE 相对 baseline 的收益和伤害 | LLM-assisted retrieval 是否真的有效 |
 | Abstain precision | 无证据问题是否拒答 | 是否减少 hallucination |
 | Memory compression turns | 多少轮后触发摘要 | 是否有长会话设计 |
 | Build stage success | fetch/parse/chunk/embed/index/wiki 是否完成 | 知识库搭建是否可解释 |
@@ -1180,6 +1218,7 @@ R - 结果：系统可以通过本地 UI 完成论文 QA、Wiki、反馈和订�
 基于 60 条 strict golden set 和 40 条 real/stress set 建立 RAG Eval Harness，
 离线评估 paper recall@10、chunk recall@10、MRR、nDCG、FPR 和 latency，
 并在 QA no-judge 模式下检查 citation existence/precision、must-contain 与 no-answer success，
+进一步通过 40 条 claim-level eval 检查 claim recall、grounded claim recall 和 LLM-assisted retrieval recall，
 避免只凭单次演示调 prompt。
 ```
 
@@ -1217,7 +1256,7 @@ R - 结果：系统可以通过本地 UI 完成论文 QA、Wiki、反馈和订�
 
 技术上，后端把 paper_rag 做成独立 Python package，再通过 FastAPI router 接到 DeerFlow gateway；检索侧使用 SQLite/FTS5 的 sparse retrieval 和 Qdrant 的 dense retrieval，经过 RRF fusion 和 BGE rerank 得到证据；生成侧加入 research memory context、query rewrite、HyDE、reflective retrieval、abstain 和 citation validation，避免无证据回答和伪引用。
 
-工程上，我补了 runtime status、smoke test、secret scan 和 golden set eval。这样项目不是只在一个问题上能演示，而是可以通过测试和评测证明核心链路可复现。
+工程上，我补了 runtime status、smoke test、secret scan 和三层 RAG Eval。这样项目不是只在一个问题上能演示，而是可以通过检索召回、引用审计和 claim 覆盖证明核心链路可复现。
 ```
 
 ### 18.2 面试官最可能追问的主线
@@ -1381,7 +1420,7 @@ Streamlit 适合快速 demo，但这个项目目标是课程和简历项目，�
 答：
 
 ```text
-项目有多层验证：单元/聚焦测试检查关键函数，import smoke 检查依赖可导入，secret scan 防止泄露 key，golden set eval 检查检索和 QA 行为，runtime status 检查本地依赖是否 ready。演示时我会同时展示 UI 和 eval，而不是只问一个提前准备好的问题。
+项目有多层验证：单元/聚焦测试检查关键函数，import smoke 检查依赖可导入，secret scan 防止泄露 key，retrieval/citation/claim eval 检查检索、引用和答案语义覆盖，runtime status 检查本地依赖是否 ready。演示时我会同时展示 UI 和 eval，而不是只问一个提前准备好的问题。
 ```
 
 问：为什么项目里要有 runtime status？
@@ -1405,7 +1444,9 @@ RAG 本地项目经常失败在环境，而不是业务代码，比如 FlagEmbed
 答：
 
 ```text
-golden set 不能只放简单问题，至少要覆盖 factual、method、evaluation、compare、ambiguous 和 no-evidence。每条样本应该包含 question、expected paper/chunk、must_contain、must_not_contain、gold_answer、category 和 notes。正例先保证 paper-level label，再给核心样本补 chunk-level label；无证据题要包含无关领域、错误前提、超出语料和时间敏感问题。这样才能知道优化影响了哪类问题。
+golden set 不能只放简单问题，至少要覆盖 factual、method、evaluation、compare、ambiguous 和 no-evidence。每条样本应该包含 question、expected paper/chunk、must_contain、must_not_contain、gold_answer、category 和 notes。正例先保证 paper-level label，再给核心样本补 chunk-level label；无证据题要包含无关领域、错误前提、超出语料和时间敏感问题。
+
+如果要评估“答案是否完整”，还要额外做 claim-level set：把一个参考答案拆成 2-4 个 expected claims，每个 claim 写 `accept_patterns` 和 `supporting_chunk_ids`。这样可以区分三类问题：检索没找到证据、引用不支撑答案、答案漏掉关键语义点。这样才能知道优化影响了哪类问题。
 ```
 
 问：如何判断一次 RAG 优化有效？
@@ -1413,7 +1454,7 @@ golden set 不能只放简单问题，至少要覆盖 factual、method、evaluat
 答：
 
 ```text
-我会先固定 golden set，再比较优化前后的 retrieval recall、MRR、citation validity、abstain precision、latency 和典型 hard cases。如果一个改动只让某个 demo question 变好，但整体 recall 或拒答变差，就不能算有效优化。
+我会先固定 golden set 和 claim-level set，再比较优化前后的 retrieval recall、MRR、citation precision、claim recall、grounded claim recall、abstain precision、latency 和典型 hard cases。如果是 query rewrite 或 HyDE 改动，还会单独看 rewrite gain/harm，确认它是提升召回而不是把原本能命中的样本弄坏。如果一个改动只让某个 demo question 变好，但整体 recall 或拒答变差，就不能算有效优化。
 ```
 
 ### 18.8 项目局限和诚实表达
@@ -1495,7 +1536,8 @@ Agent 就是能自己思考。
 7. 提问一个无关问题，比如天气，展示 no-evidence。
 8. 生成 Wiki，说明知识沉淀。
 9. 点击 feedback，说明 hard cases。
-10. 运行 `make eval-golden`，说明验证闭环。
+10. 运行 `make eval-golden`，说明 retrieval 验证闭环。
+11. 展示 `make eval-claims-report` 或 `docs/RAG_CLAIM_EVAL_REPORT.md`，说明答案语义覆盖和 grounded claim。
 
 适合演示的问题：
 
@@ -1522,7 +1564,7 @@ What is the weather tomorrow in Shanghai?
 
 展示 eval 时：
 
-> 我不是靠肉眼看一次答案来判断效果，而是用 golden set 检查 recall、citation existence 和 no-answer success。这样优化才可回归。
+> 我不是靠肉眼看一次答案来判断效果，而是分三层评测：retrieval 看 paper/chunk 是否找对，citation audit 看引用是否真实支撑答案，claim eval 看答案有没有覆盖关键语义结论。这样优化才可回归，也能解释失败到底发生在哪一层。
 
 ## 20. 课程作业设计
 
@@ -1668,7 +1710,7 @@ What is the weather tomorrow in Shanghai?
 | 拒答 | 至少 1 个无关问题触发 no-evidence |
 | Wiki | 至少 1 篇论文能生成 Wiki entry |
 | Feedback | helpful/not-helpful 能记录 |
-| Eval | `make eval-golden` 能跑通 |
+| Eval | `make eval-golden` 和 `make eval-claims` 能跑通 |
 | 表达 | 能讲清楚 dense/sparse/RRF/rerank/abstain/citation |
 
 ### 22.3 简历与面试最终检查
@@ -1679,7 +1721,7 @@ What is the weather tomorrow in Shanghai?
 |---|---|
 | 项目定位 | 能用一句话说明这是“论文 Agentic RAG 工作台”，不是普通聊天机器人 |
 | 技术主线 | 能从 discovery、ingest、retrieval、generation、harness、evaluation 讲清楚链路 |
-| 简历 bullet | 至少包含 Paper Discovery Loop、DeerFlow Harness 集成、混合检索、拒答/引用校验、golden set eval |
+| 简历 bullet | 至少包含 Paper Discovery Loop、DeerFlow Harness 集成、混合检索、拒答/引用校验、三层 RAG Eval |
 | 架构图 | 能手画 browser -> gateway -> harness/router -> paper_rag -> SQLite/Qdrant/LLM |
 | RAG 深挖 | 能解释 dense/sparse/RRF/rerank 的职责和取舍 |
 | Agentic 深挖 | 能解释 query rewrite、HyDE、reflect、abstain 为什么算决策点 |
