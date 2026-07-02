@@ -1,88 +1,110 @@
 # Paper RAG Agent
 
+[English](README_EN.md) | 中文
+
 [![ci](https://github.com/Ttttt-s/paper-rag-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Ttttt-s/paper-rag-agent/actions)
 [![codecov](https://codecov.io/gh/Ttttt-s/paper-rag-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/Ttttt-s/paper-rag-agent)
-[![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)]()
+[![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-An open-source academic-paper RAG agent with a runnable DeerFlow workspace UI.
-It can ingest papers, build a local hybrid index, answer literature questions
-with citations, generate wiki-style concept notes, collect feedback, and run a
-course/interview-grade RAG Eval Harness. The DeerFlow workspace also exposes the
-internal Agentic RAG loop, a Paper RAG-specific research memory layer, and a
-Knowledge Builder view for paper indexing status. It also includes a bounded
-Paper Discovery Loop for finding candidate papers before they are ingested into
-the evidence index.
+Paper RAG Agent 是一个面向学术论文的本地 RAG / Agentic RAG 项目。它可以把 arXiv、PDF URL 或本地 PDF 入库，解析论文，切分 chunk，建立 SQLite + Qdrant 混合索引，然后用带引用约束的 Agentic QA 回答论文问题。项目同时包含一个可运行的 DeerFlow 工作区 UI，让用户在浏览器里完成论文发现、入库、问答、证据追踪、知识构建、反馈和订阅。
 
-The repository is intended to be useful in two modes:
+这个仓库现在有三种使用方式：
 
-- **Standalone Paper RAG**: Python package, CLI scripts, local SQLite/Qdrant
-  index, retrieval, QA, wiki, feedback, and eval tools.
-- **Embedded DeerFlow App**: a modified DeerFlow checkout under
-  `integrations/deer-flow` that hosts the Paper RAG API and the
-  `/workspace/paper-rag` Next.js UI.
-- **DeerFlow Harness Extension**: Paper RAG tools and a `paper-research`
-  subagent registered under DeerFlow's harness runtime, so the lead agent can
-  call the same research capability through tools instead of only through the
-  dedicated UI page.
+| 模式 | 适合谁 | 入口 |
+|---|---|---|
+| Standalone Python 包 | 想在命令行或自己的服务里调用论文 RAG | `src/paper_rag/`、`scripts/` |
+| DeerFlow 本地应用 | 想直接打开网页体验完整产品 | `integrations/deer-flow/` |
+| DeerFlow Agent 扩展 | 想让 DeerFlow lead agent 自动调用论文工具 | `deerflow.community.paper_rag`、`paper-research` subagent |
 
-The beta target is a complete local project experience. Production deployment,
-CI golden gates, monitoring, backups, multi-tenant hardening, and cost
-accounting are deliberately left outside the default setup.
+本地体验是当前重点。生产部署、云上权限、备份恢复、成本核算和多租户隔离已有部分工程基础，但默认 README 以本地可跑通为主。
 
-## Course / Resume Project Pack
+## 功能总览
 
-This repository also includes a course-ready project pack for students who want
-to turn the system into a resume project and defend it in interviews:
-
-| File | Purpose |
+| 能力 | 说明 |
 |---|---|
-| [`course/README.md`](course/README.md) | Course material index |
-| [`course/student_quickstart.md`](course/student_quickstart.md) | Student runbook from clone to UI demo |
-| [`course/demo_pack.md`](course/demo_pack.md) | Fixed demo papers, 10+ standard questions, and live demo script |
-| [`course/troubleshooting_faq.md`](course/troubleshooting_faq.md) | Common install/runtime/eval failures and fixes |
-| [`course/paper_rag_agent_project_manual.md`](course/paper_rag_agent_project_manual.md) | Full Chinese technical manual for RAG, DeerFlow, resume, and interview prep |
-| [`course/paper_rag_agent_project_manual.pdf`](course/paper_rag_agent_project_manual.pdf) | PDF version of the course manual |
+| 论文入库 | 支持 arXiv ID、PDF URL、本地 PDF；可选择 PyMuPDF fallback 或 MinerU 解析 |
+| 混合检索 | SQLite 元数据、FTS5/BM25 稀疏检索、Qdrant dense vector、RRF 融合、可选 BGE reranker |
+| Agentic QA | query rewrite、HyDE、反思式检索、证据选择、引用校验、no-evidence 拒答 |
+| 引用约束 | 回答必须基于检索 chunk，使用 `[chunk:<id>]` 形式，避免伪造 `[1]`、作者年份引用 |
+| Paper Discovery | 按研究主题发现候选论文，返回候选分数、选中/跳过原因；候选必须入库后才能成为最终证据 |
+| Knowledge Builder | 在 UI 中查看 fetch、parse、chunk、embed、index、wiki 等构建状态 |
+| Research Memory | 多轮研究对话压缩记忆，只作为上下文，不作为最终证据 |
+| Wiki 自演化 | 对已入库论文生成概念笔记、相关概念和开放问题，默认关闭，可配置开启 |
+| 交付物生成 | 支持 Markdown survey、PPTX、DOCX、LaTeX/BibTeX、PDF |
+| Feedback 闭环 | 记录 thumbs/copy 等反馈，沉淀 hard cases，支撑后续评测和阈值校准 |
+| Proactive Agent | 订阅、inbox、digest、stale paper 提醒、auto-ingest hook |
+| DeerFlow UI | `/workspace/paper-rag` 页面提供 QA、Discovery、Knowledge Builder、Wiki、Feedback、Inbox、Subscriptions |
+| DeerFlow Agent Tools | `paper_ingest`、`paper_qa`、`paper_search`、`paper_section`、`paper_compare`、`paper_discover`、`wiki_lookup`、`export_bibtex`、`paper_deliver` |
+| 评测体系 | retrieval golden、QA no-judge、citation audit、claim eval、ablation、LLM recall 对比 |
+| 观测与运维 | Gateway metrics、Prometheus、Grafana dashboard、secret scan、smoke test |
 
-## What You Get
+## 架构
 
-| Area | Included |
-|---|---|
-| Retrieval | SQLite metadata, FTS5/BM25 sparse search, embedded Qdrant dense search, RRF fusion |
-| Discovery | Topic -> arXiv/Semantic Scholar search, dedup, relevance ranking, selected/skipped reasons, manual ingest |
-| QA | OpenAI-compatible LLM calls, query rewrite, reflect loop, abstain/no-evidence guard, citations |
-| Loop Engineering | Product-readable loop trace for intent, retrieval rounds, reflect, abstain, citations, latency placeholder |
-| Research Memory | Paper RAG-specific compressed memory for research continuity; never used as final evidence |
-| Harness | LangChain tool adapters for `paper_qa`, `paper_search`, `paper_section`, `paper_compare`, `paper_discover`, `wiki_lookup`, `export_bibtex`, plus a `paper-research` subagent |
-| UI | DeerFlow-style `/workspace/paper-rag` page for QA, Loop Trace, Discovery Loop, Knowledge Builder, wiki, ingest, feedback, inbox, subscriptions |
-| Ingest | arXiv/PDF ingest path with PyMuPDF fallback and optional MinerU parser |
-| Feedback | Helpful/not-helpful events, hard-case collection, eval item suggestions |
-| Evaluation | 60-item strict golden set, 40-item real/stress set, 40-item claim set, chunk/claim labels, strict gates, Markdown reports, retrieval and LLM-recall ablation |
-| Safety | `.env` and runtime data ignored, local secret scanner, evidence-only fallback |
+```mermaid
+flowchart TB
+    U["User"] --> FE["DeerFlow Next.js UI<br/>/workspace/paper-rag"]
+    U --> CLI["CLI scripts<br/>scripts/*.py"]
+    U --> AGENT["DeerFlow lead agent<br/>paper-research subagent"]
 
-## Prerequisites
+    FE --> GW["DeerFlow Gateway<br/>FastAPI"]
+    AGENT --> HARNESS["DeerFlow Harness tools<br/>paper_ingest / paper_qa / paper_deliver"]
+    CLI --> PKG["paper_rag Python package"]
+    GW --> ROUTER["/api/paper_rag/* router"]
+    HARNESS --> PKG
+    ROUTER --> PKG
 
-For the full DeerFlow UI path, use these versions:
+    PKG --> INGEST["ingest / parse / chunk"]
+    PKG --> RET["hybrid retrieval<br/>BM25 + Qdrant + RRF"]
+    PKG --> QA["Agentic QA<br/>rewrite / reflect / abstain / citation check"]
+    PKG --> DISC["Discovery loop"]
+    PKG --> DELIVER["Deliverables"]
+    PKG --> WIKI["Wiki"]
+    PKG --> PRO["Feedback / Proactive"]
 
-- Python 3.12 for the embedded DeerFlow backend.
-- Node.js 20+ with Corepack enabled.
-- `uv` for DeerFlow backend dependency installation.
-- A local shell on macOS/Linux.
-- An OpenAI-compatible chat provider key for real QA generation.
+    INGEST --> SQL[("SQLite<br/>papers / chunks / feedback")]
+    INGEST --> QDR[("Qdrant<br/>vectors")]
+    RET --> SQL
+    RET --> QDR
+    QA --> LLM["OpenAI-compatible LLM"]
+```
 
-The standalone Python package supports Python 3.10+, but the bundled DeerFlow
-backend declares Python 3.12+, so the recommended setup below uses one Python
-3.12 virtualenv for everything.
+### Discovery 与 QA 的边界
 
-## Quickstart: Full Local App
+Discovery 只负责找候选论文。候选论文的摘要、标题、外部 metadata 不能直接作为最终回答证据。只有论文完成入库、解析、切块、embedding、索引，并被 QA loop 检索出来之后，才能出现在最终回答引用里。
 
-Clone the repository and install the backend/runtime dependencies:
+## 环境要求
+
+| 组件 | 推荐版本 | 说明 |
+|---|---|---|
+| Python | 3.12 用于 DeerFlow；standalone 包支持 3.10+ | DeerFlow backend 当前建议 3.12 |
+| Node.js | 20+ | DeerFlow frontend 使用 pnpm / Corepack |
+| uv | 最新稳定版 | 用于安装 DeerFlow backend 依赖 |
+| Docker | 可选 | 仅在使用 Qdrant server、proactive sidecar、观测栈时需要 |
+| LLM Key | OpenAI-compatible | DeepSeek、OpenAI、DashScope/Qwen 等兼容接口都可 |
+
+默认本地配置 `config/local.yaml` 使用 embedded Qdrant：
+
+```yaml
+qdrant:
+  url: ""
+  local_path: ./data/index/qdrant_embedded
+```
+
+因此最小本地 demo 不强制启动 Docker Qdrant。
+
+## 快速开始：完整 DeerFlow UI
+
+### 1. 克隆项目
 
 ```bash
 git clone https://github.com/Ttttt-s/paper-rag-agent.git
 cd paper-rag-agent
+```
 
-# Install uv if needed, then create DeerFlow's backend virtualenv.
+### 2. 准备 DeerFlow backend Python 环境
+
+```bash
 python3 -m pip install -U uv
 uv python install 3.12
 
@@ -90,13 +112,14 @@ cd integrations/deer-flow/backend
 uv sync --python 3.12
 cd ../../..
 
-# Install Paper RAG into the same backend venv.
 export PY="$PWD/integrations/deer-flow/backend/.venv/bin/python"
 $PY -m pip install -U pip
-$PY -m pip install -e ".[dev,embed,ingest]"
+$PY -m pip install -e ".[dev,embed,ingest,deliver,deliver-pdf,proactive,deerflow]"
 ```
 
-Install the frontend dependencies:
+如果只想跑轻量测试，可以不装 `embed`；如果要真实入库和 QA，建议按上面的 extras 安装。
+
+### 3. 安装前端依赖
 
 ```bash
 cd integrations/deer-flow/frontend
@@ -105,14 +128,13 @@ corepack pnpm install
 cd ../../..
 ```
 
-Create your local environment file:
+### 4. 配置 LLM
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your own provider values. For DeepSeek or any
-OpenAI-compatible provider:
+编辑 `.env`，填入自己的 OpenAI-compatible provider：
 
 ```bash
 OPENAI_BASE_URL=https://api.deepseek.com
@@ -122,101 +144,180 @@ SMALL_MODEL=deepseek-chat
 PAPER_RAG_CONFIG=config/local.yaml
 ```
 
-Initialize the local store and ingest one starter paper:
+真实 key 只放在本地 `.env` 或 shell 环境中，不要提交到 git。
+
+### 5. 初始化索引并入库一篇论文
 
 ```bash
-make init-store
-make ingest ID=2310.11511
+$PY scripts/init_store.py
+$PY scripts/ingest_one.py --arxiv 2310.11511
 ```
 
-Start the DeerFlow gateway:
-
-```bash
-make deerflow-backend
-```
-
-In a second terminal, start the UI:
-
-```bash
-make deerflow-frontend
-```
-
-Open:
-
-```text
-http://127.0.0.1:3000/workspace/paper-rag
-```
-
-Try:
-
-- Ask: `What is Self-RAG?`
-- Discovery Loop: search a topic such as `agentic rag loop engineering`, inspect scores/reasons, and ingest selected candidates.
-- Loop Trace: inspect intent, retrieval rounds, abstain, and citation state.
-- Research Memory: continue a multi-turn thread and watch compressed memory warm up.
-- Knowledge Builder: confirm the ingested paper moves through fetch, parse, chunk, embed, index, and wiki states.
-- Wiki: generate a concept note for an indexed paper.
-- Feedback: click helpful/not helpful after an answer.
-- Subscriptions: add, pause, resume, and delete a topic subscription.
-
-## Smoke Test The App
-
-With the backend running:
-
-```bash
-make deerflow-smoke
-```
-
-For a real QA check that fails if the app only returns evidence-only fallback:
-
-```bash
-$PY scripts/deerflow_smoke.py \
-  --base-url http://127.0.0.1:8001 \
-  --timeout 180 \
-  --qa-question "What is Self-RAG?" \
-  --require-llm-answer
-```
-
-A healthy runtime status should look conceptually like:
-
-```text
-ok   200 runtime_status: llm-ready; embed-ok; qdrant-ok; vectors=...
-```
-
-If you see `embed-missing`, install `.[embed]` into the backend venv. If you
-see `qdrant-missing` or zero vectors after you already have parsed papers, run:
-
-```bash
-make deerflow-rebuild-index
-```
-
-## Standalone CLI Usage
-
-The CLI path uses the same local index and config:
-
-```bash
-export PY="$PWD/integrations/deer-flow/backend/.venv/bin/python"
-
-make init-store
-make ingest ID=2310.11511
-make ask Q="What is Self-RAG?"
-```
-
-For retrieval-only debugging without an LLM call:
-
-```bash
-$PY scripts/ask.py "What is Self-RAG?" --no-llm --top-k 8
-```
-
-For a local PDF:
+也可以用本地 PDF：
 
 ```bash
 $PY scripts/ingest_one.py --pdf /absolute/path/to/paper.pdf --title "My Paper"
 ```
 
-## Evaluation And Regression Gates
+### 6. 启动后端和前端
 
-Use these before changing retrieval, abstain thresholds, query rewrite, or the
-DeerFlow integration layer:
+终端 1：
+
+```bash
+make deerflow-backend
+```
+
+终端 2：
+
+```bash
+make deerflow-frontend
+```
+
+打开：
+
+```text
+http://127.0.0.1:3000/workspace/paper-rag
+```
+
+可以尝试：
+
+- Ask：`What is Self-RAG?`
+- Discovery Loop：搜索 `agentic rag loop engineering`，查看候选和原因，再入库选中的论文
+- Loop Trace：查看 intent、rewrite、retrieval rounds、abstain、citations
+- Knowledge Builder：查看论文从 fetch 到 wiki 的构建状态
+- Wiki：生成或查看论文概念笔记
+- Feedback：对回答点 helpful / not helpful
+- Subscriptions：新增、暂停、恢复、删除主题订阅
+- Deliver：生成 Markdown survey、PPT、Word、LaTeX/BibTeX 或 PDF
+
+## 命令行用法
+
+如果不启动 DeerFlow UI，也可以直接使用 Python 包和脚本。
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev,ingest,embed,deliver,deliver-pdf,deerflow]"
+```
+
+初始化：
+
+```bash
+python scripts/init_store.py
+python scripts/ingest_one.py --arxiv 2310.11511
+```
+
+问答：
+
+```bash
+python scripts/ask.py "What is Self-RAG?"
+python scripts/ask.py "What is the main contribution?" --paper-id arxiv:2310.11511
+python scripts/ask.py "What is Self-RAG?" --no-llm --top-k 8
+```
+
+批量入库：
+
+```bash
+cat > ids.txt <<EOF
+arxiv:2310.11511
+url:https://example.com/paper.pdf
+EOF
+
+python scripts/ingest_batch.py --file ids.txt
+```
+
+## DeerFlow Agent 工具
+
+Paper RAG 已注册为 DeerFlow Harness tools，并由内置 `paper-research` subagent 使用。
+
+| Tool | 作用 |
+|---|---|
+| `paper_ingest` | 入库 arXiv ID、PDF URL 或本地 PDF |
+| `paper_qa` | 对已索引论文进行证据约束 QA |
+| `paper_search` | 在本地论文库中搜索相关论文 |
+| `paper_section` | 读取某篇论文的指定章节 |
+| `paper_compare` | 按多个维度比较多篇论文 |
+| `paper_discover` | 按主题发现候选论文 |
+| `wiki_lookup` | 查询自演化 wiki 概念笔记 |
+| `export_bibtex` | 导出 BibTeX |
+| `paper_deliver` | 生成 Markdown / PPTX / DOCX / LaTeX+BIB / PDF |
+
+对应文件：
+
+```text
+integrations/deer-flow/backend/packages/harness/deerflow/community/paper_rag/tools.py
+integrations/deer-flow/backend/packages/harness/deerflow/subagents/builtins/paper_research.py
+integrations/deer-flow/skills/public/paper-research/SKILL.md
+```
+
+## HTTP API
+
+DeerFlow gateway 暴露 `/api/paper_rag/*`。常用端点如下：
+
+| Method | Path | 说明 |
+|---|---|---|
+| GET | `/api/paper_rag/status` | 运行时状态：LLM、embedding、Qdrant、索引数量 |
+| POST | `/api/paper_rag/qa` | SSE 流式 QA |
+| POST | `/api/paper_rag/qa/sync` | 同步 QA |
+| GET | `/api/paper_rag/papers` | 当前用户论文列表 |
+| POST | `/api/paper_rag/papers/ingest` | 入库 arXiv / PDF |
+| GET | `/api/paper_rag/knowledge/builds` | Knowledge Builder 状态 |
+| POST | `/api/paper_rag/discovery/run` | 运行论文发现 |
+| GET | `/api/paper_rag/discovery/runs` | 发现任务列表 |
+| GET | `/api/paper_rag/discovery/runs/{run_id}` | 发现任务详情 |
+| POST | `/api/paper_rag/discovery/candidates/{candidate_id}/ingest` | 入库发现候选 |
+| GET | `/api/paper_rag/wiki/{paper_id}` | 查询 wiki |
+| POST | `/api/paper_rag/wiki/{paper_id}/generate` | 生成 wiki |
+| POST | `/api/paper_rag/deliver` | 生成交付物 |
+| POST | `/api/paper_rag/feedback` | 写入反馈 |
+| GET | `/api/paper_rag/feedback/recent` | 最近反馈 |
+| GET | `/api/paper_rag/feedback/stats` | 反馈统计 |
+| GET | `/api/paper_rag/subscriptions` | 订阅列表 |
+| POST | `/api/paper_rag/subscriptions` | 新增订阅 |
+| PATCH | `/api/paper_rag/subscriptions/{sub_id}` | 启用/禁用订阅 |
+| DELETE | `/api/paper_rag/subscriptions/{sub_id}` | 删除订阅 |
+| GET | `/api/paper_rag/inbox` | inbox 列表 |
+| GET | `/api/paper_rag/inbox/stream` | inbox SSE |
+| POST | `/api/paper_rag/inbox/{item_id}/read` | 标记已读 |
+| POST | `/api/paper_rag/inbox/{item_id}/dismiss` | 关闭通知 |
+| POST | `/api/paper_rag/proactive/digest/run` | 手动触发 digest |
+| POST | `/api/paper_rag/proactive/stale/run` | 手动触发 stale scan |
+
+本地 `make deerflow-backend` 默认设置 `DEER_FLOW_AUTH_DISABLED=1`，方便 demo。生产或对外服务不要这样启动，应启用 DeerFlow auth 配置和 session 中间件。
+
+## 交付物生成
+
+支持格式定义在 `src/paper_rag/deliver/dispatch.py`：
+
+```text
+markdown_survey
+pptx
+docx
+latex_bib
+pdf
+```
+
+Python 示例：
+
+```python
+from paper_rag.deliver import dispatch
+
+result = dispatch(
+    "markdown_survey",
+    ["arxiv:2310.11511"],
+    title="Self-RAG Reading Notes",
+)
+
+print(result.filename)
+print(result.content_type)
+```
+
+Agent / DeerFlow 中使用 `paper_deliver`。
+
+## 评测与质量门禁
+
+常用命令：
 
 ```bash
 make verify-p0
@@ -230,251 +331,105 @@ make eval-claims-report
 make eval-llm-recall
 ```
 
-What they mean:
-
-| Command | Purpose |
+| 命令 | 作用 |
 |---|---|
-| `make verify-p0` | Focused lint, focused tests, import smoke, secret scan, retrieval golden set |
-| `make eval-golden` | Retrieval-only strict golden set; no chat API call, deterministic local rewrite |
-| `make eval-golden-qa` | Full QA no-judge golden set; uses provider credentials for answer generation |
-| `make eval-report` | Retrieval-only strict golden set plus `docs/RAG_EVAL_REPORT.md` |
-| `make eval-citation-audit` | Full QA no-judge run plus `docs/RAG_CITATION_AUDIT.md` with per-citation diagnosis |
-| `make eval-ablation` | Compare dense-only, sparse-only, hybrid RRF, hybrid+rerank, rewrite on/off |
-| `make eval-claims` | Claim-level QA no-judge gate for semantic answer coverage and grounded claims |
-| `make eval-claims-report` | Claim eval plus `docs/RAG_CLAIM_EVAL_REPORT.md` with missing-claim diagnosis |
-| `make eval-llm-recall` | Compare baseline retrieval, local rewrite/HyDE, and LLM rewrite/HyDE recall |
-| `make secret-scan` | Local scan for accidentally committed API keys |
-| `make hard-cases` | Turn feedback events into candidate eval items |
+| `make verify-p0` | lint、focused tests、smoke、secret scan、golden retrieval |
+| `make eval-golden` | retrieval-only strict golden set |
+| `make eval-golden-qa` | full QA no-judge golden set |
+| `make eval-citation-audit` | 生成 citation audit 报告 |
+| `make eval-ablation` | 对比 dense、sparse、hybrid、rerank、rewrite |
+| `make eval-claims` | claim-level QA gate |
+| `make eval-llm-recall` | 对比 no/local/LLM rewrite 的 recall |
+| `make secret-scan` | 扫描可能误提交的 API key |
 
-The evaluation split is:
+评测数据：
 
 ```text
-tests/eval/qa_set.golden.jsonl  # 60 stable regression items, 45 chunk-labeled positives, 15 no-evidence
-tests/eval/qa_set.real.jsonl    # 40 real/stress items for exploration and hard-case mining
-tests/eval/qa_set.claims.jsonl  # 40 claim-level items, 30 positives with 90 expected claims, 10 no-evidence
+tests/eval/qa_set.golden.jsonl
+tests/eval/qa_set.real.jsonl
+tests/eval/qa_set.claims.jsonl
 ```
 
-The harness is intentionally split into three deterministic layers:
+最近维护时使用过的快速验证组合：
 
-1. Retrieval recall: expected paper/chunk IDs are compared with top-k retrieval
-   results, like a search-engine offline eval.
-2. Citation precision: generated citations must point to real selected
-   evidence chunks and preferably to `citation_chunk_ids` that directly support
-   the answer.
-3. Claim recall: final answers are checked against hand-labeled
-   `expected_claims`; `grounded_claim_recall` only counts claims whose citation
-   hits a supporting chunk.
+```bash
+.venv/bin/ruff check --select E,F,W,I --ignore E501 src tests
+PYTHONPATH=src .venv/bin/python scripts/_run_smoke.py
+PYTHONPATH=src:tests .venv/bin/python -m pytest -q --ignore=tests/eval --ignore=tests/test_gateway_paper_rag.py --ignore=tests/test_middleware.py --ignore=tests/test_langgraph_middleware.py
+PYTHONPATH=src:integrations/deer-flow/backend/packages/harness .venv/bin/python -m pytest -q integrations/deer-flow/backend/tests/test_paper_rag_harness_adapter.py
+```
 
-The optional LLM judge is reserved for manual quality reports. It is not part
-of the fast default gate, so local eval remains reproducible and cost-controlled.
+## Docker 与观测
 
-Latest local strict retrieval baseline (`make eval-golden`, top-k=10):
+根目录 `Dockerfile` 是可选的 standalone paper_rag 镜像，适合跑 CLI、预热 embedding 模型或 proactive cron：
 
-| Metric | Value |
-|---|---:|
-| Positive paper recall@10 | 0.989 |
-| Positive paper MRR | 0.989 |
-| Positive chunk recall@10 | 0.811 |
-| Chunk label coverage | 1.000 |
-| FPR@10 before first evidence | 0.000 |
-| Errors | 0 |
+```bash
+make docker-build
+docker build -t paper-rag:full --build-arg EXTRAS=deliver,deerflow,proactive .
+```
 
-Latest local strict QA/no-judge baseline (`make eval-golden-qa`, top-k=10):
+预热 BGE-M3 模型：
 
-| Metric | Value |
-|---|---:|
-| Citation existence | 1.000 |
-| Citation precision | 0.867 |
-| Citation paper precision | 0.922 |
-| Must-contain coverage | 0.933 |
-| No-answer success | 1.000 |
-| No-answer direct abstain | 0.933 |
-| Errors | 0 |
+```bash
+make docker-build-bake
+```
 
-QA generation uses deterministic evidence selection before calling the LLM:
-the full retrieval window is still returned as `chunks`, but only the compact
-`evidence_chunks` set is placed in the prompt and allowed citation list.
+以 proactive cron 模式运行 standalone 容器：
 
-Latest claim-level QA baseline (`make eval-claims-report`, top-k=10):
+```bash
+docker run --rm \
+  -v "$PWD/data:/opt/paper_rag/data" \
+  -v "$PWD/config:/opt/paper_rag/config:ro" \
+  --env-file .env \
+  -e PAPER_RAG_CONFIG=/opt/paper_rag/config/local.yaml \
+  -e PAPER_RAG_MODE=proactive \
+  paper-rag:full proactive
+```
 
-| Metric | Value |
-|---|---:|
-| Claim recall | 0.811 |
-| Grounded claim recall | 0.722 |
-| No-answer success | 1.000 |
-| Forbidden claim violations | 0 |
-| Claim-labeled items | 30 / 40 |
-| Errors | 0 |
+DeerFlow 自身的生产 compose 位于 `integrations/deer-flow/docker/`：
 
-Latest retrieval ablation (`make eval-ablation`, positive items only):
+```bash
+cd integrations/deer-flow/docker
+docker compose -f docker-compose.yaml up -d
+```
 
-| Strategy | Paper recall@10 | Paper MRR | Chunk recall@10 | Avg latency |
-|---|---:|---:|---:|---:|
-| Dense only | 0.922 | 0.974 | 0.767 | 198.22 ms |
-| Sparse only | 0.956 | 0.782 | 0.567 | 2.19 ms |
-| Hybrid RRF | 0.944 | 0.959 | 0.811 | 152.66 ms |
-| Hybrid + rerank, no rewrite | 0.989 | 0.959 | 0.733 | 156.95 ms |
-| Hybrid + rerank + local rewrite | 0.989 | 0.989 | 0.811 | 220.52 ms |
+Prometheus / Grafana 配置位于 `docs/integration/observability/`。如果已经启动上面的 DeerFlow compose，可以从 `docs/integration` 目录启动观测栈：
 
-Latest LLM-assisted recall comparison (`make eval-llm-recall`,
-`qa_set.claims.jsonl`, top-k=10):
+```bash
+cd docs/integration
+docker compose -f observability/docker-compose.observability.yaml up -d
+```
 
-| Strategy | Paper recall@10 | Chunk recall@10 | Rewrite gain | Harm rate | Avg latency |
-|---|---:|---:|---:|---:|---:|
-| Baseline, no rewrite | 0.983 | 0.717 | 0 | 0.000 | 246.08 ms |
-| Local rewrite + HyDE | 0.983 | 0.817 | 4 | 0.025 | 215.31 ms |
-| LLM rewrite + HyDE | 1.000 | 0.933 | 10 | 0.050 | 3467.58 ms |
-
-`eval-llm-recall` measures whether LLM-assisted rewrite/HyDE improves
-retrieval recall. It is not an LLM judge: the labels are still paper/chunk IDs
-from the claim set.
-
-## Repository Layout
+默认观测地址：
 
 ```text
-paper-rag-agent/
-|-- src/paper_rag/                         # Standalone Python package
-|   |-- rag/                               # QA loop, research memory, abstain, streaming, query rewrite
-|   |-- discovery/                         # Paper discovery loop, candidate ranking, trace, SQLite run store
-|   |-- retrieve/                          # Dense/sparse retrieval, formatting, rerank
-|   |-- store/                             # SQLite + Qdrant ingest/index stores
-|   |-- parse/ and chunk/                  # PDF parsing and chunk construction
-|   |-- wiki/                              # Self-evolving concept notes
-|   |-- proactive/                         # Inbox, subscriptions, digests
-|   `-- feedback/                          # Feedback event storage
-|-- integrations/deer-flow/                # Embedded runnable DeerFlow app
-|   |-- backend/packages/harness/deerflow/
-|   |   |-- community/paper_rag/            # DeerFlow Harness tool adapters
-|   |   `-- subagents/builtins/             # paper-research subagent config
-|   |-- backend/app/gateway/routers/
-|   |   `-- paper_rag.py                   # Paper RAG FastAPI adapter
-|   `-- frontend/src/app/workspace/paper-rag/
-|       `-- page.tsx                       # Paper RAG workspace UI
-|-- scripts/                               # Setup, ingest, smoke, eval helper scripts
-|-- tests/                                 # Unit/integration/eval tests
-|-- tests/eval/qa_set.golden.jsonl         # Golden regression set
-|-- course/                                # Course runbooks, demo pack, PDF manual
-|-- config/local.yaml                      # Docker-free local config
-`-- docs/                                  # Design, integration, operations notes
+Prometheus: http://localhost:9090
+Grafana:    http://localhost:3001  admin/admin
 ```
 
-## Architecture
+## 配置文件
 
-```mermaid
-flowchart TB
-    FE["DeerFlow Next.js UI<br/>/workspace/paper-rag"] --> GW["DeerFlow Gateway<br/>FastAPI"]
-    GW --> API["paper_rag router<br/>/api/paper_rag/*"]
-    LA["DeerFlow Lead Agent"] --> HAR["DeerFlow Harness<br/>paper_rag tools + paper-research subagent"]
-    HAR --> QA
-    API --> DISC["paper_rag.discovery<br/>candidate search + ranking"]
-    DISC --> SQL
-    HAR --> DISC
-    API --> QA["paper_rag.rag<br/>memory + loop trace + QA + abstain"]
-    QA --> MEM[("SQLite<br/>research_memory")]
-    QA --> RET["paper_rag.retrieve<br/>BM25 + dense + RRF"]
-    RET --> SQL[("SQLite<br/>papers, chunks, feedback")]
-    RET --> QDR[("Embedded Qdrant<br/>vectors")]
-    API --> KB["Knowledge Builder<br/>ingest/index/wiki status"]
-    API --> WIKI["paper_rag.wiki<br/>concept notes"]
-    API --> PRO["paper_rag.proactive<br/>inbox + subscriptions"]
-    QA --> LLM["OpenAI-compatible<br/>chat provider"]
-```
-
-## Discovery Flow
-
-Discovery is deliberately separate from QA evidence. It helps students and the
-agent find promising papers, but a candidate does not become answer evidence
-until it is ingested, parsed, chunked, embedded, indexed, and later retrieved by
-the QA loop.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant U as User
-    participant UI as DeerFlow UI
-    participant DISC as Discovery Loop
-    participant KB as Knowledge Builder
-    participant QA as Agentic RAG QA
-
-    U->>UI: Enter research topic
-    UI->>DISC: POST /api/paper_rag/discovery/run
-    DISC-->>UI: candidates + scores + selected/skipped reasons + trace
-    U->>UI: Ingest selected candidate
-    UI->>KB: POST /api/paper_rag/discovery/candidates/{id}/ingest
-    KB-->>UI: fetch/parse/chunk/embed/index status
-    U->>UI: Ask paper question
-    UI->>QA: POST /api/paper_rag/qa/sync
-    QA-->>UI: answer + chunk citations + Loop Trace
-```
-
-Default local config uses embedded Qdrant at:
-
-```text
-data/index/qdrant_embedded
-```
-
-That keeps the demo Docker-free. For multi-process or production-style use,
-switch `config/*.yaml` to a Qdrant server URL.
-
-## Request Flow
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant U as User
-    participant UI as DeerFlow UI
-    participant GW as Gateway
-    participant RAG as Paper RAG
-    participant MEM as Research Memory
-    participant RET as Retriever
-    participant LLM as LLM
-
-    U->>UI: Ask a paper question
-    UI->>GW: POST /api/paper_rag/qa/sync
-    GW->>RAG: Dispatch with local config
-    RAG->>MEM: Load compressed research memory
-    MEM-->>RAG: Query context only, not evidence
-    RAG->>RET: Rewrite, retrieve, fuse, rerank
-    RET-->>RAG: Top chunks with paper/chunk citations
-    RAG->>RAG: Abstain decision
-    alt no evidence
-        RAG-->>UI: no_evidence answer, no fabricated citations
-    else enough evidence
-        RAG->>LLM: Evidence-grounded prompt
-        LLM-->>RAG: Answer
-        RAG-->>UI: Answer + citations + confidence
-    end
-    RAG->>MEM: Append turn and compress when threshold is reached
-    UI-->>U: Render answer, citations, Loop Trace, Research Memory, feedback controls
-```
-
-## Common Troubleshooting
-
-| Symptom | Likely Cause | Fix |
-|---|---|---|
-| `integrations/deer-flow/backend/.venv/bin/python: no such file` | DeerFlow backend venv was not created | Run `cd integrations/deer-flow/backend && uv sync --python 3.12` |
-| Backend starts but QA says LLM unavailable | Missing `.env` values or provider failure | Check `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL` |
-| `/api/paper_rag/status` shows `embed-missing` | `FlagEmbedding` extra not installed | `$PY -m pip install -e ".[embed,ingest]"` |
-| Dense retrieval has zero vectors | Store initialized but papers not indexed | `make ingest ID=2310.11511` or `make deerflow-rebuild-index` |
-| Frontend cannot reach API | Backend not running or wrong port | Start `make deerflow-backend`; default port is `8001` |
-| `pnpm` command missing | Corepack not enabled | `corepack enable` then rerun `corepack pnpm install` |
-| Slow first QA/ingest | Model weights downloading | Wait for BGE model download; cache lives under local model/cache dirs |
-| Secret scan fails | A key-like value is in tracked text | Move real secrets into `.env`; never commit provider keys |
-
-## Configuration Notes
-
-Important local files:
-
-| File | Purpose |
+| 文件 | 说明 |
 |---|---|
-| `.env.example` | Copy to `.env` and fill provider credentials |
-| `config/local.yaml` | Recommended Docker-free local config |
-| `config/default.yaml` | Baseline package config |
-| `docs/integration/deerflow_embedded.md` | Detailed DeerFlow integration runbook |
-| `docs/P012_COMPLETION_PLAN.md` | Current P0/P1/P2 completion map |
-| `docs/MINERU_SETUP.md` | Optional MinerU setup for richer PDF parsing |
+| `.env.example` | 本地环境变量模板 |
+| `config/local.yaml` | 本地 demo 推荐配置，embedded Qdrant |
+| `config/default.yaml` | Python 包默认配置 |
+| `config/production.yaml` | 生产式配置示例，适合远端 Qdrant |
+| `config/magic-pdf.json` | MinerU / magic-pdf 配置 |
 
-Runtime data is intentionally ignored by git:
+关键环境变量：
+
+| 变量 | 说明 |
+|---|---|
+| `PAPER_RAG_CONFIG` | 配置文件路径，默认常用 `config/local.yaml` |
+| `PAPER_RAG_HOME` | DeerFlow 查找 paper_rag 包时使用 |
+| `OPENAI_BASE_URL` | OpenAI-compatible endpoint |
+| `OPENAI_API_KEY` | LLM provider key |
+| `CHAT_MODEL` | 回答用模型 |
+| `SMALL_MODEL` | 小模型，当前多处复用 chat model 即可 |
+| `DEER_FLOW_AUTH_DISABLED` | 本地 demo 可设 `1`；生产不要关闭 auth |
+
+运行时数据默认不提交：
 
 ```text
 .env
@@ -486,19 +441,91 @@ integrations/deer-flow/frontend/node_modules
 integrations/deer-flow/frontend/public/demo/threads/*/user-data/
 ```
 
-## Development
+## 目录结构
 
-Use the backend venv as the project Python:
-
-```bash
-export PY="$PWD/integrations/deer-flow/backend/.venv/bin/python"
-
-$PY -m ruff check src tests
-$PY -m pytest -q --ignore=tests/eval
-$PY scripts/secret_scan.py
+```text
+paper-rag-agent/
+|-- src/paper_rag/                         # Standalone Python package
+|   |-- ingest/                            # arXiv / URL / local PDF source
+|   |-- parse/                             # PyMuPDF / MinerU parsing
+|   |-- chunk/                             # text and multimodal chunk builder
+|   |-- embed/                             # bge-m3 embedding
+|   |-- store/                             # SQLite + Qdrant stores
+|   |-- retrieve/                          # dense/sparse/hybrid retrieval
+|   |-- rag/                               # Agentic QA, abstain, memory, streaming
+|   |-- discovery/                         # Paper Discovery Loop
+|   |-- wiki/                              # self-evolving wiki
+|   |-- deliver/                           # markdown/pptx/docx/latex/pdf
+|   |-- feedback/                          # feedback events and hard cases
+|   |-- proactive/                         # subscriptions, inbox, digest, stale
+|   `-- tools/                             # LLM-agent-facing tool facades
+|-- integrations/deer-flow/                # Runnable DeerFlow app
+|   |-- backend/app/gateway/routers/       # paper_rag API router
+|   |-- backend/packages/harness/deerflow/ # harness tools and subagents
+|   |-- docker/                            # DeerFlow compose files
+|   |-- frontend/src/app/workspace/paper-rag/
+|   `-- skills/public/paper-research/
+|-- scripts/                               # ingest, eval, smoke, operations
+|-- tests/                                 # unit/integration/eval tests
+|-- tests/eval/                            # golden/real/claims eval sets
+|-- course/                                # course and interview material
+|-- docs/                                  # architecture, ADR, operations, reports
+|-- config/                                # local/default/production configs
+|-- Dockerfile                             # optional standalone paper_rag image
+`-- docker-entrypoint.sh                   # standalone container entrypoint
 ```
 
-Frontend checks:
+## 课程与面试材料
+
+| 文件 | 内容 |
+|---|---|
+| [course/README.md](course/README.md) | 课程材料入口 |
+| [course/student_quickstart.md](course/student_quickstart.md) | 学生从 clone 到 demo 的 runbook |
+| [course/demo_pack.md](course/demo_pack.md) | 固定 demo 论文、问题和演示脚本 |
+| [course/troubleshooting_faq.md](course/troubleshooting_faq.md) | 常见问题 |
+| [course/paper_rag_agent_project_manual.md](course/paper_rag_agent_project_manual.md) | 中文项目手册 |
+| [docs/INTERVIEW_NOTES.md](docs/INTERVIEW_NOTES.md) | 面试速查 |
+
+## 常见问题
+
+| 症状 | 常见原因 | 处理 |
+|---|---|---|
+| `integrations/deer-flow/backend/.venv/bin/python: no such file` | DeerFlow backend venv 未创建 | `cd integrations/deer-flow/backend && uv sync --python 3.12` |
+| `pnpm` 不存在 | Corepack 未启用 | `corepack enable` |
+| QA 报 LLM unavailable | `.env` 未配置或 provider 不通 | 检查 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CHAT_MODEL` |
+| `/api/paper_rag/status` 显示 `embed-missing` | 未安装 embedding extra | `$PY -m pip install -e ".[embed,ingest]"` |
+| dense 检索返回 0 | 索引未建或 Qdrant collection 缺失 | `$PY scripts/init_store.py`，必要时 `make deerflow-rebuild-index` |
+| 第一次入库或 QA 很慢 | 模型首次下载 | 等待 BGE / reranker 模型缓存完成 |
+| MinerU 不可用 | 未安装 `magic-pdf` 或模型未下载 | 先用 PyMuPDF fallback，或看 [docs/MINERU_SETUP.md](docs/MINERU_SETUP.md) |
+| 答案拒答 | 检索证据不足或问题不在语料内 | 入库更多论文，或用 Discovery 找候选 |
+| secret scan 失败 | key-like 文本进入 tracked 文件 | 移到 `.env`，不要提交真实 key |
+
+## 开发
+
+安装开发依赖：
+
+```bash
+python -m pip install -e ".[dev,ingest,deerflow]"
+```
+
+常用检查：
+
+```bash
+ruff check src tests
+pytest -q --ignore=tests/eval
+PYTHONPATH=src python scripts/_run_smoke.py
+python scripts/secret_scan.py
+```
+
+DeerFlow 相关测试：
+
+```bash
+make deerflow-paper-rag-test
+PYTHONPATH=src:integrations/deer-flow/backend/packages/harness \
+  python -m pytest -q integrations/deer-flow/backend/tests/test_paper_rag_harness_adapter.py
+```
+
+前端检查：
 
 ```bash
 cd integrations/deer-flow/frontend
@@ -506,46 +533,29 @@ corepack pnpm typecheck
 corepack pnpm exec eslint src/app/workspace/paper-rag/page.tsx
 ```
 
-Focused DeerFlow backend integration checks:
+## 进一步阅读
 
-```bash
-make deerflow-paper-rag-test
+| 文档 | 内容 |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 总体架构 |
+| [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md) | 系统设计一页纸 |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | 部署与运维 |
+| [docs/integration/deerflow_embedded.md](docs/integration/deerflow_embedded.md) | DeerFlow 集成运行指南 |
+| [docs/VERIFICATION_REPORT.md](docs/VERIFICATION_REPORT.md) | 全栈验证报告 |
+| [docs/RAG_EVAL_GUIDE.md](docs/RAG_EVAL_GUIDE.md) | RAG 评测指南 |
+| [docs/adrs/](docs/adrs/) | 架构决策记录 |
+| [docs/MINERU_SETUP.md](docs/MINERU_SETUP.md) | MinerU 设置 |
+| [docs/PERF_BASELINE.md](docs/PERF_BASELINE.md) | 性能基线 |
+
+## 分支说明
+
+当前主线 `main` 已包含 DeerFlow 源码，路径为：
+
+```text
+integrations/deer-flow/
 ```
 
-This target intentionally uses `integrations/deer-flow/backend/.venv/bin/python`
-through `DEERFLOW_BACKEND_PY`; the root `.venv` is not a complete DeerFlow
-backend environment. If that interpreter does not exist yet, run
-`cd integrations/deer-flow/backend && uv sync --python 3.12` first.
-
-## Beta Scope
-
-Complete for the local beta:
-
-- Real Paper RAG runtime with local index and OpenAI-compatible LLM.
-- DeerFlow gateway adapter and DeerFlow-style Paper RAG workspace UI.
-- QA, citations, loading/error/no-evidence states.
-- Knowledge Builder, Wiki, Ingest, Feedback, Inbox, and Subscription workflows.
-- Golden-set baseline and RAG tuning hooks.
-- Local secret scanning and runtime-data ignore rules.
-
-Deferred by design for now:
-
-- Cloud deployment automation.
-- CI golden gate enforcement.
-- Production permission isolation.
-- Backup/restore playbooks.
-- Monitoring dashboards as required local setup.
-- Larger real-world golden sets.
-- Cost accounting.
-
-## Further Reading
-
-- [Embedded DeerFlow Integration](docs/integration/deerflow_embedded.md)
-- [P0/P1/P2 Completion Plan](docs/P012_COMPLETION_PLAN.md)
-- [System Design](docs/SYSTEM_DESIGN.md)
-- [Operations Notes](docs/OPERATIONS.md)
-- [ADR Index](docs/adrs/)
-- [MinerU Setup](docs/MINERU_SETUP.md)
+旧分支 `codex/paper-rag-integration` 是早期 `vendor/deer-flow/` 集成尝试。主线已经选择性移植了其中有价值的 `paper_ingest`、`paper_deliver` 和 `paper-research` skill，不需要整支合并旧分支。
 
 ## License
 
