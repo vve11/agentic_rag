@@ -72,6 +72,13 @@ deliver-pdf = [
 proactive = [
     "apscheduler>=3.10",
 ]
+# Optional local vision fallback for figure/table summaries.
+vision-local = [
+    "accelerate>=0.30",
+    "pillow>=10",
+    "torch>=2.2",
+    "transformers<5",
+]
 # Development + CI tooling.
 dev = [
     "pytest>=8.0",

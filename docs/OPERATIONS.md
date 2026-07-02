@@ -16,6 +16,9 @@ pip install -e .
 # 想用本地 MinerU 解析
 pip install -e .[mineru]
 
+# 想让图表摘要 API 失败后尝试本地 Qwen2.5-VL fallback
+pip install -e .[vision-local]
+
 # 开发依赖（测试 + ruff）
 pip install -e .[dev]
 ```
@@ -48,6 +51,30 @@ export OPENAI_API_KEY=sk-...
 export CHAT_MODEL=...
 export SMALL_MODEL=...   # 可选，目前未独立使用
 ```
+
+### 视觉模型（可选，ingest 图表摘要）
+
+默认关闭。打开 `config/local.yaml` 或当前 `PAPER_RAG_CONFIG` 中的：
+
+```yaml
+vision:
+  enabled: true
+  fallback_local: false
+```
+
+再设置 OpenAI-compatible 视觉模型：
+
+```bash
+export VISION_BASE_URL=https://...
+export VISION_API_KEY=sk-...
+export VISION_MODEL=qwen-vl-plus
+```
+
+启用后，MinerU 提取的 `figures/*.png` 会在 chunk 入库前生成
+`visual_summary`，并把摘要追加进 figure/table chunk 的 `text` 和
+`context_text`，用于 Qdrant embedding 和 FTS 检索。API 失败不会导致
+ingest 失败；如果 `vision.fallback_local: true` 且本地依赖可用，会尝试
+Qwen2.5-VL fallback，否则保留 caption/context 原始行为。
 
 ## 3. 日常操作
 
@@ -111,6 +138,7 @@ python scripts/wiki_review.py
 | `database is locked` | SQLite 并发写 | 等本迭代 P0-#1 修；临时 `rm data/index/papers.sqlite-journal` |
 | `qdrant_client.http.exceptions.UnexpectedResponse` | Qdrant 没起 | `bash scripts/up_qdrant.sh` 或 `docker ps` 看 paper-rag-qdrant |
 | `mineru: command not found` | 没装 mineru | `pip install -e .[mineru]` 或在 config 里改 `mineru.fallback_to_pymupdf: true` |
+| 图表没有 `visual_summary` | `vision.enabled` 关闭、`VISION_*` 缺失、图片路径不存在或 API 失败 | 启用 `vision.enabled`，配置 `VISION_BASE_URL`/`VISION_API_KEY`/`VISION_MODEL`；需要本地兜底时安装 `.[vision-local]` 并设置 `vision.fallback_local: true` |
 | `Field name "json" in ... shadows attribute` | 旧 pydantic 报警 | 忽略，已用 alias |
 | 答案里出现 `[1] [2]` 这种引用 | LLM 没按 prompt 输出 | 等 P0-#3；临时手工核对 |
 | 入库很慢 | Wiki trigger 同步阻塞 | 关 `wiki.enabled` 或等 P1-#11 |

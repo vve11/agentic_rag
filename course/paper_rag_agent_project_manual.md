@@ -53,6 +53,7 @@ Paper RAG Agent 是一个集成在 DeerFlow 工作台里的 Agentic RAG 学术�
 | Rerank | BAAI/bge-reranker-v2-m3 | 对候选 chunk 做 cross-encoder 相关性重排 |
 | LLM | OpenAI-compatible API | DeepSeek/OpenAI/Qwen 等兼容协议模型生成答案与 rewrite |
 | PDF 解析 | PyMuPDF fallback, optional MinerU | 从论文 PDF 中抽取文本、结构和多模态线索 |
+| 图表理解 | OpenAI-compatible vision API, optional Qwen2.5-VL fallback | 对 MinerU 提取的图表生成视觉摘要，并随上下文一起入库检索 |
 | 评测 | JSONL golden set, pytest, smoke scripts | 评估 retrieval、citation、no-answer 和产品 API |
 | 工程安全 | `.env` gitignore, secret scan | 避免把 API key 和 runtime data 提交进仓库 |
 
@@ -185,6 +186,24 @@ paper source
 3. 图片上下文缺失：图题、图注和正文引用可能分离。
 
 项目当前策略是 PyMuPDF fallback 保证可运行，MinerU 作为可选增强。课程里可以把它讲成一个工程取舍：第一阶段优先让链路跑通，第二阶段再提升解析质量。
+
+### 5.3 图表多模态摘要为什么有价值
+
+MinerU 不只是抽文本；它还能把论文里的图片资产落到 `data/parsed/<paper_id>/figures/`，并在 `paper.md` 中保留图片引用。新增的 vision enrichment 会在 chunk 入库前读取这些 figure/table 图片，结合 caption 和正文前后文，用 OpenAI-compatible 视觉模型生成结构化摘要，再把摘要写回 chunk：
+
+```text
+figure image + caption + surrounding context
+  -> vision model summary
+  -> visual_summary metadata
+  -> enriched chunk text/context_text
+  -> embedding + SQLite/Qdrant
+```
+
+这样做的核心价值是：检索时不再只依赖“图注里有没有关键词”，而是可以召回“图里展示了什么趋势、对比了哪些方法、支持了论文哪个结论”。比如用户问“方法结构图说明了什么”或“实验曲线显示哪个方法最好”，系统可以通过 `modality=figure` 的 chunk 命中图表摘要，再用 `[chunk:<id>]` 形式引用。
+
+课程里要强调边界：当前不是把图片二进制直接放进向量库，也不是回答阶段让模型实时看图；它是在 ingest 阶段把图片理解结果转成可检索文本。这样复用现有 BM25 + Qdrant + rerank + citation 架构，成本更低，也更容易评测和调试。
+
+失败策略也很重要：视觉 API 缺 key、超时或本地 Qwen2.5-VL fallback 缺依赖时，ingest 不会失败，而是回到 caption/context 原始行为，并在 metadata 里记录 `visual_summary_status=skipped|failed`。这体现了工程系统里的 graceful degradation。
 
 面试追问：
 

@@ -24,6 +24,7 @@ Paper RAG Agent 是一个面向学术论文的本地 RAG / Agentic RAG 项目。
 | 能力 | 说明 |
 |---|---|
 | 论文入库 | 支持 arXiv ID、PDF URL、本地 PDF；可选择 PyMuPDF fallback 或 MinerU 解析 |
+| 图表多模态摘要 | 可选用 OpenAI-compatible 视觉 API 总结 MinerU 提取的 figure/table，并把摘要随上下文一起入库；API 失败时可懒加载本地 Qwen2.5-VL fallback |
 | 混合检索 | SQLite 元数据、FTS5/BM25 稀疏检索、Qdrant dense vector、RRF 融合、可选 BGE reranker |
 | Agentic QA | query rewrite、HyDE、反思式检索、证据选择、引用校验、no-evidence 拒答 |
 | 引用约束 | 回答必须基于检索 chunk，使用 `[chunk:<id>]` 形式，避免伪造 `[1]`、作者年份引用 |
@@ -145,6 +146,20 @@ PAPER_RAG_CONFIG=config/local.yaml
 ```
 
 真实 key 只放在本地 `.env` 或 shell 环境中，不要提交到 git。
+
+可选：如果希望 ingest 时把 MinerU 提取出的图表用多模态模型总结后再入库，打开 `config/local.yaml` 中的 `vision.enabled`，并配置 OpenAI-compatible 视觉模型：
+
+```bash
+VISION_BASE_URL=https://your-vision-provider.example/v1
+VISION_API_KEY=sk-your-vision-key
+VISION_MODEL=qwen-vl-plus
+```
+
+本地 fallback 是懒加载的 Qwen2.5-VL 适配器；只有设置 `vision.fallback_local: true` 且安装本地依赖时才会尝试：
+
+```bash
+$PY -m pip install -e ".[vision-local]"
+```
 
 ### 5. 初始化索引并入库一篇论文
 
@@ -427,6 +442,9 @@ Grafana:    http://localhost:3001  admin/admin
 | `OPENAI_API_KEY` | LLM provider key |
 | `CHAT_MODEL` | 回答用模型 |
 | `SMALL_MODEL` | 小模型，当前多处复用 chat model 即可 |
+| `VISION_BASE_URL` | 可选视觉模型 OpenAI-compatible endpoint，用于图表摘要入库 |
+| `VISION_API_KEY` | 可选视觉模型 key |
+| `VISION_MODEL` | 可选视觉模型名，例如 `qwen-vl-plus` |
 | `DEER_FLOW_AUTH_DISABLED` | 本地 demo 可设 `1`；生产不要关闭 auth |
 
 运行时数据默认不提交：
@@ -458,6 +476,7 @@ paper-rag-agent/
 |   |-- deliver/                           # markdown/pptx/docx/latex/pdf
 |   |-- feedback/                          # feedback events and hard cases
 |   |-- proactive/                         # subscriptions, inbox, digest, stale
+|   |-- vision/                            # visual summaries for figure/table chunks
 |   `-- tools/                             # LLM-agent-facing tool facades
 |-- integrations/deer-flow/                # Runnable DeerFlow app
 |   |-- backend/app/gateway/routers/       # paper_rag API router
@@ -497,6 +516,7 @@ paper-rag-agent/
 | dense 检索返回 0 | 索引未建或 Qdrant collection 缺失 | `$PY scripts/init_store.py`，必要时 `make deerflow-rebuild-index` |
 | 第一次入库或 QA 很慢 | 模型首次下载 | 等待 BGE / reranker 模型缓存完成 |
 | MinerU 不可用 | 未安装 `magic-pdf` 或模型未下载 | 先用 PyMuPDF fallback，或看 [docs/MINERU_SETUP.md](docs/MINERU_SETUP.md) |
+| 图表没有视觉摘要 | `vision.enabled` 默认关闭，或 `VISION_*` 未配置 | 在配置里启用 `vision.enabled` 并设置 `VISION_BASE_URL`、`VISION_API_KEY`、`VISION_MODEL`；API 失败时可安装 `.[vision-local]` 并启用 `vision.fallback_local` |
 | 答案拒答 | 检索证据不足或问题不在语料内 | 入库更多论文，或用 Discovery 找候选 |
 | secret scan 失败 | key-like 文本进入 tracked 文件 | 移到 `.env`，不要提交真实 key |
 

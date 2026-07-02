@@ -24,6 +24,7 @@ Local usage is the main path documented here. Production deployment, cloud permi
 | Capability | Details |
 |---|---|
 | Paper ingestion | arXiv ID, PDF URL, and local PDF input; PyMuPDF fallback and optional MinerU parsing |
+| Multimodal figure/table summaries | Optionally uses an OpenAI-compatible vision API to summarize MinerU-extracted figures/tables before indexing; API failure can fall back to a lazy local Qwen2.5-VL adapter |
 | Hybrid retrieval | SQLite metadata, FTS5/BM25 sparse retrieval, Qdrant dense vectors, RRF fusion, optional BGE reranker |
 | Agentic QA | Query rewrite, HyDE, reflective retrieval, evidence selection, citation checking, no-evidence abstention |
 | Citation constraints | Answers must cite retrieved chunks with `[chunk:<id>]`; fabricated `[1]` or author-year citations are rejected |
@@ -145,6 +146,20 @@ PAPER_RAG_CONFIG=config/local.yaml
 ```
 
 Keep real keys in local `.env` files or shell environment variables. Do not commit secrets.
+
+Optional: to summarize MinerU-extracted figures/tables with a multimodal model during ingest, enable `vision.enabled` in `config/local.yaml` and configure an OpenAI-compatible vision model:
+
+```bash
+VISION_BASE_URL=https://your-vision-provider.example/v1
+VISION_API_KEY=sk-your-vision-key
+VISION_MODEL=qwen-vl-plus
+```
+
+The local fallback is a lazy Qwen2.5-VL adapter. It is only attempted when `vision.fallback_local: true` and local dependencies are installed:
+
+```bash
+$PY -m pip install -e ".[vision-local]"
+```
 
 ### 5. Initialize the store and ingest one paper
 
@@ -427,6 +442,9 @@ Key environment variables:
 | `OPENAI_API_KEY` | LLM provider key |
 | `CHAT_MODEL` | Answer model |
 | `SMALL_MODEL` | Smaller model; currently often the same as `CHAT_MODEL` |
+| `VISION_BASE_URL` | Optional OpenAI-compatible vision endpoint for figure/table summaries |
+| `VISION_API_KEY` | Optional vision model key |
+| `VISION_MODEL` | Optional vision model name, for example `qwen-vl-plus` |
 | `DEER_FLOW_AUTH_DISABLED` | May be `1` for local demo only; do not disable auth in production |
 
 Runtime data is intentionally not committed:
@@ -458,6 +476,7 @@ paper-rag-agent/
 |   |-- deliver/                           # markdown/pptx/docx/latex/pdf
 |   |-- feedback/                          # feedback events and hard cases
 |   |-- proactive/                         # subscriptions, inbox, digest, stale
+|   |-- vision/                            # visual summaries for figure/table chunks
 |   `-- tools/                             # LLM-agent-facing tool facades
 |-- integrations/deer-flow/                # Runnable DeerFlow app
 |   |-- backend/app/gateway/routers/       # paper_rag API router
@@ -497,6 +516,7 @@ paper-rag-agent/
 | Dense retrieval returns 0 results | Store is not initialized or Qdrant collection is missing | `$PY scripts/init_store.py`; if needed, `make deerflow-rebuild-index` |
 | First ingestion or QA is slow | Model weights are downloading for the first time | Wait for BGE / reranker model cache to finish |
 | MinerU is unavailable | `magic-pdf` or models are missing | Use PyMuPDF fallback first, or see [docs/MINERU_SETUP.md](docs/MINERU_SETUP.md) |
+| Figure/table summaries are missing | `vision.enabled` is disabled by default, or `VISION_*` is not configured | Enable `vision.enabled` and set `VISION_BASE_URL`, `VISION_API_KEY`, `VISION_MODEL`; for API fallback, install `.[vision-local]` and enable `vision.fallback_local` |
 | Answer abstains | Retrieved evidence is insufficient or the question is outside the corpus | Ingest more papers, or use Discovery to find candidates |
 | Secret scan fails | Key-like text entered tracked files | Move secrets to `.env`; never commit real keys |
 

@@ -157,6 +157,36 @@ def test_build_chunks_preserves_local_asset_metadata(tmp_path: Path):
     assert formula["char_start"] < formula["char_end"]
 
 
+def test_build_chunks_calls_visual_enrichment(tmp_path: Path, monkeypatch):
+    from paper_rag.chunk import builder
+
+    parsed = tmp_path / "parsed"
+    figures = parsed / "figures"
+    figures.mkdir(parents=True)
+    (figures / "a.png").write_bytes(b"fake")
+    (parsed / "paper.md").write_text(
+        "# Method\n![pipeline](figures/a.png)\n",
+        encoding="utf-8",
+    )
+
+    def fake_enrich(paper_id, chunks):
+        assert paper_id == "sha1:deadbeef"
+        for chunk in chunks:
+            if chunk.get("modality") == "figure":
+                chunk["text"] += "\nVisual summary: mocked"
+                chunk["context_text"] += "\nVisual summary: mocked"
+                chunk.setdefault("metadata", {})["visual_summary_status"] = "ok"
+        return chunks
+
+    monkeypatch.setattr("paper_rag.vision.enrich.enrich_chunks", fake_enrich)
+
+    _, chunks = builder.build_chunks("sha1:deadbeef", parsed, title="Sample Paper")
+    fig = next(c for c in chunks if c["modality"] == "figure")
+
+    assert "Visual summary: mocked" in fig["text"]
+    assert fig["metadata"]["visual_summary_status"] == "ok"
+
+
 def test_metadata_path_report_ok_property():
     from paper_rag.validate.metadata_paths import MetadataPathReport
 

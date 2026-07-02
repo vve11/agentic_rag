@@ -21,11 +21,11 @@ log = get_logger("chunk.builder")
 
 def _chunk_id(paper_id: str, section_idx: int, kind: str, ord_: int) -> str:
     base = f"{paper_id}::{section_idx}::{kind}::{ord_}"
-    return hashlib.sha1(base.encode("utf-8")).hexdigest()[:20]
+    return hashlib.sha1(base.encode()).hexdigest()[:20]
 
 
 def _section_id(paper_id: str, idx: int) -> str:
-    return hashlib.sha1(f"{paper_id}::sec::{idx}".encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha1(f"{paper_id}::sec::{idx}".encode()).hexdigest()[:16]
 
 
 _PAGE_RE = re.compile(r"<!--\s*page\s+(\d+)\s*-->")
@@ -131,6 +131,13 @@ def build_chunks(paper_id: str, parsed_dir: Path, *, title: str) -> tuple[list[d
                         "neighbors": [],
                     }
                 )
+
+    try:
+        from paper_rag.vision.enrich import enrich_chunks
+
+        chunks = enrich_chunks(paper_id, chunks)
+    except Exception as exc:
+        log.warning(f"visual enrichment skipped for {paper_id}: {exc}")
 
     log.info(f"built {len(sections)} sections, {len(chunks)} chunks for {paper_id}")
     return sections, chunks

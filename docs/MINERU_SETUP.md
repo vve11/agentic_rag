@@ -74,6 +74,55 @@ Expected result:
 - `data/parsed/arxiv_2310.11511/paper.md` is produced by MinerU;
 - `data/parsed/arxiv_2310.11511/figures/` contains copied local assets when images are extracted.
 
+## Optional Vision Summaries for Figures and Tables
+
+MinerU gives Paper RAG the local image assets. The optional vision enrichment
+stage turns those assets into searchable text evidence before chunks are
+embedded:
+
+```text
+figure/table image + caption + nearby context
+  -> OpenAI-compatible vision API
+  -> visual_summary metadata
+  -> enriched chunk text
+  -> SQLite + Qdrant
+```
+
+Enable it in `config/local.yaml`:
+
+```yaml
+vision:
+  enabled: true
+  base_url: $VISION_BASE_URL
+  api_key: $VISION_API_KEY
+  model: $VISION_MODEL
+```
+
+Then set local environment variables:
+
+```bash
+export VISION_BASE_URL=https://your-vision-provider.example/v1
+export VISION_API_KEY=sk-your-vision-key
+export VISION_MODEL=qwen-vl-plus
+```
+
+If the API is unavailable, a local Qwen2.5-VL fallback can be enabled:
+
+```bash
+.venv/bin/python -m pip install -U -e ".[vision-local]"
+```
+
+```yaml
+vision:
+  fallback_local: true
+  local_model: Qwen/Qwen2.5-VL-7B-Instruct
+```
+
+Visual summarization never blocks ingest. If the API key is missing, the API
+times out, local dependencies are unavailable, or the image file is missing,
+the chunk remains indexed with the original caption/context and records a
+`visual_summary_status` such as `skipped` or `failed`.
+
 ## Rebuild the RAG Index
 
 Once MinerU parses the corpus successfully:

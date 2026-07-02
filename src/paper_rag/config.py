@@ -96,7 +96,7 @@ class _Abstain(BaseModel):
     min_chunks: int = 3              # avg top-N chunk scores for decision
     no_evidence_message: str = (
         "未在已索引文献中找到与该问题相关的内容。请确认问题与已入库的论文主题"
-        "相符，或考虑通过 paper_ingest_tool 扩充语料库。"
+        "相符，或考虑通过 paper_ingest_tool 扩充语料库。"  # noqa: RUF001
     )
 
 
@@ -134,6 +134,21 @@ class _Llm(BaseModel):
     temperatures: _LlmTemperatures = Field(default_factory=_LlmTemperatures)
 
 
+class _Vision(BaseModel):
+    enabled: bool = False
+    provider: str = "openai_compatible"
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    timeout_sec: int = 60
+    fallback_local: bool = False
+    local_model: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    max_images_per_paper: int = 40
+    max_image_bytes: int = 8_000_000
+    cache: bool = True
+    cache_dir: str = "./data/index/vision_cache"
+
+
 class _Wiki(BaseModel):
     enabled: bool = False
     similarity_threshold: float = 0.85
@@ -158,6 +173,7 @@ class AppConfig(BaseModel):
     retrieve: _Retrieve = Field(default_factory=_Retrieve)
     rag: _Rag = Field(default_factory=_Rag)
     llm: _Llm = Field(default_factory=_Llm)
+    vision: _Vision = Field(default_factory=_Vision)
     wiki: _Wiki = Field(default_factory=_Wiki)
     logging: _Logging = Field(default_factory=_Logging)
 
@@ -199,11 +215,11 @@ def load(path: str | Path | None = None) -> AppConfig:
         cfg_path = env_path if env_path.is_absolute() else (PROJECT_ROOT / env_path)
     else:
         cfg_path = DEFAULT_CONFIG_PATH
-    with open(cfg_path, "r", encoding="utf-8") as f:
+    with open(cfg_path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     raw = _expand_env(raw)
     raw = _resolve_paths(raw)
     return AppConfig.model_validate(raw)
 
 
-__all__ = ["AppConfig", "load", "PROJECT_ROOT"]
+__all__ = ["PROJECT_ROOT", "AppConfig", "load"]
