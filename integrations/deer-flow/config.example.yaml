@@ -632,6 +632,10 @@ tools:
   # Paper RAG tools. These are thin DeerFlow Harness adapters around the
   # standalone paper_rag package. Keep PAPER_RAG_HOME pointed at this repository
   # when paper_rag is not installed as a package.
+  - name: paper_ingest
+    group: paper
+    use: deerflow.community.paper_rag.tools:paper_ingest_tool
+
   - name: paper_qa
     group: paper
     use: deerflow.community.paper_rag.tools:paper_qa_tool
@@ -659,6 +663,10 @@ tools:
   - name: export_bibtex
     group: paper
     use: deerflow.community.paper_rag.tools:export_bibtex_tool
+
+  - name: paper_deliver
+    group: paper
+    use: deerflow.community.paper_rag.tools:paper_deliver_tool
 
   # Image search tool (uses InfoQuest)
   # - name: image_search

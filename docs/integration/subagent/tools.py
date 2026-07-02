@@ -42,6 +42,38 @@ def _ensure_paper_rag_importable() -> None:
         sys.path.insert(0, str(candidate))
 
 
+@tool("paper_ingest", parse_docstring=True)
+def paper_ingest_tool(
+    arxiv_id: str | None = None,
+    pdf_url: str | None = None,
+    pdf_path: str | None = None,
+    title_hint: str = "",
+) -> str:
+    """Ingest one paper into the local paper_rag index.
+
+    Use this when the user provides an arXiv id, a direct PDF URL, or a local
+    PDF path and wants it available for later paper_qa / paper_compare calls.
+
+    Args:
+        arxiv_id: Optional arXiv id, e.g. 2310.11511.
+        pdf_url: Optional direct PDF URL.
+        pdf_path: Optional local PDF path visible to the runtime.
+        title_hint: Optional title hint for URL or local PDF ingestion.
+    """
+    _ensure_paper_rag_importable()
+    from paper_rag.tools.paper_index import ingest
+
+    res = ingest(
+        {
+            "arxiv_id": arxiv_id,
+            "pdf_url": pdf_url,
+            "pdf_path": pdf_path,
+            "title_hint": title_hint or None,
+        }
+    )
+    return json.dumps(res, ensure_ascii=False, indent=2)
+
+
 @tool("paper_qa", parse_docstring=True)
 def paper_qa_tool(question: str, paper_ids: str | None = None) -> str:
     """Answer a research question using the indexed paper corpus.
@@ -318,7 +350,7 @@ def paper_deliver_tool(
     import base64
 
     _ensure_paper_rag_importable()
-    from paper_rag.deliver import dispatch
+    from paper_rag import deliver
 
     pids = [p.strip() for p in paper_ids.split(",") if p.strip()]
     try:
@@ -326,11 +358,12 @@ def paper_deliver_tool(
     except json.JSONDecodeError:
         options = {}
 
-    result = dispatch(
+    result = deliver.dispatch(
         format,
         pids,
         title=title or None,
         options=options,
+        user_id="harness",
     )
     return json.dumps({
         "format": result.format,

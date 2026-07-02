@@ -57,6 +57,39 @@ def _split_csv(value: str | None) -> list[str] | None:
     return items or None
 
 
+@tool("paper_ingest", parse_docstring=True)
+def paper_ingest_tool(
+    arxiv_id: str | None = None,
+    pdf_url: str | None = None,
+    pdf_path: str | None = None,
+    title_hint: str = "",
+) -> str:
+    """Ingest one paper into the local paper_rag index.
+
+    Use this when the user provides an arXiv id, a direct PDF URL, or a local
+    PDF path and wants it available for later paper_qa or paper_compare calls.
+
+    Args:
+        arxiv_id: Optional arXiv id, for example 2310.11511.
+        pdf_url: Optional direct PDF URL.
+        pdf_path: Optional local PDF path visible to the runtime.
+        title_hint: Optional title hint for URL or local PDF ingestion.
+    """
+    _ensure_paper_rag_importable()
+    from paper_rag.tools.paper_index import ingest
+
+    return _json_dumps(
+        ingest(
+            {
+                "arxiv_id": arxiv_id,
+                "pdf_url": pdf_url,
+                "pdf_path": pdf_path,
+                "title_hint": title_hint or None,
+            }
+        )
+    )
+
+
 @tool("paper_qa", parse_docstring=True)
 def paper_qa_tool(question: str, paper_ids: str | None = None) -> str:
     """Answer a research question using the indexed paper corpus.
@@ -226,7 +259,55 @@ def export_bibtex_tool(paper_ids: str) -> str:
     return _json_dumps(export_bibtex(BibtexExportInput(paper_ids=_split_csv(paper_ids) or [])))
 
 
+@tool("paper_deliver", parse_docstring=True)
+def paper_deliver_tool(
+    format: str,
+    paper_ids: str,
+    title: str = "",
+    options_json: str = "{}",
+) -> str:
+    """Generate a ready-to-use deliverable from indexed papers.
+
+    Supported formats include markdown_survey, pptx, docx, latex_bib, and pdf.
+    The returned JSON includes a base64-encoded artifact payload.
+
+    Args:
+        format: Deliverable format, for example markdown_survey or pptx.
+        paper_ids: Comma-separated paper ids.
+        title: Optional human-readable title.
+        options_json: Optional JSON object with format-specific options.
+    """
+    import base64
+
+    _ensure_paper_rag_importable()
+    from paper_rag import deliver
+
+    try:
+        options = json.loads(options_json) if options_json else {}
+    except json.JSONDecodeError:
+        options = {}
+
+    result = deliver.dispatch(
+        format,
+        _split_csv(paper_ids) or [],
+        title=title or None,
+        options=options,
+        user_id="harness",
+    )
+    return _json_dumps(
+        {
+            "format": result.format,
+            "filename": result.filename,
+            "content_base64": base64.b64encode(result.content_bytes).decode("ascii"),
+            "content_type": result.content_type,
+            "size_bytes": len(result.content_bytes),
+            "metadata": result.metadata,
+        }
+    )
+
+
 __all__ = [
+    "paper_ingest_tool",
     "paper_qa_tool",
     "paper_search_tool",
     "paper_section_tool",
@@ -234,4 +315,5 @@ __all__ = [
     "paper_discover_tool",
     "wiki_lookup_tool",
     "export_bibtex_tool",
+    "paper_deliver_tool",
 ]

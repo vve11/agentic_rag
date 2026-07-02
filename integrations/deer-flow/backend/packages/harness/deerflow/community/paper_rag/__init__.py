@@ -3,6 +3,9 @@
 from .tools import (
     export_bibtex_tool,
     paper_compare_tool,
+    paper_deliver_tool,
+    paper_discover_tool,
+    paper_ingest_tool,
     paper_qa_tool,
     paper_search_tool,
     paper_section_tool,
@@ -10,10 +13,13 @@ from .tools import (
 )
 
 __all__ = [
+    "paper_ingest_tool",
     "paper_qa_tool",
     "paper_search_tool",
     "paper_section_tool",
     "paper_compare_tool",
+    "paper_discover_tool",
     "wiki_lookup_tool",
     "export_bibtex_tool",
+    "paper_deliver_tool",
 ]
