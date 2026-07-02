@@ -815,7 +815,7 @@ Paper -> Concept Wiki -> Later QA / review
 Subscription -> Matcher -> Inbox -> User action
 ```
 
-这是卖课时很重要的表达：学生不是做一个孤立接口，而是在做一个可演进的 AI 产品。
+这是课程展示和项目答辩时很重要的表达：学生不是做一个孤立接口，而是在做一个可演进的 AI 产品。
 
 ### 13.2 UI 状态也算工程能力
 
@@ -1659,45 +1659,67 @@ What is the weather tomorrow in Shanghai?
 - 真实 RAG runtime。
 - DeerFlow gateway 和 workspace UI。
 - QA/Knowledge Builder/Wiki/Ingest/Feedback/Inbox/Subscription 闭环。
-- Golden set 和基础 RAG 优化。
+- `paper_ingest`、`paper_qa`、`paper_discover`、`paper_deliver` 等 9 个 DeerFlow Harness tools 和 `paper-research` subagent。
+- 图表多模态摘要入库：MinerU 图表资产 + OpenAI-compatible vision API + 本地 Qwen2.5-VL fallback。
+- Golden / real / claim 三类评测集：60 条 strict golden、40 条 real/stress、40 条 claim-level。
+- Retrieval-only、QA no-judge、citation audit、claim eval、ablation、LLM-assisted recall 和可选 judge 入口。
 - 本地安全和 smoke gate。
+- Gateway / Harness 回归测试、Prometheus / Grafana 观测配置和基础运维文档。
 
 当前不作为课程第一阶段重点：
 
-- 云部署。
-- CI golden gate。
-- 多租户权限隔离。
-- 备份恢复。
-- 生产监控。
-- 大规模真实 golden set。
-- token 成本统计。
+- 公网生产部署和 SLA 级值守。
+- GitHub Actions 里的 CI golden gate。目前已有本地 `make verify-p0` / `make eval-golden`，但 CI workflow 还没有默认跑 golden eval。
+- 完整多租户数据隔离。当前 Gateway 有认证要求和 user_id 透传测试，但 SQLite/Qdrant 的租户级强隔离、迁移和权限策略还需要生产化。
+- 自动化备份恢复脚本。当前文档说明了 SQLite/Qdrant 备份方式，但还不是一键定时备份。
+- 成本统计闭环。当前有 token / latency / metrics 中间件和 dashboard 基础，但还没有按用户、论文、任务聚合成本。
+- 更大规模真实评测集。当前评测足够课程和回归，但还需要扩展到更多论文、更多领域和更多图表问题。
 
 这些不是不重要，而是课程节奏上应该后置。学生先把“可运行、可解释、可评估”的本地项目做扎实，再进入生产化。
 
-### 21.1 后续可卖课扩展方向
+### 21.1 项目后续优化方向
 
-方向一：RAG 质量提升
+这一节用于说明项目后续技术优化。关键是先说明当前进度，再说明下一步为什么值得做。
 
-- 扩大 golden set 到 50-100 条。
-- 为重点问题加 chunk-level ground truth。
-- 加入 LLM judge，但只作为辅助指标。
-- 做 query rewrite ablation。
-- 做 chunk size ablation。
+方向一：RAG 质量继续提升
 
-方向二：Agent 能力扩展
+| 主题 | 当前进度 | 下一步优化 |
+|---|---|---|
+| 评测集规模 | 已有 60 条 strict golden、40 条 real/stress、40 条 claim-level；golden 中 45 条正例有 chunk-level 标注 | 扩到更多论文和领域，补充 100+ 高质量 positive/negative 样本，增加 compare、ambiguous、figure/table 问题 |
+| Chunk / citation 标注 | 已区分 `relevant_chunk_ids`、`citation_chunk_ids` 和 claim 的 `supporting_chunk_ids` | 对高价值问题补更细粒度 evidence label，建立标注规范和 review 流程 |
+| 图表检索质量 | 已支持 MinerU 图表摘要随上下文入库 | 新增 figure/table 专门评测集，检查视觉摘要是否提升图表问题召回和 grounded claim recall |
+| LLM judge | 已有 `make eval-claims-judge` 可选入口，不进入默认 gate | 固定 judge rubric，输出手动质量报告；只做辅助指标，不作为 CI hard gate |
+| Rewrite / HyDE ablation | 已有 `make eval-ablation` 和 `make eval-llm-recall` | 继续做按问题类型的 gain/harm 分析，避免 rewrite drift |
+| Chunk size ablation | 还没有形成标准命令 | 增加 chunk size、overlap、context prefix 的离线对比，观察 recall、citation precision、latency 和索引体积 |
+| Hard cases 闭环 | 已能记录反馈并通过 hard-cases 脚本沉淀样本 | 加入人工审核和自动转评测集流程，让用户反馈真正驱动下一轮优化 |
 
-- 把 Paper RAG 封装成 DeerFlow tool。
-- 让普通 DeerFlow chat agent 可以主动调用 paper QA。
-- 加入多论文综述生成。
-- 加入引用导出和 BibTeX。
+方向二：Agent 能力继续增强
 
-方向三：工程生产化
+| 主题 | 当前进度 | 下一步优化 |
+|---|---|---|
+| DeerFlow tool 封装 | 已封装 9 个 Harness tools：ingest、QA、search、section、compare、discover、wiki、BibTeX、deliver | 增加真实 lead agent 对话级 E2E，验证工具选择、参数生成、错误恢复和 trace |
+| 普通 chat agent 调用 Paper RAG | 已有 `paper-research` subagent 和工具注册 | 做 tool routing 评测：哪些问题应进入 paper subagent，哪些应拒绝或转普通 web search |
+| 多论文综述生成 | 已有 `paper_deliver`，支持 Markdown survey、PPTX、DOCX、LaTeX/BibTeX、PDF | 增加综述质量评测、模板主题、citation map 和图表引用说明 |
+| Paper Discovery Loop | 已能发现候选、解释 selected/skipped reason，并要求候选入库后才可作证据 | 加入候选质量评测、去重更细化、用户确认后的 auto-ingest 编排 |
+| Research Memory | 已限定为 query context，不作为最终证据 | 增加 memory drift 检测，验证多轮研究中 memory 是否帮助召回而不污染 evidence |
 
-- 切换 Qdrant server。
-- 加入用户级数据隔离。
-- 加 CI golden gate。
-- 加监控和成本统计。
-- 加备份恢复脚本。
+方向三：工程生产化继续推进
+
+| 主题 | 当前进度 | 下一步优化 |
+|---|---|---|
+| Qdrant server | 已有 `qdrant-up`、Docker compose 和 `config/production.yaml`；本地默认 embedded Qdrant | 编写从 embedded 到 server 的迁移 runbook，验证远端 Qdrant 备份、恢复和容量扩展 |
+| 用户级数据隔离 | Gateway 路由已有认证要求和 user_id 透传测试 | 在 SQLite 查询、Qdrant payload filter、Discovery/Feedback/Proactive 全链路强制 user scope |
+| CI golden gate | 本地已有 `make verify-p0` 和 strict golden gate 命令；GitHub CI 目前只跑纯逻辑测试和 smoke | 在 CI 增加可缓存、可控成本的 retrieval-only golden gate；完整 QA gate 保持手动或 nightly |
+| 监控和成本统计 | 已有 Prometheus / Grafana 配置、gateway metrics、token/latency middleware 基础 | 加按用户、任务、模型、论文的成本聚合，设置慢查询、LLM error、citation 风险告警 |
+| 备份恢复 | 运维文档已有 SQLite/Qdrant 手动备份说明 | 增加 `backup` / `restore` 脚本，覆盖 SQLite、Qdrant、parsed assets、deliverables 和配置版本 |
+| 部署安全 | 本地 demo 可关闭 auth；README 已强调生产不要关闭 | 增加生产启动检查，检测 `DEER_FLOW_AUTH_DISABLED=1`、弱 JWT secret、公开端口和缺失 HTTPS 的风险 |
+
+优先级建议：
+
+1. 先补 chunk size / visual eval，因为它直接影响 RAG 质量。
+2. 再补 lead agent 对话级 E2E，因为它验证 Paper RAG 是否真的能被普通 DeerFlow agent 稳定调用。
+3. 然后做 CI retrieval-only golden gate，把“不会退化”变成合并条件。
+4. 最后再做生产部署、成本统计和备份恢复。生产化之前，先把本地质量和可回归验证打牢。
 
 ## 22. 最终交付标准
 
@@ -1721,13 +1743,23 @@ What is the weather tomorrow in Shanghai?
 30 秒版本：
 
 ```text
-这是一个集成在 DeerFlow 工作台里的 Agentic RAG 论文助手。它不是简单向量库问答，而是包含论文发现、论文入库、混合检索、query rewrite、HyDE、rerank、abstain 拒答、chunk 级引用校验、反馈闭环和 golden set 评测的完整工程项目。
+这是一个集成在 DeerFlow 工作台里的 Agentic RAG 论文助手。
+它不是简单向量库问答，而是包含论文发现、论文入库、混合检索、
+query rewrite、HyDE、rerank、abstain 拒答、chunk 级引用校验、
+反馈闭环和 golden set 评测的完整工程项目。
 ```
 
 3 分钟版本：
 
 ```text
-项目分四层：第一层是 DeerFlow workspace 和 FastAPI gateway，负责 UI、API、状态和中间件；第二层是 DeerFlow Harness，负责 tools、subagent、memory、middleware 和 agent runtime；第三层是 paper_rag Python package，负责 discovery、解析、chunk、embedding、SQLite/Qdrant、混合检索和 QA；第四层是 eval 和 smoke，负责验证系统是否真的可靠。RAG 主链路采用 dense + sparse + RRF + rerank，并在 LLM 前做 abstain 判断，生成后做 citation validation。这样既能发现候选论文，也能在证据不足时拒答。
+项目分四层：
+第一层是 DeerFlow workspace 和 FastAPI gateway，负责 UI、API、状态和中间件；
+第二层是 DeerFlow Harness，负责 tools、subagent、memory、middleware 和 agent runtime；
+第三层是 paper_rag Python package，负责 discovery、解析、chunk、embedding、
+SQLite/Qdrant、混合检索和 QA；
+第四层是 eval 和 smoke，负责验证系统是否真的可靠。
+RAG 主链路采用 dense + sparse + RRF + rerank，并在 LLM 前做 abstain 判断，
+生成后做 citation validation。这样既能发现候选论文，也能在证据不足时拒答。
 ```
 
 10 分钟版本：
