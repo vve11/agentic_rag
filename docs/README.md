@@ -39,4 +39,6 @@
 | [0016](./adrs/0016-m10-deliverables.md) | M10 交付物升级（Markdown 综述 / PPT / Word / LaTeX bib） | accepted |
 | [0017](./adrs/0017-m11-data-feedback-loop.md) | M11 数据闭环（行为埋点 / hard case 自动收集 / abstain 阈值自适应 / 人在 loop） | accepted |
 | [0018](./adrs/0018-m9-proactive-agent.md) | M9 主动 Agent（日报 / 订阅 / Stale 提醒 / 自动 ingest） | accepted |
-| [0015](./adrs/0015-m8-service-deerflow-gateway.md) | M8 服务化（接 DeerFlow gateway / BetterAuth / Qdrant 容器化 / user_id 隔离） | accepted |
+| [0019](./adrs/0019-two-sqlite-databases.md) | 双 SQLite 数据库边界 | accepted |
+| [0020](./adrs/0020-gateway-middleware-and-observability.md) | DeerFlow gateway 中间件与观测架构 | accepted |
+| [0021](./adrs/0021-langgraph-middleware-hardening.md) | LangGraph 中间件加固 | accepted |

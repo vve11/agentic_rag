@@ -543,8 +543,8 @@ DeerFlow 提供的是一个 Agent 工作台宿主：
 - `/api/paper_rag/qa`
 - `/api/paper_rag/qa/sync`
 - `/api/paper_rag/papers`
+- `/api/paper_rag/papers/ingest`
 - `/api/paper_rag/wiki/*`
-- `/api/paper_rag/ingest`
 - `/api/paper_rag/feedback`
 - `/api/paper_rag/inbox`
 - `/api/paper_rag/subscriptions`
@@ -611,6 +611,7 @@ integrations/deer-flow/backend/packages/harness/deerflow/community/paper_rag/
 
 | Tool | 用途 |
 |---|---|
+| `paper_ingest` | 入库 arXiv ID、PDF URL 或本地 PDF |
 | `paper_discover` | 从 topic 发现候选论文，返回 score、rank_reason、skip_reason |
 | `paper_qa` | 对 indexed paper corpus 做 Agentic RAG QA |
 | `paper_search` | 按 query 找相关论文 |
@@ -618,6 +619,7 @@ integrations/deer-flow/backend/packages/harness/deerflow/community/paper_rag/
 | `paper_compare` | 按维度比较多篇论文 |
 | `wiki_lookup` | 查询论文概念 Wiki |
 | `export_bibtex` | 导出 BibTeX 引用 |
+| `paper_deliver` | 生成 Markdown survey、PPTX、DOCX、LaTeX/BibTeX 或 PDF 交付物 |
 
 此外项目还注册了一个内置 subagent：
 
@@ -845,9 +847,31 @@ make eval-ablation
 make eval-claims
 make eval-claims-report
 make eval-llm-recall
+make deerflow-smoke
+make deerflow-paper-rag-test
 make hard-cases
 make verify-p0
 ```
+
+### 14A. 从 RAG 到 Agent 答复的分层评测
+
+README 里的评测体系需要在教学手册里讲清楚：这个项目不是只测向量召回，也不是只让面试官肉眼看一个答案，而是把“检索是否找到证据、答案是否绑定证据、Agent 是否正确调用工具、Gateway 是否保护用户边界”串起来测。
+
+| 层级 | 评测重点 | 命令 / 文件 | 核心指标或断言 |
+|---|---|---|---|
+| Retrieval 层 | 问题能不能召回正确 paper / chunk | `make eval-golden`、`tests/eval/qa_set.golden.jsonl` | paper recall@10、chunk recall@10、MRR、nDCG、FPR |
+| RAG 生成层 | 答案是否只引用 selected evidence，no-evidence 时是否拒答 | `make eval-golden-qa`、`make eval-citation-audit` | citation existence、citation precision/recall、must-contain、no-answer success |
+| Claim 语义层 | 最终答复是否覆盖关键语义结论，并用 citation 支撑 | `make eval-claims`、`make eval-claims-report` | claim recall、grounded claim recall、forbidden claim violations |
+| 策略对比层 | dense / sparse / hybrid / rerank / rewrite / HyDE 是否真的提升召回 | `make eval-ablation`、`make eval-llm-recall` | rewrite gain、rewrite harm、latency |
+| Agent 工具层 | DeerFlow lead agent / `paper-research` subagent 是否能调用论文工具 | `integrations/deer-flow/backend/tests/test_paper_rag_harness_adapter.py` | tool 注册、subagent 注册、`paper_ingest` / `paper_discover` / `paper_deliver` payload 契约 |
+| Gateway 产品层 | UI/API 入口是否覆盖 QA、ingest、discovery、wiki、feedback、proactive，并正确处理认证和 user scope | `make deerflow-smoke`、`integrations/deer-flow/backend/tests/test_paper_rag_integration.py` | route readiness、auth required、secret redaction、user_id propagation |
+| 运维门禁 | 代码质量、导入、密钥泄漏和基础 smoke | `make verify-p0`、`scripts/_run_smoke.py`、`scripts/secret_scan.py` | lint/test/smoke/secret scan/errors |
+
+教学时建议这样讲：
+
+> 我把评测拆成 RAG 质量和 Agent 集成两部分。RAG 质量看 retrieval、citation、claim 和 no-answer；Agent 集成看 DeerFlow Harness 工具是否注册、subagent 是否能调用、Gateway API 是否需要认证、user_id 是否正确透传。这样能从“chunk 是否召回”一直追到“Agent 最终答复是否有证据、有引用、可审计”。
+
+这也是为什么 Discovery、Wiki 和 Research Memory 不能直接作为最终证据。它们可以帮助发现论文、延续研究上下文或沉淀知识，但最终答案仍然只认本轮 indexed chunks、selected evidence 和 `[chunk:<id>]` citations。
 
 当前数据集：
 

@@ -1,16 +1,18 @@
 # DeerFlow Integration Reference
 
-Snapshot of the deerflow-side files that wire `paper_rag` into a DeerFlow
-deployment. The runnable checkout under `integrations/deer-flow` now contains
-the primary Gateway router, Harness tool adapter, and `paper-research` subagent;
-this folder keeps lightweight reference copies for review and external ports.
+Reference files and runbooks for wiring `paper_rag` into a DeerFlow
+deployment. The runnable checkout under `integrations/deer-flow` is the source
+of truth for the Gateway router, Harness tool adapter, and `paper-research`
+subagent. This folder keeps only the reference snippets that are still tested
+or useful for external ports; duplicated subagent code was removed to avoid
+drift from the runnable Harness implementation.
 
 | Folder | Purpose |
 |---|---|
 | `router/` | paper_rag HTTP endpoints + Prometheus `/metrics` router |
 | `middleware/gateway/` | 8-layer gateway middleware (auth / observability / protection) |
 | `middleware/langgraph/` | 4 langgraph middleware (token cost / latency / recursion guard / PII scrub) |
-| `subagent/` | community/paper_rag tools + paper-research subagent config |
+| Harness tools/subagent | Primary source lives in `integrations/deer-flow/backend/packages/harness/deerflow/community/paper_rag/` and `integrations/deer-flow/backend/packages/harness/deerflow/subagents/builtins/paper_research.py` |
 | `frontend/` | Next.js workspace/paper-rag page |
 | `observability/` | Prometheus + Grafana docker-compose override + alert rules |
 

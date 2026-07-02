@@ -27,6 +27,7 @@ Local usage is the main path documented here. Production deployment, cloud permi
 | Multimodal figure/table summaries | Optionally uses an OpenAI-compatible vision API to summarize MinerU-extracted figures/tables before indexing; API failure can fall back to a lazy local Qwen2.5-VL adapter |
 | Hybrid retrieval | SQLite metadata, FTS5/BM25 sparse retrieval, Qdrant dense vectors, RRF fusion, optional BGE reranker |
 | Agentic QA | Query rewrite, HyDE, reflective retrieval, evidence selection, citation checking, no-evidence abstention |
+| Trace and auditability | QA returns intent, rewrites, retrieval rounds, selected evidence, abstain decisions, and citations for debugging the path from retrieval to final answer |
 | Citation constraints | Answers must cite retrieved chunks with `[chunk:<id>]`; fabricated `[1]` or author-year citations are rejected |
 | Paper Discovery | Finds candidate papers for a topic and explains candidate scores and selected/skipped reasons |
 | Knowledge Builder | Shows fetch, parse, chunk, embed, index, and wiki build state in the UI |
@@ -37,7 +38,8 @@ Local usage is the main path documented here. Production deployment, cloud permi
 | Proactive Agent | Subscriptions, inbox, digest, stale paper reminders, and auto-ingest hook |
 | DeerFlow UI | `/workspace/paper-rag` page for QA, Discovery, Knowledge Builder, Wiki, Feedback, Inbox, and Subscriptions |
 | DeerFlow Agent tools | `paper_ingest`, `paper_qa`, `paper_search`, `paper_section`, `paper_compare`, `paper_discover`, `wiki_lookup`, `export_bibtex`, `paper_deliver` |
-| Evaluation | Retrieval golden set, QA no-judge eval, citation audit, claim eval, ablation, LLM recall comparison |
+| RAG / Agent evaluation | Retrieval golden set, QA no-judge eval, citation audit, claim eval, ablation, LLM recall comparison, and DeerFlow Harness/Gateway regressions from recall to Agent tool answers |
+| Security and user boundary | DeerFlow gateway routes require auth and have user_id propagation tests; local demo may disable auth, production must enable it |
 | Observability | Gateway metrics, Prometheus, Grafana dashboard, secret scan, smoke test |
 
 ## Architecture
@@ -332,6 +334,24 @@ In Agent / DeerFlow flows, use `paper_deliver`.
 
 ## Evaluation and Quality Gates
 
+Evaluation is not limited to vector top-k. The suite covers the full path: recall -> evidence selection -> citation -> abstention -> semantic claims -> DeerFlow tool calls -> Gateway API. If retrieval does not find evidence, a fluent Agent answer still does not pass.
+
+| Layer | What it checks | Command / file | Key metrics or assertions |
+|---|---|---|---|
+| Retrieval | Whether the question retrieves the correct paper / chunk | `make eval-golden`, `tests/eval/qa_set.golden.jsonl` | `positive_paper_recall@10`, `positive_chunk_recall@10`, MRR, nDCG, FPR |
+| RAG generation | Whether answers cite only selected evidence and abstain when evidence is missing | `make eval-golden-qa`, `make eval-citation-audit` | `cite_existence`, `cite_precision`, `cite_recall`, `must_contain`, `no_answer_success_rate` |
+| Semantic claims | Whether the final answer covers key conclusions and grounds them with citations | `make eval-claims`, `make eval-claims-report` | `claim_recall`, `grounded_claim_recall`, `forbidden_claim_violations` |
+| Strategy comparison | Whether dense / sparse / hybrid / rerank / rewrite / HyDE actually improve recall | `make eval-ablation`, `make eval-llm-recall` | `rewrite_gain_count`, `rewrite_harm_rate`, latency |
+| Agent tools | Whether the DeerFlow lead agent / `paper-research` subagent can call paper tools and preserve auditable payloads | `make deerflow-paper-rag-test`, `integrations/deer-flow/backend/tests/test_paper_rag_harness_adapter.py` | tool registration, subagent registration, `paper_ingest` / `paper_discover` / `paper_deliver` contracts |
+| Gateway product path | Whether UI/API entry points cover QA, ingest, discovery, wiki, feedback, proactive flows, auth, and user scope | `make deerflow-smoke`, `integrations/deer-flow/backend/tests/test_paper_rag_integration.py` | route readiness, auth required, secret redaction, user_id propagation |
+| Operations gate | Basic code quality, imports, leaked secrets, and smoke coverage | `make verify-p0`, `scripts/_run_smoke.py`, `scripts/secret_scan.py` | lint/test/smoke/secret scan/errors |
+
+Important boundaries:
+
+- Discovery, Wiki, and Research Memory provide research context only. They are not final answer evidence.
+- Final QA evaluation only trusts the current indexed chunks, selected evidence, and `[chunk:<id>]` citations.
+- Agent evaluation focuses on DeerFlow tool contracts, evidence boundaries, error payloads, and auditable traces, not answer style alone.
+
 Common commands:
 
 ```bash
@@ -344,6 +364,8 @@ make eval-ablation
 make eval-claims
 make eval-claims-report
 make eval-llm-recall
+make deerflow-smoke
+make deerflow-paper-rag-test
 ```
 
 | Command | Purpose |
@@ -355,11 +377,14 @@ make eval-llm-recall
 | `make eval-ablation` | Compare dense, sparse, hybrid, rerank, and rewrite strategies |
 | `make eval-claims` | Claim-level QA gate |
 | `make eval-llm-recall` | Compare no/local/LLM rewrite recall |
+| `make deerflow-smoke` | Smoke running Paper RAG endpoints on the DeerFlow gateway |
+| `make deerflow-paper-rag-test` | Run DeerFlow backend Paper RAG gateway integration tests |
 | `make secret-scan` | Scan for accidentally committed API keys |
 
 Evaluation data:
 
 ```text
+tests/eval/README.md
 tests/eval/qa_set.golden.jsonl
 tests/eval/qa_set.real.jsonl
 tests/eval/qa_set.claims.jsonl
@@ -371,6 +396,7 @@ Quick verification commands used during recent maintenance:
 .venv/bin/ruff check --select E,F,W,I --ignore E501 src tests
 PYTHONPATH=src .venv/bin/python scripts/_run_smoke.py
 PYTHONPATH=src:tests .venv/bin/python -m pytest -q --ignore=tests/eval --ignore=tests/test_gateway_paper_rag.py --ignore=tests/test_middleware.py --ignore=tests/test_langgraph_middleware.py
+PYTHONPATH=integrations/deer-flow/backend:integrations/deer-flow/backend/packages/harness:src .venv/bin/python -m pytest -q integrations/deer-flow/backend/tests/test_paper_rag_integration.py
 PYTHONPATH=src:integrations/deer-flow/backend/packages/harness .venv/bin/python -m pytest -q integrations/deer-flow/backend/tests/test_paper_rag_harness_adapter.py
 ```
 
@@ -563,6 +589,7 @@ corepack pnpm exec eslint src/app/workspace/paper-rag/page.tsx
 | [docs/integration/deerflow_embedded.md](docs/integration/deerflow_embedded.md) | DeerFlow embedded integration guide |
 | [docs/VERIFICATION_REPORT.md](docs/VERIFICATION_REPORT.md) | Full-stack verification report |
 | [docs/RAG_EVAL_GUIDE.md](docs/RAG_EVAL_GUIDE.md) | RAG evaluation guide |
+| [tests/eval/README.md](tests/eval/README.md) | Eval sets, metrics, and gates |
 | [docs/adrs/](docs/adrs/) | Architecture decision records |
 | [docs/MINERU_SETUP.md](docs/MINERU_SETUP.md) | MinerU setup |
 | [docs/PERF_BASELINE.md](docs/PERF_BASELINE.md) | Performance baseline |

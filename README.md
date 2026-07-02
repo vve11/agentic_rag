@@ -27,6 +27,7 @@ Paper RAG Agent 是一个面向学术论文的本地 RAG / Agentic RAG 项目。
 | 图表多模态摘要 | 可选用 OpenAI-compatible 视觉 API 总结 MinerU 提取的 figure/table，并把摘要随上下文一起入库；API 失败时可懒加载本地 Qwen2.5-VL fallback |
 | 混合检索 | SQLite 元数据、FTS5/BM25 稀疏检索、Qdrant dense vector、RRF 融合、可选 BGE reranker |
 | Agentic QA | query rewrite、HyDE、反思式检索、证据选择、引用校验、no-evidence 拒答 |
+| Trace 与可审计性 | QA 返回 intent、rewrite、retrieval rounds、selected evidence、abstain 决策和 citations，方便定位从检索到答案的问题 |
 | 引用约束 | 回答必须基于检索 chunk，使用 `[chunk:<id>]` 形式，避免伪造 `[1]`、作者年份引用 |
 | Paper Discovery | 按研究主题发现候选论文，返回候选分数、选中/跳过原因；候选必须入库后才能成为最终证据 |
 | Knowledge Builder | 在 UI 中查看 fetch、parse、chunk、embed、index、wiki 等构建状态 |
@@ -37,7 +38,8 @@ Paper RAG Agent 是一个面向学术论文的本地 RAG / Agentic RAG 项目。
 | Proactive Agent | 订阅、inbox、digest、stale paper 提醒、auto-ingest hook |
 | DeerFlow UI | `/workspace/paper-rag` 页面提供 QA、Discovery、Knowledge Builder、Wiki、Feedback、Inbox、Subscriptions |
 | DeerFlow Agent Tools | `paper_ingest`、`paper_qa`、`paper_search`、`paper_section`、`paper_compare`、`paper_discover`、`wiki_lookup`、`export_bibtex`、`paper_deliver` |
-| 评测体系 | retrieval golden、QA no-judge、citation audit、claim eval、ablation、LLM recall 对比 |
+| RAG / Agent 评测 | retrieval golden、QA no-judge、citation audit、claim eval、ablation、LLM recall、DeerFlow Harness/Gateway 回归，覆盖从召回到 Agent 工具答复 |
+| 安全与用户边界 | DeerFlow gateway 对 Paper RAG 路由有认证要求和 user_id 透传测试；本地 demo 可关闭 auth，生产必须开启 |
 | 观测与运维 | Gateway metrics、Prometheus、Grafana dashboard、secret scan、smoke test |
 
 ## 架构
@@ -332,6 +334,24 @@ Agent / DeerFlow 中使用 `paper_deliver`。
 
 ## 评测与质量门禁
 
+这个项目的评测不是只看向量 top-k，而是分层覆盖“召回 -> 证据选择 -> 引用 -> 拒答 -> 语义 claim -> DeerFlow 工具调用 -> Gateway API”。如果检索本身没有找到证据，后面的 Agent 答复再流畅也不算通过。
+
+| 层级 | 评测重点 | 命令 / 文件 | 核心指标或断言 |
+|---|---|---|---|
+| Retrieval 层 | 问题能不能召回正确 paper / chunk | `make eval-golden`、`tests/eval/qa_set.golden.jsonl` | `positive_paper_recall@10`、`positive_chunk_recall@10`、MRR、nDCG、FPR |
+| RAG 生成层 | 答案是否只引用 selected evidence，no-evidence 时是否拒答 | `make eval-golden-qa`、`make eval-citation-audit` | `cite_existence`、`cite_precision`、`cite_recall`、`must_contain`、`no_answer_success_rate` |
+| Claim 语义层 | 最终答复是否覆盖关键结论，且这些结论有 citation 支撑 | `make eval-claims`、`make eval-claims-report` | `claim_recall`、`grounded_claim_recall`、`forbidden_claim_violations` |
+| 策略对比层 | dense / sparse / hybrid / rerank / rewrite / HyDE 是否真的提升召回 | `make eval-ablation`、`make eval-llm-recall` | `rewrite_gain_count`、`rewrite_harm_rate`、latency |
+| Agent 工具层 | DeerFlow lead agent / `paper-research` subagent 是否能调用论文工具，payload 是否保持可审计 | `make deerflow-paper-rag-test`、`integrations/deer-flow/backend/tests/test_paper_rag_harness_adapter.py` | tool 注册、subagent 注册、`paper_ingest` / `paper_discover` / `paper_deliver` 调用契约 |
+| Gateway 产品层 | UI/API 入口是否覆盖 QA、ingest、discovery、wiki、feedback、proactive，并正确处理认证和 user scope | `make deerflow-smoke`、`integrations/deer-flow/backend/tests/test_paper_rag_integration.py` | route readiness、auth required、secret redaction、user_id propagation |
+| 运维门禁 | 基础代码质量、导入、密钥泄漏、smoke | `make verify-p0`、`scripts/_run_smoke.py`、`scripts/secret_scan.py` | lint/test/smoke/secret scan/errors |
+
+几个边界需要特别注意：
+
+- Discovery、Wiki、Research Memory 只能提供研究上下文，不能直接作为最终答案证据。
+- 最终 QA 评测只认本轮 indexed chunks、selected evidence 和 `[chunk:<id>]` citations。
+- Agent 层评测的重点不是 LLM 文风，而是 DeerFlow 工具契约、证据边界、错误返回和可审计 trace 是否稳定。
+
 常用命令：
 
 ```bash
@@ -344,6 +364,8 @@ make eval-ablation
 make eval-claims
 make eval-claims-report
 make eval-llm-recall
+make deerflow-smoke
+make deerflow-paper-rag-test
 ```
 
 | 命令 | 作用 |
@@ -355,11 +377,14 @@ make eval-llm-recall
 | `make eval-ablation` | 对比 dense、sparse、hybrid、rerank、rewrite |
 | `make eval-claims` | claim-level QA gate |
 | `make eval-llm-recall` | 对比 no/local/LLM rewrite 的 recall |
+| `make deerflow-smoke` | 对正在运行的 DeerFlow gateway 做 Paper RAG endpoint smoke |
+| `make deerflow-paper-rag-test` | 跑 DeerFlow backend 的 Paper RAG gateway 集成测试 |
 | `make secret-scan` | 扫描可能误提交的 API key |
 
 评测数据：
 
 ```text
+tests/eval/README.md
 tests/eval/qa_set.golden.jsonl
 tests/eval/qa_set.real.jsonl
 tests/eval/qa_set.claims.jsonl
@@ -371,6 +396,7 @@ tests/eval/qa_set.claims.jsonl
 .venv/bin/ruff check --select E,F,W,I --ignore E501 src tests
 PYTHONPATH=src .venv/bin/python scripts/_run_smoke.py
 PYTHONPATH=src:tests .venv/bin/python -m pytest -q --ignore=tests/eval --ignore=tests/test_gateway_paper_rag.py --ignore=tests/test_middleware.py --ignore=tests/test_langgraph_middleware.py
+PYTHONPATH=integrations/deer-flow/backend:integrations/deer-flow/backend/packages/harness:src .venv/bin/python -m pytest -q integrations/deer-flow/backend/tests/test_paper_rag_integration.py
 PYTHONPATH=src:integrations/deer-flow/backend/packages/harness .venv/bin/python -m pytest -q integrations/deer-flow/backend/tests/test_paper_rag_harness_adapter.py
 ```
 
@@ -563,6 +589,7 @@ corepack pnpm exec eslint src/app/workspace/paper-rag/page.tsx
 | [docs/integration/deerflow_embedded.md](docs/integration/deerflow_embedded.md) | DeerFlow 集成运行指南 |
 | [docs/VERIFICATION_REPORT.md](docs/VERIFICATION_REPORT.md) | 全栈验证报告 |
 | [docs/RAG_EVAL_GUIDE.md](docs/RAG_EVAL_GUIDE.md) | RAG 评测指南 |
+| [tests/eval/README.md](tests/eval/README.md) | 评测集、指标和 gate 说明 |
 | [docs/adrs/](docs/adrs/) | 架构决策记录 |
 | [docs/MINERU_SETUP.md](docs/MINERU_SETUP.md) | MinerU 设置 |
 | [docs/PERF_BASELINE.md](docs/PERF_BASELINE.md) | 性能基线 |

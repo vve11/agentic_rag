@@ -50,7 +50,7 @@
 > 4 个回归（ADR-0012）。(1) `arxiv` 包升 v4 删了 `Result.download_pdf`，改用 `client.download_pdf(result, ...)` + httpx 兜底。(2) `qdrant-client` 1.18 弃用 `client.search()`，改用 `query_points()` + 兼容写法。(3) `wiki/store.py` 残留 SyntaxError 被 sqlmodel 缺失掩盖。(4) `init_store.py` 直接 new client 绕过 `get_client` 兜底，加了 `qdrant.local_path` 配置后才发现。所有问题都通过 try/except + 兜底降级吸收，主路径无 `database is locked` / `qdrant unreachable` 异常。
 
 **Q: 怎么跟 DeerFlow 集成的？**
-> 不入侵 harness/app boundary。三处接入：`backend/.../community/paper_rag/tools.py` 用 LangChain `@tool` 包装 7 个工具（paper_qa/search/section/compare/discover/wiki_lookup/export_bibtex）；`backend/.../subagents/builtins/paper_research.py` 注册 `paper-research` 专家 subagent；`config.example.yaml` 把 paper 工具挂到 `paper` tool group。`paper_discover` 只返回候选和理由，不把候选当最终证据；最终回答仍回到 indexed chunks。
+> 不入侵 harness/app boundary。三处接入：`backend/.../community/paper_rag/tools.py` 用 LangChain `@tool` 包装 9 个工具（paper_ingest/qa/search/section/compare/discover/wiki_lookup/export_bibtex/paper_deliver）；`backend/.../subagents/builtins/paper_research.py` 注册 `paper-research` 专家 subagent；`config.example.yaml` 把 paper 工具挂到 `paper` tool group。`paper_discover` 只返回候选和理由，不把候选当最终证据；最终回答仍回到 indexed chunks。
 
 **Q: 怎么防 Wiki 越改越烂？**
 > 五条护栏（ADR-0007）。(1) 频率限制：单 entry 24h 内最多 1 次更新，`lock_until` 字段控制。(2) Patch-only：LLM 只能输出 `add_*` 字段，definition 仅在显式给出新值时覆盖，禁止整条重写。(3) self_eval gate：LLM 同时输出置信度，<0.7 直接丢弃。(4) 版本日志：`wiki_versions` 表每次 upsert 写一条。(5) 默认关闭：`wiki.enabled=false`，先把 RAG 主路径打稳。(6) 一致性 heuristic：`consistency.py` 标 short_def / no_key_papers / self_related。
@@ -70,7 +70,7 @@ topic ─► Paper Discovery Loop ─► candidates + reasons ─► manual inge
 arxiv/s2/local ◄────────────────────────────────────────┘
           └─► MinerU/pymupdf ─► section+chunk+modality ─► Qdrant + SQLite
                                                                       │
-DeerFlow Lead Agent ─► paper-research subagent ─► 7 paper tools ─► paper_qa ──┤
+DeerFlow Lead Agent ─► paper-research subagent ─► 9 paper tools ─► paper_qa ──┤
                                                               ↓       │
                                        intent → rewrite → hybrid ────┤
                                                   (dense+FTS5 RRF)    │

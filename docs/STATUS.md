@@ -53,7 +53,7 @@
 
 - [x] `backend/packages/harness/deerflow/community/paper_rag/{__init__,tools}.py`
 - [x] LangChain `@tool` 包装 + sys.path lazy 注入（不破 harness/app boundary）
-- [x] `skills/custom/paper-research/SKILL.md`（决策流 + 引用纪律）
+- [x] `integrations/deer-flow/skills/public/paper-research/SKILL.md`（决策流 + 引用纪律）
 - [x] `tools/__init__.py` 改 `__getattr__` 懒加载
 - [x] ADR-0008
 
@@ -145,7 +145,7 @@ ADR-0016 完整落地：从"答案文本"升级到"可直接交付的 4 类工�
 - [x] **#45 docx 生成器**：`docx.py` — 二步流水线（先复用 survey_md → 解析 Markdown 子集 → emit Word 元素）；保留 Heading 1/2/3 + List Bullet/Number + Intense Quote 样式
 - [x] **#46 latex_bib 生成器**：`latex_bib.py` — 复用 M6 #31 `bibtex_export` + 输出 zip（references.bib + related_work.tex），可选 `synthesize=True` 触发 LLM 起稿
 - [x] **#47 gateway router /deliver 端点**：`POST /api/paper_rag/deliver` 返回 base64 + metadata
-- [x] **#48 LangChain `paper_deliver_tool`**：双形态共存，lead_agent 可调；community/paper_rag 暴露到 7 个 tool（原 6 + paper_deliver）
+- [x] **#48 LangChain `paper_deliver_tool`**：双形态共存，lead_agent 可调；community/paper_rag 当前暴露 9 个 tool（paper_ingest + 原 QA/search/section/compare/discover/wiki_lookup/export_bibtex + paper_deliver）
 - [x] **#49 `[deliver]` optional extra**：`pip install -e .[deliver]` 才装 python-pptx + python-docx，保持核心包瘦
 - [x] **#50 7 项纯逻辑测试**：`tests/test_deliver.py` 覆盖 4 类格式生成 + dispatch 路由 + 边界（unknown format / empty paper_ids）
 
