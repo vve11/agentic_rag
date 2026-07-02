@@ -23,6 +23,9 @@ def __getattr__(name: str):
     if name == "paper_discover":
         from .paper_discover import paper_discover as fn
         return fn
+    if name == "paper_ingest":
+        from .paper_index import ingest as fn
+        return fn
     if name == "wiki_lookup":
         from .wiki_lookup import wiki_lookup as fn
         return fn
@@ -36,6 +39,7 @@ __all__ = [
     "export_bibtex",
     "paper_compare",
     "paper_discover",
+    "paper_ingest",
     "paper_qa",
     "paper_search",
     "paper_section",

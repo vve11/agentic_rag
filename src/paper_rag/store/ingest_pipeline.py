@@ -15,8 +15,8 @@ Hits return the existing paper_id back to the caller (signalled via the
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any
 
 from ..chunk.builder import build_chunks

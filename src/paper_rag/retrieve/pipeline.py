@@ -10,7 +10,6 @@ from __future__ import annotations
 from .hybrid import hybrid_search
 from .rerank import rerank as _rerank
 
-
 _MODALITY_HINTS = {
     "formula": (
         "formula", "equation", "latex", "derive", "derivation", "公式", "方程", "推导",
