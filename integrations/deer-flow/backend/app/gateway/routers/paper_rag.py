@@ -231,6 +231,10 @@ class PaperRagRuntimeStatus(BaseModel):
     qdrant_available: bool
     qdrant_collection: str | None = None
     qdrant_points: int | None = None
+    wiki_enabled: bool = False
+    wiki_available: bool = False
+    wiki_status: str = "unavailable"
+    wiki_reason: str | None = None
     warnings: list[str]
 
 
@@ -242,6 +246,65 @@ def _safe_next(gen):
         return next(gen)
     except StopIteration:
         return _SENTINEL_DONE
+
+
+def _load_paper_rag_config():
+    from paper_rag import config as cfg
+
+    return cfg.load()
+
+
+def _missing_llm_config(c: Any) -> list[str]:
+    missing = []
+    if not getattr(c.llm, "base_url", None):
+        missing.append("OPENAI_BASE_URL")
+    if not getattr(c.llm, "api_key", None):
+        missing.append("OPENAI_API_KEY")
+    if not getattr(c.llm, "chat_model", None):
+        missing.append("CHAT_MODEL")
+    return missing
+
+
+def _wiki_runtime_state() -> dict[str, Any]:
+    """Product-facing wiki activation state.
+
+    `wiki.enabled` is treated as an ops kill switch. Existing wiki entries can
+    still be shown, but empty per-paper wiki builds should explain when new
+    wiki generation is disabled or unavailable.
+    """
+    try:
+        c = _load_paper_rag_config()
+    except Exception as exc:
+        return {
+            "wiki_enabled": False,
+            "wiki_available": False,
+            "wiki_status": "unavailable",
+            "wiki_reason": f"paper_rag config unavailable: {type(exc).__name__}: {exc}",
+        }
+
+    if not bool(getattr(c.wiki, "enabled", False)):
+        return {
+            "wiki_enabled": False,
+            "wiki_available": False,
+            "wiki_status": "disabled",
+            "wiki_reason": "wiki disabled by configuration",
+        }
+
+    missing = _missing_llm_config(c)
+    if missing:
+        return {
+            "wiki_enabled": True,
+            "wiki_available": False,
+            "wiki_status": "unavailable",
+            "wiki_reason": f"LLM config missing: {', '.join(missing)}",
+        }
+
+    return {
+        "wiki_enabled": True,
+        "wiki_available": True,
+        "wiki_status": "enabled",
+        "wiki_reason": None,
+    }
 
 
 @router.get("/status", response_model=PaperRagRuntimeStatus)
@@ -259,7 +322,7 @@ def _build_runtime_status() -> dict[str, Any]:
     warnings: list[str] = []
     _ensure_paper_rag_importable()
     try:
-        from paper_rag import config as cfg
+        c = _load_paper_rag_config()
     except Exception as exc:
         return {
             "importable": False,
@@ -274,24 +337,25 @@ def _build_runtime_status() -> dict[str, Any]:
             "qdrant_available": False,
             "qdrant_collection": None,
             "qdrant_points": None,
+            "wiki_enabled": False,
+            "wiki_available": False,
+            "wiki_status": "unavailable",
+            "wiki_reason": f"paper_rag unavailable: {type(exc).__name__}: {exc}",
             "warnings": [f"paper_rag unavailable: {type(exc).__name__}: {exc}"],
         }
 
-    c = cfg.load()
     embedding_available = importlib.util.find_spec("FlagEmbedding") is not None
     if not embedding_available:
         warnings.append("FlagEmbedding is not installed; install paper-rag[embed] for dense retrieval.")
 
-    llm_configured = bool(c.llm.base_url and c.llm.api_key and c.llm.chat_model)
+    llm_missing = _missing_llm_config(c)
+    llm_configured = not llm_missing
     if not llm_configured:
-        missing = []
-        if not c.llm.base_url:
-            missing.append("OPENAI_BASE_URL")
-        if not c.llm.api_key:
-            missing.append("OPENAI_API_KEY")
-        if not c.llm.chat_model:
-            missing.append("CHAT_MODEL")
-        warnings.append(f"LLM config missing: {', '.join(missing)}; QA will use evidence-only fallback.")
+        warnings.append(f"LLM config missing: {', '.join(llm_missing)}; QA will use evidence-only fallback.")
+
+    wiki_state = _wiki_runtime_state()
+    if wiki_state["wiki_reason"] and not wiki_state["wiki_available"]:
+        warnings.append(f"Wiki build unavailable: {wiki_state['wiki_reason']}.")
 
     sqlite_papers = _count_sqlite_papers(c.paths.sqlite_path)
     sqlite_available = sqlite_papers is not None
@@ -317,6 +381,7 @@ def _build_runtime_status() -> dict[str, Any]:
         "qdrant_available": qdrant_available,
         "qdrant_collection": qdrant_collection,
         "qdrant_points": qdrant_points,
+        **wiki_state,
         "warnings": warnings,
     }
 
@@ -509,12 +574,13 @@ async def list_knowledge_builds(
     """Return product-facing paper knowledge-base build status."""
     _ensure_paper_rag_importable()
     try:
-        from paper_rag import config as cfg
-    except ImportError as exc:
+        c = _load_paper_rag_config()
+    except Exception as exc:
         raise HTTPException(503, f"paper_rag unavailable: {exc}") from exc
 
-    qdrant_points, qdrant_warning = _count_qdrant_points(cfg.load().qdrant.collection_chunks)
+    qdrant_points, qdrant_warning = _count_qdrant_points(c.qdrant.collection_chunks)
     qdrant_status = "online" if qdrant_points is not None else "offline"
+    wiki_runtime = _wiki_runtime_state()
     loop = asyncio.get_running_loop()
     rows = await loop.run_in_executor(
         None,
@@ -523,6 +589,7 @@ async def list_knowledge_builds(
         limit,
         qdrant_status,
         qdrant_warning,
+        wiki_runtime,
     )
     return [KnowledgeBuildStatus(**row) for row in rows]
 
@@ -532,7 +599,9 @@ def _list_knowledge_builds_for_user(
     limit: int,
     qdrant_status: str,
     qdrant_warning: str | None,
+    wiki_runtime: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    wiki_runtime = wiki_runtime or _wiki_runtime_state()
     sqlite_path = _resolve_sqlite_path()
     if not Path(sqlite_path).exists():
         return []
@@ -575,6 +644,8 @@ def _list_knowledge_builds_for_user(
             n_chunks = _count_chunks_for_paper(con, tables, chunks_table, paper_id)
             ingest_steps = _latest_ingest_steps(con, tables, paper_id)
             wiki_status = _wiki_status_for_paper(con, tables, paper_id)
+            if wiki_status == "empty" and not bool(wiki_runtime.get("wiki_available")):
+                wiki_status = str(wiki_runtime.get("wiki_status") or "unavailable")
             wiki_consumed = _wiki_consumed_for_paper(con, tables, paper_id)
             wiki_review_needed = _wiki_review_needed_for_paper(con, tables, paper_id)
             stages = _knowledge_stages(row, ingest_steps, wiki_status)
@@ -583,6 +654,11 @@ def _list_knowledge_builds_for_user(
                 warnings.append(qdrant_warning)
             if wiki_status == "empty":
                 warnings.append("Wiki entry has not been generated for this paper.")
+            elif wiki_status == "disabled":
+                warnings.append("Wiki auto-build is disabled by configuration.")
+            elif wiki_status == "unavailable":
+                reason = wiki_runtime.get("wiki_reason") or "wiki runtime is unavailable"
+                warnings.append(f"Wiki build unavailable: {reason}.")
             if wiki_review_needed:
                 warnings.append("Wiki entry needs review based on QA or feedback signals.")
             out.append(

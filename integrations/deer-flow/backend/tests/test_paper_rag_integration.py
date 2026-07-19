@@ -127,6 +127,7 @@ def test_runtime_status_reports_readiness_without_secrets(monkeypatch):
 
 def test_wiki_missing_entry_returns_404(monkeypatch):
     monkeypatch.setenv("PAPER_RAG_HOME", str(PAPER_RAG_HOME))
+    monkeypatch.setattr(paper_rag, "_lookup_wiki_for_paper", lambda _store, _paper_id: None)
     client = TestClient(_make_authenticated_app())
 
     response = client.get("/api/paper_rag/wiki/arxiv%3A2310.11511")

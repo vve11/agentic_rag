@@ -59,6 +59,10 @@ def _make_app():
     return app, auth
 
 
+def _fake_flag_embedding_find_spec(name: str):
+    return object() if name == "FlagEmbedding" else None
+
+
 def test_routes_registered():
     """Verify core paper_rag endpoints + /metrics are registered."""
     _make_app()
@@ -140,6 +144,105 @@ def test_paper_rag_papers_dev_mode():
             assert required in sample, f"missing field in response: {required}"
 
 
+def test_runtime_status_exposes_wiki_runtime_state(monkeypatch):
+    """Runtime status should make wiki activation visible to the product."""
+    from fastapi.testclient import TestClient
+
+    app, auth = _make_app()
+    pr = sys.modules["pr_mod"]
+    auth._AUTH_DISABLED = True
+    auth._DEV_USER_ID = "system"
+
+    class _Obj:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    fake_cfg = _Obj(
+        paths=_Obj(sqlite_path="missing.sqlite"),
+        llm=_Obj(base_url="https://llm.example.test/v1", api_key="sk-test", chat_model="model"),
+        wiki=_Obj(enabled=True),
+        qdrant=_Obj(collection_chunks="paper_chunks"),
+    )
+    monkeypatch.setattr(pr, "_load_paper_rag_config", lambda: fake_cfg)
+    monkeypatch.setattr(pr.importlib.util, "find_spec", _fake_flag_embedding_find_spec)
+    monkeypatch.setattr(pr, "_count_sqlite_papers", lambda _path: 1)
+    monkeypatch.setattr(pr, "_count_qdrant_points", lambda _collection: (42, None))
+
+    r = TestClient(app).get("/api/paper_rag/status")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["wiki_enabled"] is True
+    assert data["wiki_available"] is True
+    assert data["wiki_status"] == "enabled"
+    assert data["wiki_reason"] is None
+
+
+def test_runtime_status_reports_wiki_disabled(monkeypatch):
+    """wiki.enabled=false should be visible as an ops kill switch."""
+    from fastapi.testclient import TestClient
+
+    app, auth = _make_app()
+    pr = sys.modules["pr_mod"]
+    auth._AUTH_DISABLED = True
+    auth._DEV_USER_ID = "system"
+
+    class _Obj:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    fake_cfg = _Obj(
+        paths=_Obj(sqlite_path="missing.sqlite"),
+        llm=_Obj(base_url="https://llm.example.test/v1", api_key="sk-test", chat_model="model"),
+        wiki=_Obj(enabled=False),
+        qdrant=_Obj(collection_chunks="paper_chunks"),
+    )
+    monkeypatch.setattr(pr, "_load_paper_rag_config", lambda: fake_cfg)
+    monkeypatch.setattr(pr.importlib.util, "find_spec", _fake_flag_embedding_find_spec)
+    monkeypatch.setattr(pr, "_count_sqlite_papers", lambda _path: 1)
+    monkeypatch.setattr(pr, "_count_qdrant_points", lambda _collection: (42, None))
+
+    r = TestClient(app).get("/api/paper_rag/status")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["wiki_enabled"] is False
+    assert data["wiki_available"] is False
+    assert data["wiki_status"] == "disabled"
+    assert "disabled" in data["wiki_reason"]
+
+
+def test_runtime_status_reports_wiki_unavailable_without_llm(monkeypatch):
+    """An enabled wiki without LLM credentials should surface as unavailable."""
+    from fastapi.testclient import TestClient
+
+    app, auth = _make_app()
+    pr = sys.modules["pr_mod"]
+    auth._AUTH_DISABLED = True
+    auth._DEV_USER_ID = "system"
+
+    class _Obj:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    fake_cfg = _Obj(
+        paths=_Obj(sqlite_path="missing.sqlite"),
+        llm=_Obj(base_url=None, api_key=None, chat_model=None),
+        wiki=_Obj(enabled=True),
+        qdrant=_Obj(collection_chunks="paper_chunks"),
+    )
+    monkeypatch.setattr(pr, "_load_paper_rag_config", lambda: fake_cfg)
+    monkeypatch.setattr(pr.importlib.util, "find_spec", _fake_flag_embedding_find_spec)
+    monkeypatch.setattr(pr, "_count_sqlite_papers", lambda _path: 1)
+    monkeypatch.setattr(pr, "_count_qdrant_points", lambda _collection: (42, None))
+
+    r = TestClient(app).get("/api/paper_rag/status")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["wiki_enabled"] is True
+    assert data["wiki_available"] is False
+    assert data["wiki_status"] == "unavailable"
+    assert "LLM" in data["wiki_reason"]
+
+
 def test_knowledge_builds_dev_mode_returns_stage_status(tmp_path):
     """Knowledge Builder should expose ingest/index/wiki status for the UI."""
     import json
@@ -215,7 +318,9 @@ def test_knowledge_builds_dev_mode_returns_stage_status(tmp_path):
         [("c1", "arxiv:2310.11511", "text"), ("c2", "arxiv:2310.11511", "text")],
     )
     con.executemany(
-        "INSERT INTO ingest_runs (paper_id, step, status, finished_at, error) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO ingest_runs "
+        "(paper_id, step, status, finished_at, error) "
+        "VALUES (?, ?, ?, ?, ?)",
         [
             ("arxiv:2310.11511", "parse", "ok", "2026-01-01", None),
             ("arxiv:2310.11511", "chunk", "ok", "2026-01-01", None),
@@ -237,11 +342,20 @@ def test_knowledge_builds_dev_mode_returns_stage_status(tmp_path):
         "INSERT INTO wiki_consumption_events "
         "(trace_id, paper_id, entry_id, entry_name, wiki_fingerprint, question, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ("trace-1", "arxiv:2310.11511", "self-rag", "Self-RAG", "self-rag:1", "What is it?", "2026-01-01"),
+        (
+            "trace-1",
+            "arxiv:2310.11511",
+            "self-rag",
+            "Self-RAG",
+            "self-rag:1",
+            "What is it?",
+            "2026-01-01",
+        ),
     )
     con.execute(
         "INSERT INTO wiki_review_queue "
-        "(event_type, concept, concept_norm, paper_id, question, reason, status, payload_json, created_at, updated_at) "
+        "(event_type, concept, concept_norm, paper_id, question, reason, "
+        "status, payload_json, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             "qa_weak_evidence",
@@ -284,6 +398,139 @@ def test_knowledge_builds_dev_mode_returns_stage_status(tmp_path):
         "index": "ok",
         "wiki": "ready",
     }
+
+
+def test_knowledge_builds_reports_wiki_disabled_when_no_entry(tmp_path, monkeypatch):
+    """A disabled wiki kill switch should not appear as an unexplained empty wiki."""
+    import sqlite3
+
+    from fastapi.testclient import TestClient
+
+    db = tmp_path / "knowledge-disabled.sqlite"
+    con = sqlite3.connect(str(db))
+    con.executescript(
+        """
+        CREATE TABLE paper (
+            paper_id TEXT PRIMARY KEY,
+            title TEXT,
+            arxiv_id TEXT,
+            status TEXT,
+            error TEXT,
+            user_id TEXT,
+            created_at TEXT
+        );
+        CREATE TABLE chunk (
+            chunk_id TEXT PRIMARY KEY,
+            paper_id TEXT,
+            text TEXT
+        );
+        CREATE TABLE wiki_entries (
+            entry_id TEXT PRIMARY KEY,
+            name TEXT,
+            key_papers_json TEXT,
+            definition TEXT,
+            updated_at TEXT
+        );
+        """
+    )
+    con.execute(
+        "INSERT INTO paper VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            "arxiv:disabled",
+            "Disabled Wiki Paper",
+            "0000.00001",
+            "done",
+            None,
+            "system",
+            "2026-01-01",
+        ),
+    )
+    con.execute("INSERT INTO chunk VALUES (?, ?, ?)", ("c1", "arxiv:disabled", "text"))
+    con.commit()
+    con.close()
+
+    app, auth = _make_app()
+    pr = sys.modules["pr_mod"]
+    pr._resolve_sqlite_path = lambda: str(db)
+    pr._count_qdrant_points = lambda collection: (1, None)
+    monkeypatch.setattr(pr, "_wiki_runtime_state", lambda: {
+        "wiki_enabled": False,
+        "wiki_available": False,
+        "wiki_status": "disabled",
+        "wiki_reason": "wiki disabled by configuration",
+    })
+    auth._AUTH_DISABLED = True
+    auth._DEV_USER_ID = "system"
+
+    r = TestClient(app).get("/api/paper_rag/knowledge/builds")
+    assert r.status_code == 200, r.text
+    row = r.json()[0]
+    assert row["wiki_status"] == "disabled"
+    assert row["stages"][-1]["name"] == "wiki"
+    assert row["stages"][-1]["status"] == "disabled"
+    assert "disabled" in row["warnings"][0]
+
+
+def test_knowledge_builds_reports_wiki_unavailable_without_llm(tmp_path, monkeypatch):
+    """Missing LLM credentials should be visible in Knowledge Builder."""
+    import sqlite3
+
+    from fastapi.testclient import TestClient
+
+    db = tmp_path / "knowledge-unavailable.sqlite"
+    con = sqlite3.connect(str(db))
+    con.executescript(
+        """
+        CREATE TABLE paper (
+            paper_id TEXT PRIMARY KEY,
+            title TEXT,
+            arxiv_id TEXT,
+            status TEXT,
+            error TEXT,
+            user_id TEXT,
+            created_at TEXT
+        );
+        CREATE TABLE chunk (
+            chunk_id TEXT PRIMARY KEY,
+            paper_id TEXT,
+            text TEXT
+        );
+        CREATE TABLE wiki_entries (
+            entry_id TEXT PRIMARY KEY,
+            name TEXT,
+            key_papers_json TEXT,
+            definition TEXT,
+            updated_at TEXT
+        );
+        """
+    )
+    con.execute(
+        "INSERT INTO paper VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("arxiv:no-llm", "No LLM Paper", "0000.00002", "done", None, "system", "2026-01-01"),
+    )
+    con.execute("INSERT INTO chunk VALUES (?, ?, ?)", ("c1", "arxiv:no-llm", "text"))
+    con.commit()
+    con.close()
+
+    app, auth = _make_app()
+    pr = sys.modules["pr_mod"]
+    pr._resolve_sqlite_path = lambda: str(db)
+    pr._count_qdrant_points = lambda collection: (1, None)
+    monkeypatch.setattr(pr, "_wiki_runtime_state", lambda: {
+        "wiki_enabled": True,
+        "wiki_available": False,
+        "wiki_status": "unavailable",
+        "wiki_reason": "LLM config missing: OPENAI_BASE_URL, OPENAI_API_KEY, CHAT_MODEL",
+    })
+    auth._AUTH_DISABLED = True
+    auth._DEV_USER_ID = "system"
+
+    r = TestClient(app).get("/api/paper_rag/knowledge/builds")
+    assert r.status_code == 200, r.text
+    row = r.json()[0]
+    assert row["wiki_status"] == "unavailable"
+    assert row["stages"][-1]["status"] == "unavailable"
+    assert any("LLM config missing" in warning for warning in row["warnings"])
 
 
 def test_touch_paper_access_extracts_unique_ids(tmp_path=None):

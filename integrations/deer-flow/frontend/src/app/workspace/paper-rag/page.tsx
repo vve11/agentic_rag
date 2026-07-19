@@ -211,6 +211,10 @@ type RuntimeStatus = {
   qdrant_available: boolean;
   qdrant_collection?: string | null;
   qdrant_points?: number | null;
+  wiki_enabled?: boolean;
+  wiki_available?: boolean;
+  wiki_status?: string;
+  wiki_reason?: string | null;
   warnings: string[];
 };
 
@@ -248,10 +252,22 @@ function ingestMessage(data: IngestResponse) {
 }
 
 function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "ok" || status === "ready" || status === "done" || status === "online") return "default";
-  if (status === "error" || status === "failed" || status === "offline") return "destructive";
-  if (status === "pending" || status === "empty" || status === "skipped") return "secondary";
+  if (status === "ok" || status === "ready" || status === "done" || status === "online" || status === "enabled") {
+    return "default";
+  }
+  if (status === "error" || status === "failed" || status === "offline" || status === "unavailable") {
+    return "destructive";
+  }
+  if (status === "pending" || status === "empty" || status === "skipped" || status === "disabled") {
+    return "secondary";
+  }
   return "outline";
+}
+
+function wikiRuntimeLabel(status?: RuntimeStatus | null) {
+  if (!status?.wiki_status) return null;
+  if (status.wiki_status === "enabled") return "wiki on";
+  return `wiki ${status.wiki_status}`;
 }
 
 function memoryList(values?: string[]) {
@@ -572,6 +588,11 @@ export default function PaperRagPage() {
               <Badge variant={status.llm_configured ? "default" : "secondary"}>
                 {status.llm_configured ? (status.chat_model ?? "LLM ready") : "evidence-only"}
               </Badge>
+              {wikiRuntimeLabel(status) && (
+                <Badge variant={statusVariant(status.wiki_status ?? "unavailable")}>
+                  {wikiRuntimeLabel(status)}
+                </Badge>
+              )}
               <Badge variant={status.qdrant_available ? "secondary" : "destructive"}>
                 {status.qdrant_available ? `${status.qdrant_points ?? 0} vectors` : "dense offline"}
               </Badge>
@@ -976,6 +997,7 @@ export default function PaperRagPage() {
                             <Badge variant={statusVariant(build.status)}>{build.status}</Badge>
                             <Badge variant="secondary">{build.n_chunks} chunks</Badge>
                             <Badge variant={statusVariant(build.qdrant_status)}>qdrant {build.qdrant_status}</Badge>
+                            <Badge variant={statusVariant(build.wiki_status)}>wiki {build.wiki_status}</Badge>
                             {build.wiki_consumed && <Badge variant="default">wiki consumed</Badge>}
                             {build.wiki_review_needed && <Badge variant="destructive">wiki review</Badge>}
                             <span className="sr-only">knowledge build row {index + 1}</span>

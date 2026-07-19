@@ -15,6 +15,7 @@ POST   /api/paper_rag/discovery/run     Discover candidate papers for a topic
 GET    /api/paper_rag/discovery/runs    List discovery runs
 GET    /api/paper_rag/discovery/runs/{run_id}
 POST   /api/paper_rag/discovery/candidates/{candidate_id}/ingest
+GET    /api/paper_rag/status            Runtime readiness and wiki activation
 GET    /api/paper_rag/knowledge/builds  Knowledge Builder status
 GET    /api/paper_rag/wiki/{paper_id}   Wiki entry for a paper
 
@@ -35,9 +36,11 @@ Notes
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import logging
 import os
+import sqlite3
 import sys
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -207,6 +210,26 @@ class KnowledgeBuildStatus(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class PaperRagRuntimeStatus(BaseModel):
+    importable: bool
+    embedding_available: bool
+    llm_configured: bool
+    chat_model: str | None = None
+    openai_base_url_configured: bool
+    api_key_configured: bool
+    evidence_only: bool
+    sqlite_available: bool
+    sqlite_papers: int | None = None
+    qdrant_available: bool
+    qdrant_collection: str | None = None
+    qdrant_points: int | None = None
+    wiki_enabled: bool = False
+    wiki_available: bool = False
+    wiki_status: str = "unavailable"
+    wiki_reason: str | None = None
+    warnings: list[str]
+
+
 class WikiResponse(BaseModel):
     paper_id: str
     summary: str
@@ -331,6 +354,155 @@ def _safe_next(gen):
         return next(gen)
     except StopIteration:
         return _SENTINEL_DONE
+
+
+def _load_paper_rag_config():
+    from paper_rag import config as cfg
+
+    return cfg.load()
+
+
+def _missing_llm_config(c: Any) -> list[str]:
+    missing = []
+    if not getattr(c.llm, "base_url", None):
+        missing.append("OPENAI_BASE_URL")
+    if not getattr(c.llm, "api_key", None):
+        missing.append("OPENAI_API_KEY")
+    if not getattr(c.llm, "chat_model", None):
+        missing.append("CHAT_MODEL")
+    return missing
+
+
+def _wiki_runtime_state() -> dict[str, Any]:
+    try:
+        c = _load_paper_rag_config()
+    except Exception as exc:
+        return {
+            "wiki_enabled": False,
+            "wiki_available": False,
+            "wiki_status": "unavailable",
+            "wiki_reason": f"paper_rag config unavailable: {type(exc).__name__}: {exc}",
+        }
+
+    if not bool(getattr(c.wiki, "enabled", False)):
+        return {
+            "wiki_enabled": False,
+            "wiki_available": False,
+            "wiki_status": "disabled",
+            "wiki_reason": "wiki disabled by configuration",
+        }
+
+    missing = _missing_llm_config(c)
+    if missing:
+        return {
+            "wiki_enabled": True,
+            "wiki_available": False,
+            "wiki_status": "unavailable",
+            "wiki_reason": f"LLM config missing: {', '.join(missing)}",
+        }
+
+    return {
+        "wiki_enabled": True,
+        "wiki_available": True,
+        "wiki_status": "enabled",
+        "wiki_reason": None,
+    }
+
+
+@router.get("/status", response_model=PaperRagRuntimeStatus)
+async def runtime_status(
+    user_id: str = Depends(get_current_user_id),
+) -> PaperRagRuntimeStatus:
+    """Report paper_rag runtime readiness without exposing secrets."""
+    _ = user_id
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, _build_runtime_status)
+    return PaperRagRuntimeStatus(**data)
+
+
+def _build_runtime_status() -> dict[str, Any]:
+    warnings: list[str] = []
+    _ensure_paper_rag_importable()
+    try:
+        c = _load_paper_rag_config()
+    except Exception as exc:
+        return {
+            "importable": False,
+            "embedding_available": importlib.util.find_spec("FlagEmbedding") is not None,
+            "llm_configured": False,
+            "chat_model": None,
+            "openai_base_url_configured": False,
+            "api_key_configured": False,
+            "evidence_only": True,
+            "sqlite_available": False,
+            "sqlite_papers": None,
+            "qdrant_available": False,
+            "qdrant_collection": None,
+            "qdrant_points": None,
+            "wiki_enabled": False,
+            "wiki_available": False,
+            "wiki_status": "unavailable",
+            "wiki_reason": f"paper_rag unavailable: {type(exc).__name__}: {exc}",
+            "warnings": [f"paper_rag unavailable: {type(exc).__name__}: {exc}"],
+        }
+
+    embedding_available = importlib.util.find_spec("FlagEmbedding") is not None
+    if not embedding_available:
+        warnings.append("FlagEmbedding is not installed; install paper-rag[embed] for dense retrieval.")
+
+    llm_missing = _missing_llm_config(c)
+    llm_configured = not llm_missing
+    if not llm_configured:
+        warnings.append(f"LLM config missing: {', '.join(llm_missing)}; QA will use evidence-only fallback.")
+
+    wiki_state = _wiki_runtime_state()
+    if wiki_state["wiki_reason"] and not wiki_state["wiki_available"]:
+        warnings.append(f"Wiki build unavailable: {wiki_state['wiki_reason']}.")
+
+    sqlite_papers = _count_sqlite_papers(c.paths.sqlite_path)
+    sqlite_available = sqlite_papers is not None
+    if not sqlite_available:
+        warnings.append(f"SQLite store unavailable at {c.paths.sqlite_path}.")
+
+    qdrant_collection = getattr(c.qdrant, "collection_chunks", "paper_chunks")
+    qdrant_points, qdrant_warning = _count_qdrant_points(qdrant_collection)
+    qdrant_available = qdrant_points is not None
+    if qdrant_warning:
+        warnings.append(qdrant_warning)
+
+    return {
+        "importable": True,
+        "embedding_available": embedding_available,
+        "llm_configured": llm_configured,
+        "chat_model": c.llm.chat_model,
+        "openai_base_url_configured": bool(c.llm.base_url),
+        "api_key_configured": bool(c.llm.api_key),
+        "evidence_only": not llm_configured,
+        "sqlite_available": sqlite_available,
+        "sqlite_papers": sqlite_papers,
+        "qdrant_available": qdrant_available,
+        "qdrant_collection": qdrant_collection,
+        "qdrant_points": qdrant_points,
+        **wiki_state,
+        "warnings": warnings,
+    }
+
+
+def _count_sqlite_papers(sqlite_path: str) -> int | None:
+    path = Path(sqlite_path)
+    if not path.exists():
+        return None
+    con = sqlite3.connect(str(path))
+    try:
+        table_names = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        papers_table = "paper" if "paper" in table_names else "papers"
+        if papers_table not in table_names:
+            return 0
+        return int(con.execute(f"SELECT COUNT(*) FROM {papers_table}").fetchone()[0] or 0)
+    except sqlite3.Error:
+        return None
+    finally:
+        con.close()
 
 
 @router.post("/qa/sync", response_model=QASyncResponse)
@@ -555,6 +727,7 @@ async def list_knowledge_builds(
     """Return product-facing paper knowledge-base build status."""
     qdrant_points, qdrant_warning = _count_qdrant_points("paper_chunks")
     qdrant_status = "online" if qdrant_points is not None else "offline"
+    wiki_runtime = _wiki_runtime_state()
     loop = asyncio.get_running_loop()
     rows = await loop.run_in_executor(
         None,
@@ -563,6 +736,7 @@ async def list_knowledge_builds(
         limit,
         qdrant_status,
         qdrant_warning,
+        wiki_runtime,
     )
     return [KnowledgeBuildStatus(**row) for row in rows]
 
@@ -572,9 +746,11 @@ def _list_knowledge_builds_for_user(
     limit: int,
     qdrant_status: str,
     qdrant_warning: str | None,
+    wiki_runtime: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     import sqlite3
 
+    wiki_runtime = wiki_runtime or _wiki_runtime_state()
     sqlite_path = _resolve_sqlite_path()
     if not Path(sqlite_path).exists():
         return []
@@ -616,6 +792,8 @@ def _list_knowledge_builds_for_user(
             n_chunks = _kb_count_chunks(con, tables, chunks_table, paper_id)
             steps = _kb_latest_steps(con, tables, paper_id)
             wiki_status = _kb_wiki_status(con, tables, paper_id)
+            if wiki_status == "empty" and not bool(wiki_runtime.get("wiki_available")):
+                wiki_status = str(wiki_runtime.get("wiki_status") or "unavailable")
             wiki_consumed = _kb_wiki_consumed(con, tables, paper_id)
             wiki_review_needed = _kb_wiki_review_needed(con, tables, paper_id)
             warnings = []
@@ -623,6 +801,11 @@ def _list_knowledge_builds_for_user(
                 warnings.append(qdrant_warning)
             if wiki_status == "empty":
                 warnings.append("Wiki entry has not been generated for this paper.")
+            elif wiki_status == "disabled":
+                warnings.append("Wiki auto-build is disabled by configuration.")
+            elif wiki_status == "unavailable":
+                reason = wiki_runtime.get("wiki_reason") or "wiki runtime is unavailable"
+                warnings.append(f"Wiki build unavailable: {reason}.")
             if wiki_review_needed:
                 warnings.append("Wiki entry needs review based on QA or feedback signals.")
             rows.append(
