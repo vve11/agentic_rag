@@ -150,7 +150,7 @@ class _Vision(BaseModel):
 
 
 class _Wiki(BaseModel):
-    enabled: bool = False
+    enabled: bool = True
     similarity_threshold: float = 0.85
     rate_limit_hours: int = 24
     self_eval_threshold: float = 0.7

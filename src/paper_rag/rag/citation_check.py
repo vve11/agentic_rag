@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 _CITE_RE = re.compile(r"\[chunk:([0-9a-f]{6,40})\]")
+_ANY_CHUNK_CITE_RE = re.compile(r"\[chunk:([^\]\s]+)\]")
 
 # Bracketed numeric like [1], [12]. Avoid matching [chunk:..] (already excluded by
 # the negative lookahead) and avoid markdown checkboxes "[x]" (require digits only).
@@ -31,7 +32,7 @@ def validate_citations(answer: str, retrieved: list[dict]) -> tuple[str, list[st
     Returns (cleaned_answer, valid_chunk_ids).
     """
     allowed = {c.get("chunk_id") for c in retrieved if c.get("chunk_id")}
-    found = _CITE_RE.findall(answer)
+    found = _ANY_CHUNK_CITE_RE.findall(answer)
     valid = []
     seen = set()
     for cid in found:
@@ -42,7 +43,7 @@ def validate_citations(answer: str, retrieved: list[dict]) -> tuple[str, list[st
     def _sub(m):
         return m.group(0) if m.group(1) in allowed else ""
 
-    cleaned = _CITE_RE.sub(_sub, answer)
+    cleaned = _ANY_CHUNK_CITE_RE.sub(_sub, answer)
     return cleaned, valid
 
 

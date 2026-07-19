@@ -90,7 +90,7 @@ vision:
   cache_dir: ./data/index/vision_cache
 
 wiki:
-  enabled: false
+  enabled: true              # product default; set false only as an ops kill switch
   similarity_threshold: 0.85
   rate_limit_hours: 24
   self_eval_threshold: 0.7

@@ -57,10 +57,25 @@ type QASyncResponse = {
   n_chunks?: number;
   trace?: {
     loop?: LoopTrace;
+    wiki_context?: WikiTraceContext;
     memory?: ResearchMemoryTrace;
     memory_before?: ResearchMemoryTrace;
   };
   memory?: ResearchMemoryTrace | null;
+};
+
+type WikiTraceEntry = {
+  entry_id?: string;
+  name?: string;
+  version?: number;
+  aliases?: string[];
+  key_papers?: string[];
+};
+
+type WikiTraceContext = {
+  role?: string;
+  fingerprint?: string;
+  entries?: WikiTraceEntry[];
 };
 
 type LoopIteration = {
@@ -116,6 +131,8 @@ type KnowledgeBuild = {
   ingested_at?: string | null;
   stages: KnowledgeBuildStage[];
   wiki_status: string;
+  wiki_consumed?: boolean;
+  wiki_review_needed?: boolean;
   qdrant_status: string;
   warnings: string[];
 };
@@ -194,6 +211,10 @@ type RuntimeStatus = {
   qdrant_available: boolean;
   qdrant_collection?: string | null;
   qdrant_points?: number | null;
+  wiki_enabled?: boolean;
+  wiki_available?: boolean;
+  wiki_status?: string;
+  wiki_reason?: string | null;
   warnings: string[];
 };
 
@@ -231,10 +252,22 @@ function ingestMessage(data: IngestResponse) {
 }
 
 function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "ok" || status === "ready" || status === "done" || status === "online") return "default";
-  if (status === "error" || status === "failed" || status === "offline") return "destructive";
-  if (status === "pending" || status === "empty" || status === "skipped") return "secondary";
+  if (status === "ok" || status === "ready" || status === "done" || status === "online" || status === "enabled") {
+    return "default";
+  }
+  if (status === "error" || status === "failed" || status === "offline" || status === "unavailable") {
+    return "destructive";
+  }
+  if (status === "pending" || status === "empty" || status === "skipped" || status === "disabled") {
+    return "secondary";
+  }
   return "outline";
+}
+
+function wikiRuntimeLabel(status?: RuntimeStatus | null) {
+  if (!status?.wiki_status) return null;
+  if (status.wiki_status === "enabled") return "wiki on";
+  return `wiki ${status.wiki_status}`;
 }
 
 function memoryList(values?: string[]) {
@@ -555,6 +588,11 @@ export default function PaperRagPage() {
               <Badge variant={status.llm_configured ? "default" : "secondary"}>
                 {status.llm_configured ? (status.chat_model ?? "LLM ready") : "evidence-only"}
               </Badge>
+              {wikiRuntimeLabel(status) && (
+                <Badge variant={statusVariant(status.wiki_status ?? "unavailable")}>
+                  {wikiRuntimeLabel(status)}
+                </Badge>
+              )}
               <Badge variant={status.qdrant_available ? "secondary" : "destructive"}>
                 {status.qdrant_available ? `${status.qdrant_points ?? 0} vectors` : "dense offline"}
               </Badge>
@@ -645,6 +683,33 @@ export default function PaperRagPage() {
                         ))}
                       </div>
                     )}
+                    {answer.trace?.wiki_context?.entries?.length ? (
+                      <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-medium">Wiki Context</h3>
+                          <Badge variant="outline">
+                            {answer.trace.wiki_context.role ?? "background_not_evidence"}
+                          </Badge>
+                          {answer.trace.wiki_context.fingerprint && (
+                            <Badge variant="secondary" className="max-w-full truncate">
+                              {answer.trace.wiki_context.fingerprint}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {answer.trace.wiki_context.entries.map((entry) => (
+                            <Badge
+                              key={entry.entry_id ?? entry.name}
+                              variant="secondary"
+                              className="max-w-full truncate"
+                            >
+                              {entry.name ?? entry.entry_id}
+                              {typeof entry.version === "number" ? ` v${entry.version}` : ""}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {answer.trace?.loop && (
                       <div className="space-y-3 rounded-md border bg-muted/20 p-3">
                         <div className="flex flex-wrap items-center gap-2">
@@ -859,7 +924,8 @@ export default function PaperRagPage() {
                         ))}
                       </div>
                     )}
-                    {(discovery.trace.loop?.length || discovery.trace.source_errors?.length) && (
+                    {((discovery.trace.loop?.length ?? 0) > 0 ||
+                      (discovery.trace.source_errors?.length ?? 0) > 0) && (
                       <div className="space-y-2 rounded-md border bg-muted/20 p-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-sm font-medium">Discovery Trace</h3>
@@ -931,6 +997,9 @@ export default function PaperRagPage() {
                             <Badge variant={statusVariant(build.status)}>{build.status}</Badge>
                             <Badge variant="secondary">{build.n_chunks} chunks</Badge>
                             <Badge variant={statusVariant(build.qdrant_status)}>qdrant {build.qdrant_status}</Badge>
+                            <Badge variant={statusVariant(build.wiki_status)}>wiki {build.wiki_status}</Badge>
+                            {build.wiki_consumed && <Badge variant="default">wiki consumed</Badge>}
+                            {build.wiki_review_needed && <Badge variant="destructive">wiki review</Badge>}
                             <span className="sr-only">knowledge build row {index + 1}</span>
                           </div>
                         </div>
