@@ -72,6 +72,46 @@ def _maybe_rewrite_with_history(question: str, conversation_id: str | None) -> s
         return question
 
 
+def _resolve_wiki_context_safe(question: str, paper_ids: list[str] | None) -> dict:
+    """Resolve wiki background for QA. Failures are non-fatal."""
+    try:
+        from ..wiki.context import resolve_wiki_context
+
+        return resolve_wiki_context(question, paper_ids=paper_ids)
+    except Exception as e:
+        log.warning(f"wiki context resolve failed (non-fatal): {e}")
+        return {"role": "background_not_evidence", "fingerprint": "", "entries": []}
+
+
+def _cache_question(question: str, wiki_context: dict | None) -> str:
+    fingerprint = (wiki_context or {}).get("fingerprint") or ""
+    if not fingerprint:
+        return question
+    return f"{question}\n\nwiki_context_fingerprint:{fingerprint}"
+
+
+def _record_wiki_consumption_safe(
+    *,
+    question: str,
+    paper_ids: list[str] | None,
+    wiki_context: dict,
+    trace_id: str,
+) -> None:
+    if not (wiki_context or {}).get("entries"):
+        return
+    try:
+        from ..wiki.usage import record_consumption
+
+        record_consumption(
+            question=question,
+            paper_ids=paper_ids,
+            wiki_context=wiki_context,
+            trace_id=trace_id,
+        )
+    except Exception as e:
+        log.warning(f"wiki consumption record failed (non-fatal): {e}")
+
+
 def _check_cache(question: str, paper_ids: list[str] | None, trace_id: str) -> dict | None:
     """qa_cache short-circuit. Returns the cached response (already shaped
     for the public ``answer`` contract) or None if no hit."""
@@ -106,6 +146,7 @@ def _retrieve_loop(
     top_k: int,
     max_iter: int,
     enable_reflect: bool,
+    wiki_context: dict | None = None,
 ) -> tuple[dict[str, dict], list[dict], str]:
     """Run up to ``max_iter`` rounds of retrieve+reflect.
 
@@ -117,7 +158,14 @@ def _retrieve_loop(
     stopped = "max_iters"
 
     for it in range(max_iter):
-        chunks = _retrieve_round(current_query, paper_ids, top_k)
+        try:
+            chunks = _retrieve_round(
+                current_query, paper_ids, top_k, wiki_context=wiki_context
+            )
+        except TypeError as e:
+            if "wiki_context" not in str(e):
+                raise
+            chunks = _retrieve_round(current_query, paper_ids, top_k)
         for ch in chunks:
             cid = ch.get("chunk_id")
             if cid and cid not in all_chunks:
@@ -147,7 +195,13 @@ def _retrieve_loop(
     return all_chunks, trace, stopped
 
 
-def _no_chunks_response(intent_cfg: dict, trace: list[dict], stopped: str, trace_id: str) -> dict:
+def _no_chunks_response(
+    intent_cfg: dict,
+    trace: list[dict],
+    stopped: str,
+    trace_id: str,
+    wiki_context: dict | None = None,
+) -> dict:
     """Final response when retrieve produced zero usable chunks."""
     from ..observability import counter
 
@@ -169,6 +223,7 @@ def _no_chunks_response(intent_cfg: dict, trace: list[dict], stopped: str, trace
                 "evidence_score": 0.0,
                 "n_chunks": 0,
             },
+            "wiki_context": wiki_context or {"role": "background_not_evidence", "fingerprint": "", "entries": []},
             "trace_id": trace_id,
         },
     }
@@ -206,6 +261,7 @@ def _no_evidence_response(
     abstain_cfg,
     final_chunks: list[dict],
     trace_id: str,
+    wiki_context: dict | None = None,
 ) -> dict:
     """Skip the LLM entirely when abstain says no_evidence."""
     from ..observability import counter
@@ -224,18 +280,32 @@ def _no_evidence_response(
             "iters": trace,
             "stopped_by": "no_evidence_abstain",
             "abstain": abstain_result,
+            "wiki_context": wiki_context or {"role": "background_not_evidence", "fingerprint": "", "entries": []},
             "trace_id": trace_id,
         },
     }
 
 
-def _build_user_prompt(question: str, final_chunks: list[dict], abstain_result: dict) -> str:
+def _build_user_prompt(
+    question: str,
+    final_chunks: list[dict],
+    abstain_result: dict,
+    wiki_context: dict | None = None,
+) -> str:
     evidence = format_evidence(final_chunks)
+    wiki_block = ""
+    try:
+        from ..wiki.context import format_wiki_background
+
+        wiki_block = format_wiki_background(wiki_context or {})
+    except Exception as e:
+        log.warning(f"wiki background formatting failed (non-fatal): {e}")
     allowed_citations = " ".join(
         f"[chunk:{ch['chunk_id']}]" for ch in final_chunks if ch.get("chunk_id")
     )
+    wiki_section = f"\n\n{wiki_block}\n" if wiki_block else ""
     user = (
-        f"Question: {question}\n\nEvidence:\n{evidence}\n\n"
+        f"Question: {question}{wiki_section}\nEvidence:\n{evidence}\n\n"
         f"Allowed citation tokens: {allowed_citations}\n\n"
         "Use at most 2 citations. Choose the chunks that most directly support "
         "the answer; do not cite background chunks just because they are available.\n\n"
@@ -258,6 +328,7 @@ def _chat_failed_response(
     evidence_selection: dict,
     trace_id: str,
     err: Exception,
+    wiki_context: dict | None = None,
 ) -> dict:
     from ..observability import counter
 
@@ -278,6 +349,7 @@ def _chat_failed_response(
             "stopped_by": stopped,
             "degraded": f"chat_error:{type(err).__name__}",
             "evidence_selection": evidence_selection,
+            "wiki_context": wiki_context or {"role": "background_not_evidence", "fingerprint": "", "entries": []},
             "trace_id": trace_id,
         },
     }
@@ -290,6 +362,56 @@ def _store_in_cache(question: str, paper_ids: list[str] | None, out: dict) -> No
         qa_cache.put(question, paper_ids, out)
     except Exception as e:
         log.warning(f"qa_cache put failed (non-fatal): {e}")
+
+
+def _first_wiki_concept(wiki_context: dict | None) -> str | None:
+    entries = (wiki_context or {}).get("entries") or []
+    if not entries:
+        return None
+    name = entries[0].get("name")
+    return str(name) if name else None
+
+
+def _first_paper_id(paper_ids: list[str] | None, chunks: list[dict] | None) -> str | None:
+    if paper_ids:
+        return paper_ids[0]
+    for chunk in chunks or []:
+        paper_id = chunk.get("paper_id")
+        if paper_id:
+            return str(paper_id)
+    return None
+
+
+def _enqueue_wiki_review_event(
+    event_type: str,
+    *,
+    question: str,
+    paper_ids: list[str] | None = None,
+    chunks: list[dict] | None = None,
+    wiki_context: dict | None = None,
+    reason: str = "",
+    trace_id: str | None = None,
+    payload: dict | None = None,
+    concept: str | None = None,
+    paper_id: str | None = None,
+) -> None:
+    try:
+        from ..wiki import review_queue
+
+        review_queue.enqueue(
+            event_type,
+            concept=concept or _first_wiki_concept(wiki_context),
+            paper_id=paper_id or _first_paper_id(paper_ids, chunks),
+            question=question,
+            reason=reason,
+            payload={
+                "trace_id": trace_id,
+                "wiki_context_fingerprint": (wiki_context or {}).get("fingerprint", ""),
+                **(payload or {}),
+            },
+        )
+    except Exception as e:
+        log.warning(f"wiki review enqueue failed (non-fatal): {e}")
 
 
 def _persist_history(
@@ -445,12 +567,24 @@ def _answer_impl(
     # Stage 1 — fold conversation history into a self-contained question.
     question = _maybe_rewrite_with_history(question, conversation_id)
 
-    # Stage 2 — qa_cache short-circuit.
-    cached = _check_cache(question, paper_ids, trace_id)
+    # Stage 2 — resolve wiki background. Wiki is query/prompt context only,
+    # never final evidence.
+    wiki_context = _resolve_wiki_context_safe(question, paper_ids)
+    _record_wiki_consumption_safe(
+        question=question,
+        paper_ids=paper_ids,
+        wiki_context=wiki_context,
+        trace_id=trace_id,
+    )
+
+    # Stage 3 — qa_cache short-circuit. The effective key includes wiki entry
+    # versions so a patched background note cannot reuse an older answer.
+    question_for_cache = _cache_question(question, wiki_context)
+    cached = _check_cache(question_for_cache, paper_ids, trace_id)
     if cached is not None:
         return cached
 
-    # Stage 3 — pick intent + retrieve loop.
+    # Stage 4 — pick intent + retrieve loop.
     c = cfg.load().rag
     intent_cfg = classify(question)
     max_iter = min(intent_cfg["max_iter"], c.max_inner_iters)
@@ -461,28 +595,64 @@ def _answer_impl(
         top_k,
         max_iter,
         enable_reflect=c.enable_reflect,
+        wiki_context=wiki_context,
     )
 
-    # Stage 4 — short-circuit if retrieve produced nothing.
+    # Stage 5 — short-circuit if retrieve produced nothing.
     final_chunks = list(all_chunks.values())[: top_k * 2]
     if not final_chunks:
-        return _no_chunks_response(intent_cfg, trace, stopped, trace_id)
+        _enqueue_wiki_review_event(
+            "qa_no_chunks",
+            question=question,
+            paper_ids=paper_ids,
+            wiki_context=wiki_context,
+            reason="no_chunks",
+            trace_id=trace_id,
+            concept=_first_wiki_concept(wiki_context),
+            paper_id=_first_paper_id(paper_ids, []),
+        )
+        return _no_chunks_response(intent_cfg, trace, stopped, trace_id, wiki_context)
 
-    # Stage 5 — abstain decision (after retrieve, before LLM, see ADR-0014).
+    # Stage 6 — abstain decision (after retrieve, before LLM, see ADR-0014).
     abstain_cfg = c.abstain
     abstain_result = _decide_abstain(final_chunks, abstain_cfg)
     if abstain_result["decision"] == abstain_mod.DECISION_NO_EVIDENCE:
+        _enqueue_wiki_review_event(
+            "qa_no_evidence",
+            question=question,
+            paper_ids=paper_ids,
+            chunks=final_chunks,
+            wiki_context=wiki_context,
+            reason="no_evidence",
+            trace_id=trace_id,
+            payload={"abstain": abstain_result},
+            concept=_first_wiki_concept(wiki_context),
+            paper_id=_first_paper_id(paper_ids, final_chunks),
+        )
         return _no_evidence_response(
-            intent_cfg, trace, abstain_result, abstain_cfg, final_chunks, trace_id
+            intent_cfg, trace, abstain_result, abstain_cfg, final_chunks, trace_id, wiki_context
+        )
+    if abstain_result["decision"] == abstain_mod.DECISION_WEAK:
+        _enqueue_wiki_review_event(
+            "qa_weak_evidence",
+            question=question,
+            paper_ids=paper_ids,
+            chunks=final_chunks,
+            wiki_context=wiki_context,
+            reason="weak_evidence",
+            trace_id=trace_id,
+            payload={"abstain": abstain_result},
+            concept=_first_wiki_concept(wiki_context),
+            paper_id=_first_paper_id(paper_ids, final_chunks),
         )
 
-    # Stage 6 — deterministic evidence selection + LLM call + citation cleanup.
+    # Stage 7 — deterministic evidence selection + LLM call + citation cleanup.
     evidence_chunks, evidence_selection = select_evidence(
         question,
         final_chunks,
         intent=intent_cfg.get("intent"),
     )
-    user = _build_user_prompt(question, evidence_chunks, abstain_result)
+    user = _build_user_prompt(question, evidence_chunks, abstain_result, wiki_context)
     try:
         raw = chat(
             [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
@@ -500,6 +670,7 @@ def _answer_impl(
             evidence_selection,
             trace_id,
             e,
+            wiki_context,
         )
 
     cleaned, valid = validate_citations(raw, evidence_chunks)
@@ -528,8 +699,9 @@ def _answer_impl(
             "stopped_by": stopped,
             "abstain": abstain_result,
             "evidence_selection": evidence_selection,
+            "wiki_context": wiki_context,
             "trace_id": trace_id,
         },
     }
-    _store_in_cache(question, paper_ids, out)
+    _store_in_cache(question_for_cache, paper_ids, out)
     return out

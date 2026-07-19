@@ -41,7 +41,7 @@ Return only JSON.
 """
 
 
-def rewrite(question: str) -> dict:
+def rewrite(question: str, wiki_context: dict | None = None) -> dict:
     c = cfg.load()
     enable = c.rag.enable_hyde
     data = {}
@@ -62,13 +62,41 @@ def rewrite(question: str) -> dict:
     else:
         log.debug("rewrite LLM not configured; using local fallback variants")
 
-    variants = _dedupe([*(data.get("variants") or []), *_heuristic_variants(question)])
-    keywords = data.get("keywords") or question
+    wiki_hints = _wiki_hints(wiki_context)
+    variants = _dedupe([
+        *(data.get("variants") or []),
+        *_heuristic_variants(question),
+        *wiki_hints["dense_queries"],
+    ])
+    keyword_parts = [data.get("keywords") or question]
+    if wiki_hints["bm25_query"]:
+        keyword_parts.append(wiki_hints["bm25_query"])
+    keywords = " ".join(part for part in keyword_parts if part)
     hyde = data.get("hyde") if enable else None
     queries_dense = [question, *variants]
     if hyde:
         queries_dense.append(hyde)
-    return {"dense_queries": queries_dense, "bm25_query": keywords, "raw": data}
+    return {
+        "dense_queries": _dedupe(queries_dense),
+        "bm25_query": keywords,
+        "raw": {
+            **data,
+            "wiki_context_used": bool(wiki_hints["dense_queries"]),
+            "wiki_key_papers": wiki_hints["key_papers"],
+        },
+    }
+
+
+def _wiki_hints(wiki_context: dict | None) -> dict:
+    if not wiki_context:
+        return {"dense_queries": [], "bm25_query": "", "key_papers": []}
+    try:
+        from ..wiki.context import wiki_rewrite_hints
+
+        return wiki_rewrite_hints(wiki_context)
+    except Exception as e:
+        log.warning(f"wiki rewrite hints skipped: {e}")
+        return {"dense_queries": [], "bm25_query": "", "key_papers": []}
 
 
 def _truthy_env(name: str) -> bool:

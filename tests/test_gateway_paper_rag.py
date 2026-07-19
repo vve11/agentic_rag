@@ -181,6 +181,29 @@ def test_knowledge_builds_dev_mode_returns_stage_status(tmp_path):
             definition TEXT,
             updated_at TEXT
         );
+        CREATE TABLE wiki_consumption_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trace_id TEXT,
+            paper_id TEXT,
+            entry_id TEXT,
+            entry_name TEXT,
+            wiki_fingerprint TEXT,
+            question TEXT,
+            created_at TEXT
+        );
+        CREATE TABLE wiki_review_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT,
+            concept TEXT,
+            concept_norm TEXT,
+            paper_id TEXT,
+            question TEXT,
+            reason TEXT,
+            status TEXT,
+            payload_json TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        );
         """
     )
     con.execute(
@@ -210,6 +233,29 @@ def test_knowledge_builds_dev_mode_returns_stage_status(tmp_path):
             "2026-01-01",
         ),
     )
+    con.execute(
+        "INSERT INTO wiki_consumption_events "
+        "(trace_id, paper_id, entry_id, entry_name, wiki_fingerprint, question, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("trace-1", "arxiv:2310.11511", "self-rag", "Self-RAG", "self-rag:1", "What is it?", "2026-01-01"),
+    )
+    con.execute(
+        "INSERT INTO wiki_review_queue "
+        "(event_type, concept, concept_norm, paper_id, question, reason, status, payload_json, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "qa_weak_evidence",
+            "Self-RAG",
+            "selfrag",
+            "arxiv:2310.11511",
+            "What is it?",
+            "weak_evidence",
+            "pending",
+            "{}",
+            "2026-01-01",
+            "2026-01-01",
+        ),
+    )
     con.commit()
     con.close()
 
@@ -226,6 +272,8 @@ def test_knowledge_builds_dev_mode_returns_stage_status(tmp_path):
     assert data[0]["paper_id"] == "arxiv:2310.11511"
     assert data[0]["n_chunks"] == 2
     assert data[0]["wiki_status"] == "ready"
+    assert data[0]["wiki_consumed"] is True
+    assert data[0]["wiki_review_needed"] is True
     assert data[0]["qdrant_status"] == "offline"
     stages = {stage["name"]: stage["status"] for stage in data[0]["stages"]}
     assert stages == {

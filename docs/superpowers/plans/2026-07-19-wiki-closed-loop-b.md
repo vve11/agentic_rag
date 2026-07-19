@@ -24,6 +24,7 @@
 
 - Create `src/paper_rag/wiki/context.py`: read-only wiki matching, compaction, fingerprinting, prompt formatting, and rewrite hint extraction.
 - Create `src/paper_rag/wiki/review_queue.py`: SQLite-backed review queue and dedupe.
+- Create `src/paper_rag/wiki/usage.py`: SQLite-backed wiki consumption events for Knowledge Builder status.
 - Modify `src/paper_rag/rag/query_rewrite.py`: accept optional wiki context and add aliases/definition keywords to rewrite output.
 - Modify `src/paper_rag/retrieve/pipeline.py`: pass wiki context into rewrite.
 - Modify `src/paper_rag/rag/qa_agentic.py`: resolve wiki context, add prompt background, protect cache with fingerprint, enqueue review events, expose trace.
@@ -252,13 +253,17 @@ Expected: PASS.
 ### Task 4: Feedback And Gateway Status
 
 **Files:**
+- Create: `src/paper_rag/wiki/usage.py`
 - Modify: `src/paper_rag/feedback/collector.py`
 - Modify: `integrations/deer-flow/backend/app/gateway/routers/paper_rag.py`
+- Test: `tests/test_wiki_usage.py`
 - Test: `tests/test_feedback_wiki_loop.py`
 - Test: `integrations/deer-flow/backend/tests/test_paper_rag_integration.py`
 
 **Interfaces:**
 - Consumes: `review_queue.enqueue`
+- Produces: `usage.record_consumption(question, paper_ids, wiki_context, trace_id) -> None`
+- Produces: `usage.consumed_paper_ids() -> set[str]`
 - Produces: Knowledge Builder fields `wiki_consumed: bool` and `wiki_review_needed: bool`
 
 - [ ] **Step 1: Write failing feedback test**
@@ -286,13 +291,13 @@ Add assertions that Knowledge Builder rows include `wiki_consumed` and `wiki_rev
 
 In `record_event`, after `store.write`, call a private best-effort helper. Enqueue for configured `thumbs_down` reasons and `judge_score` values below 3.0.
 
-- [ ] **Step 4: Implement gateway status fields**
+- [ ] **Step 4: Implement wiki usage and gateway status fields**
 
-Extend `KnowledgeBuildStatus` with `wiki_consumed: bool = False` and `wiki_review_needed: bool = False`. Compute consumed by scanning `qa_history` rows that contain parseable trace JSON; when the table or trace data is missing, return `False`. Compute review-needed by scanning `wiki_review_queue`; when the table is missing, return `False`.
+Add `wiki_consumption_events` with trace id, paper id, entry id/name, fingerprint, question, and created_at. Record consumption from `qa_agentic` immediately after wiki context resolution when entries are present. Extend `KnowledgeBuildStatus` with `wiki_consumed: bool = False` and `wiki_review_needed: bool = False`. Compute consumed by scanning `wiki_consumption_events`; when the table is missing, return `False`. Compute review-needed by scanning pending `wiki_review_queue`; when the table is missing, return `False`.
 
 - [ ] **Step 5: Run tests**
 
-Run: `PYTHONPATH=src pytest -q tests/test_feedback_wiki_loop.py tests/test_gateway_paper_rag.py integrations/deer-flow/backend/tests/test_paper_rag_integration.py`
+Run: `PYTHONPATH=src pytest -q tests/test_wiki_usage.py tests/test_feedback_wiki_loop.py tests/test_gateway_paper_rag.py integrations/deer-flow/backend/tests/test_paper_rag_integration.py`
 
 Expected: PASS or skip integration tests that require unavailable DeerFlow deps with the existing test behavior.
 

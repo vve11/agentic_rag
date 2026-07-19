@@ -124,6 +124,11 @@ QA responses should include:
 
 Metrics should count wiki context hits, misses, and review queue events when the local metrics helper makes that straightforward.
 
+QA should also persist lightweight wiki consumption events when wiki context
+entries are present. These events power Knowledge Builder's consumed status and
+should include trace id, paper id, wiki entry id/name, fingerprint, question,
+and timestamp.
+
 ### Cache Safety
 
 QA cache keys must account for wiki context fingerprint. If wiki context changes, a cached answer produced from older background should not be reused as if it used current background.
@@ -135,7 +140,9 @@ If changing the existing cache schema is risky, include the fingerprint in the e
 Backend:
 
 - Ensure QA sync responses pass through `trace.wiki_context`.
-- Add or reuse a Knowledge Builder signal for `wiki_status`, `wiki_consumed`, and `wiki_review_needed`.
+- Add Knowledge Builder signals for `wiki_status`, `wiki_consumed`, and `wiki_review_needed`.
+- Compute `wiki_consumed` from `wiki_consumption_events`.
+- Compute `wiki_review_needed` from pending `wiki_review_queue` rows.
 
 Frontend:
 

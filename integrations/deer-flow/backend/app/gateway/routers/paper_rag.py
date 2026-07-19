@@ -148,6 +148,8 @@ class KnowledgeBuildStatus(BaseModel):
     ingested_at: str | None = None
     stages: list[KnowledgeBuildStage]
     wiki_status: str
+    wiki_consumed: bool = False
+    wiki_review_needed: bool = False
     qdrant_status: str
     warnings: list[str] = Field(default_factory=list)
 
@@ -573,12 +575,16 @@ def _list_knowledge_builds_for_user(
             n_chunks = _count_chunks_for_paper(con, tables, chunks_table, paper_id)
             ingest_steps = _latest_ingest_steps(con, tables, paper_id)
             wiki_status = _wiki_status_for_paper(con, tables, paper_id)
+            wiki_consumed = _wiki_consumed_for_paper(con, tables, paper_id)
+            wiki_review_needed = _wiki_review_needed_for_paper(con, tables, paper_id)
             stages = _knowledge_stages(row, ingest_steps, wiki_status)
             warnings = []
             if qdrant_warning:
                 warnings.append(qdrant_warning)
             if wiki_status == "empty":
                 warnings.append("Wiki entry has not been generated for this paper.")
+            if wiki_review_needed:
+                warnings.append("Wiki entry needs review based on QA or feedback signals.")
             out.append(
                 {
                     "paper_id": paper_id,
@@ -590,6 +596,8 @@ def _list_knowledge_builds_for_user(
                     "ingested_at": str(row["created_at"]) if row["created_at"] is not None else None,
                     "stages": stages,
                     "wiki_status": wiki_status,
+                    "wiki_consumed": wiki_consumed,
+                    "wiki_review_needed": wiki_review_needed,
                     "qdrant_status": qdrant_status,
                     "warnings": warnings,
                 }
@@ -648,6 +656,32 @@ def _wiki_status_for_paper(con: sqlite3.Connection, tables: set[str], paper_id: 
         if paper_id in key_papers:
             return "ready"
     return "empty"
+
+
+def _wiki_consumed_for_paper(con: sqlite3.Connection, tables: set[str], paper_id: str) -> bool:
+    if "wiki_consumption_events" not in tables:
+        return False
+    try:
+        row = con.execute(
+            "SELECT 1 FROM wiki_consumption_events WHERE paper_id = ? LIMIT 1",
+            (paper_id,),
+        ).fetchone()
+        return row is not None
+    except sqlite3.Error:
+        return False
+
+
+def _wiki_review_needed_for_paper(con: sqlite3.Connection, tables: set[str], paper_id: str) -> bool:
+    if "wiki_review_queue" not in tables:
+        return False
+    try:
+        row = con.execute(
+            "SELECT 1 FROM wiki_review_queue WHERE paper_id = ? AND status = 'pending' LIMIT 1",
+            (paper_id,),
+        ).fetchone()
+        return row is not None
+    except sqlite3.Error:
+        return False
 
 
 def _knowledge_stages(row: sqlite3.Row, ingest_steps: dict[str, dict[str, Any]], wiki_status: str) -> list[dict[str, Any]]:

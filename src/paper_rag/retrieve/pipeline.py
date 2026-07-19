@@ -10,7 +10,6 @@ from __future__ import annotations
 from .hybrid import hybrid_search
 from .rerank import rerank as _rerank
 
-
 _MODALITY_HINTS = {
     "formula": (
         "formula", "equation", "latex", "derive", "derivation", "公式", "方程", "推导",
@@ -41,6 +40,7 @@ def retrieve_round_with_rewrite(
     top_k: int,
     *,
     rewrite_fn=None,
+    wiki_context: dict | None = None,
 ) -> tuple[list[dict], dict]:
     """One round of retrieval. Returns (reranked_chunks, rewrite_payload).
 
@@ -51,7 +51,12 @@ def retrieve_round_with_rewrite(
     if rewrite_fn is None:
         from ..rag.query_rewrite import rewrite as rewrite_fn  # local import to avoid cycle
 
-    rw = rewrite_fn(query)
+    try:
+        rw = rewrite_fn(query, wiki_context=wiki_context)
+    except TypeError as exc:
+        if "wiki_context" not in str(exc):
+            raise
+        rw = rewrite_fn(query)
     modalities = infer_modalities(query)
     pooled: dict[str, dict] = {}
     for q in rw["dense_queries"]:
@@ -72,9 +77,17 @@ def retrieve_round_with_rewrite(
     return _diversify_by_paper(ranked, top_k=top_k), rw
 
 
-def retrieve_round(query: str, paper_ids: list[str] | None, top_k: int) -> list[dict]:
+def retrieve_round(
+    query: str,
+    paper_ids: list[str] | None,
+    top_k: int,
+    *,
+    wiki_context: dict | None = None,
+) -> list[dict]:
     """Convenience wrapper that drops the rewrite payload."""
-    chunks, _ = retrieve_round_with_rewrite(query, paper_ids, top_k)
+    chunks, _ = retrieve_round_with_rewrite(
+        query, paper_ids, top_k, wiki_context=wiki_context
+    )
     return chunks
 
 
