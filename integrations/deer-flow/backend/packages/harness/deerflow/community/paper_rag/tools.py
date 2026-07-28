@@ -11,9 +11,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from langchain.tools import tool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg
 
 
 def _ensure_paper_rag_importable() -> None:
@@ -57,6 +59,20 @@ def _split_csv(value: str | None) -> list[str] | None:
     return items or None
 
 
+def _runtime_context_from_config(config: RunnableConfig | None = None) -> tuple[str | None, str]:
+    thread_id = None
+    if isinstance(config, dict):
+        configurable = config.get("configurable") or {}
+        thread_id = configurable.get("thread_id")
+    try:
+        from deerflow.runtime.user_context import get_effective_user_id
+
+        user_id = get_effective_user_id()
+    except Exception:
+        user_id = "system"
+    return (str(thread_id) if thread_id else None, str(user_id or "system"))
+
+
 @tool("paper_ingest", parse_docstring=True)
 def paper_ingest_tool(
     arxiv_id: str | None = None,
@@ -91,7 +107,12 @@ def paper_ingest_tool(
 
 
 @tool("paper_qa", parse_docstring=True)
-def paper_qa_tool(question: str, paper_ids: str | None = None) -> str:
+def paper_qa_tool(
+    question: str,
+    paper_ids: str | None = None,
+    resolved_question: str | None = None,
+    config: Annotated[RunnableConfig | None, InjectedToolArg()] = None,
+) -> str:
     """Answer a research question using the indexed paper corpus.
 
     Use this tool for paper, arXiv, DOI, academic literature, method,
@@ -101,12 +122,24 @@ def paper_qa_tool(question: str, paper_ids: str | None = None) -> str:
     Args:
         question: Natural-language research question.
         paper_ids: Optional comma-separated paper ids to restrict retrieval.
+        resolved_question: Optional caller-resolved self-contained question.
     """
     _ensure_paper_rag_importable()
     from paper_rag.tools._schema import PaperQAInput
     from paper_rag.tools.paper_qa import paper_qa
 
-    out = paper_qa(PaperQAInput(question=question, paper_ids=_split_csv(paper_ids)))
+    conversation_id, user_id = _runtime_context_from_config(config)
+    out = paper_qa(
+        PaperQAInput(
+            question=question,
+            paper_ids=_split_csv(paper_ids),
+            conversation_id=conversation_id,
+            user_id=user_id,
+            resolved_question=resolved_question or None,
+        )
+    )
+    trace = out.get("trace") or {}
+    query_resolution = out.get("query_resolution") or trace.get("query_resolution")
     chunks = [
         {key: chunk.get(key) for key in ("chunk_id", "paper_id", "section", "modality", "text")}
         for chunk in out.get("chunks", [])[:8]
@@ -114,8 +147,9 @@ def paper_qa_tool(question: str, paper_ids: str | None = None) -> str:
     return _json_dumps({
         "answer": out.get("answer", ""),
         "citations": out.get("citations", []),
-        "abstain": out.get("abstain"),
-        "trace_id": out.get("trace_id"),
+        "abstain": out.get("abstain") or trace.get("abstain"),
+        "trace_id": out.get("trace_id") or trace.get("trace_id"),
+        "query_resolution": query_resolution,
         "chunks": chunks,
     })
 

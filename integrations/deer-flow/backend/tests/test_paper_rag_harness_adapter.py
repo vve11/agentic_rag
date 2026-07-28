@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
@@ -112,6 +113,53 @@ def test_paper_ingest_tool_delegates_to_paper_index(monkeypatch):
     assert calls == [{"arxiv_id": "1234.56789", "pdf_url": None, "pdf_path": None, "title_hint": "Test Paper"}]
     assert '"status": "ingested"' in payload
     assert '"n_chunks": 9' in payload
+
+
+def test_paper_qa_tool_schema_exposes_only_model_fields():
+    from deerflow.community.paper_rag import tools
+
+    schema = tools.paper_qa_tool.args
+
+    assert set(schema) == {"question", "paper_ids", "resolved_question"}
+
+
+def test_paper_qa_tool_passes_resolved_question_and_runtime_context(monkeypatch):
+    from paper_rag.tools import paper_qa as paper_qa_mod
+
+    from deerflow.community.paper_rag import tools
+
+    captured = {}
+
+    def fake_paper_qa(input):
+        captured.update(input.model_dump())
+        return {
+            "answer": "ok",
+            "citations": [],
+            "chunks": [],
+            "trace": {
+                "trace_id": "trace-1",
+                "query_resolution": {"effective_question": input.resolved_question},
+            },
+        }
+
+    monkeypatch.setattr(paper_qa_mod, "paper_qa", fake_paper_qa)
+    monkeypatch.setattr(tools, "_runtime_context_from_config", lambda config=None: ("thread-1", "alice"))
+
+    payload = tools.paper_qa_tool.invoke(
+        {
+            "question": "raw",
+            "paper_ids": "p1",
+            "resolved_question": "effective",
+        }
+    )
+    data = json.loads(payload)
+
+    assert captured["question"] == "raw"
+    assert captured["paper_ids"] == ["p1"]
+    assert captured["conversation_id"] == "thread-1"
+    assert captured["user_id"] == "alice"
+    assert captured["resolved_question"] == "effective"
+    assert data["query_resolution"]["effective_question"] == "effective"
 
 
 def test_paper_deliver_tool_returns_base64_payload(monkeypatch):
