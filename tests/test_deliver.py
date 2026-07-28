@@ -71,29 +71,34 @@ def _stub_qa_answer(*args, **kwargs):
     }
 
 
-def _patch_paper_rag(qa_summary=None):
+def _patch_paper_rag(monkeypatch=None, qa_summary=None):
     """Apply common monkey-patches and return cleanup."""
+    if monkeypatch is None:
+        from pytest import MonkeyPatch
+
+        monkeypatch = MonkeyPatch()
+
     from paper_rag.deliver import _common as common
     from paper_rag.tools import bibtex_export
 
-    common.fetch_paper_meta = lambda pid: {
+    monkeypatch.setattr(common, "fetch_paper_meta", lambda pid: {
         "paper_id": pid,
         "title": "Self-RAG: Self-Reflective Retrieval-Augmented Generation",
         "authors": ["Akari Asai", "Zeqiu Wu"],
         "year": 2023,
         "arxiv_id": "2310.11511",
         "abstract": "...",
-    }
+    })
 
     # Patch qa_agentic.answer (lazy-imported inside fetch_paper_bundle)
     import paper_rag.rag.qa_agentic as qa_mod
-    qa_mod.answer = qa_summary or _stub_qa_answer
+    monkeypatch.setattr(qa_mod, "answer", qa_summary or _stub_qa_answer)
 
     # Patch sqlite_store for bibtex_export
     import paper_rag.store.sqlite_store as ss
-    ss.get_paper = lambda pid: _stub_paper(pid)
+    monkeypatch.setattr(ss, "get_paper", lambda pid: _stub_paper(pid))
     # bibtex_export uses Session/get_engine — make it return our stub paper
-    bibtex_export.export_bibtex = lambda inp: {
+    monkeypatch.setattr(bibtex_export, "export_bibtex", lambda inp: {
         "bibtex": "\n\n".join(
             f"@misc{{{pid.replace(':', '_').replace('.', '_')},\n"
             f"  title = {{Self-RAG}},\n  year = {{2023}}\n}}"
@@ -101,7 +106,8 @@ def _patch_paper_rag(qa_summary=None):
         ),
         "n_exported": len(inp.paper_ids),
         "missing": [],
-    }
+    })
+    return monkeypatch.undo
 
 
 # ---------------------------------------------------------------------------
@@ -109,9 +115,9 @@ def _patch_paper_rag(qa_summary=None):
 # ---------------------------------------------------------------------------
 
 
-def test_markdown_survey_structure():
+def test_markdown_survey_structure(monkeypatch):
     """Survey contains the 3 required sections + References + at least 1 cite."""
-    _patch_paper_rag()
+    _patch_paper_rag(monkeypatch)
     from paper_rag.deliver import survey_md
     # Skip the synthesis LLM call — fall back to stitched summaries
     survey_md._synthesize_outline = lambda bundles, max_words: (
@@ -134,9 +140,9 @@ def test_markdown_survey_structure():
     assert res.metadata["n_papers"] == 1
 
 
-def test_pptx_is_valid_office_file():
+def test_pptx_is_valid_office_file(monkeypatch):
     """PPTX file is a valid Office Open XML zip."""
-    _patch_paper_rag()
+    _patch_paper_rag(monkeypatch)
     from paper_rag.deliver import pptx as pptx_gen
 
     res = pptx_gen.generate(["arxiv:2310.11511"], title="Reading Group")
@@ -152,9 +158,9 @@ def test_pptx_is_valid_office_file():
     assert res.metadata["n_slides"] >= 10
 
 
-def test_docx_is_valid_office_file():
+def test_docx_is_valid_office_file(monkeypatch):
     """DOCX file is a valid Office Open XML zip with word/document.xml."""
-    _patch_paper_rag()
+    _patch_paper_rag(monkeypatch)
     from paper_rag.deliver import survey_md
     survey_md._synthesize_outline = lambda bundles, max_words: (
         "## Introduction\n\nText. [chunk:abc12345]\n\n"
@@ -175,9 +181,9 @@ def test_docx_is_valid_office_file():
     assert "Heading" in body or "heading" in body.lower()
 
 
-def test_latex_bib_zip_structure():
+def test_latex_bib_zip_structure(monkeypatch):
     """latex_bib zip has both required files."""
-    _patch_paper_rag()
+    _patch_paper_rag(monkeypatch)
     from paper_rag.deliver import latex_bib
 
     res = latex_bib.generate(
@@ -222,9 +228,9 @@ def test_dispatch_rejects_empty_paper_ids():
     raise AssertionError("dispatch should reject empty paper_ids")
 
 
-def test_dispatch_routes_to_correct_generator():
+def test_dispatch_routes_to_correct_generator(monkeypatch):
     """dispatch() actually calls the matching submodule."""
-    _patch_paper_rag()
+    _patch_paper_rag(monkeypatch)
     from paper_rag.deliver import survey_md
     survey_md._synthesize_outline = lambda bundles, max_words: (
         "## Introduction\n\nx.\n\n## Methods Comparison\n\nx.\n\n## Open Problems\n\nx.\n"
@@ -236,9 +242,9 @@ def test_dispatch_routes_to_correct_generator():
     assert "From Dispatch" in res.content_bytes.decode("utf-8")
 
 
-def test_pdf_fallback_is_valid_pdf():
+def test_pdf_fallback_is_valid_pdf(monkeypatch):
     """P3-15: PDF generator falls back to hand-written PDF when reportlab missing."""
-    _patch_paper_rag()
+    _patch_paper_rag(monkeypatch)
     from paper_rag.deliver import survey_md
     survey_md._synthesize_outline = lambda bundles, max_words: (
         "## Introduction\n\nThe field is broad.\n\n## Methods\n\nDetails."
