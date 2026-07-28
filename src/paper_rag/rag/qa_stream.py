@@ -95,7 +95,7 @@ def stream_answer(
     resolved_question: str | None = None,
 ) -> Generator[dict, None, None]:
     """Yield events as the agentic pipeline progresses."""
-    from .context_resolver import QARequestContext, resolve_query, resolution_to_trace
+    from .context_resolver import QARequestContext, resolution_to_trace, resolve_query
 
     resolution = resolve_query(
         QARequestContext(

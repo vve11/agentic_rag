@@ -14,8 +14,7 @@ def _confident_abstain(chunks, cfg):
 
 
 def test_answer_uses_resolved_question_and_skips_legacy_rewriters(monkeypatch):
-    from paper_rag.rag import context_resolver
-    from paper_rag.rag import qa_agentic
+    from paper_rag.rag import context_resolver, qa_agentic
 
     seen = {}
 
@@ -81,8 +80,7 @@ def test_answer_uses_resolved_question_and_skips_legacy_rewriters(monkeypatch):
 
 
 def test_final_prompt_excludes_research_memory_scope_hints(monkeypatch):
-    from paper_rag.rag import context_resolver
-    from paper_rag.rag import qa_agentic
+    from paper_rag.rag import context_resolver, qa_agentic
 
     captured = {"user": ""}
 

@@ -30,16 +30,16 @@ from .citation_check import (
     strip_suspicious_citation_forms,
     validate_citations,
 )
-from .evidence_select import select_evidence
-from .intent_classifier import classify
-from .llm import chat
-from .reflect import reflect
 from .context_resolver import (
     QARequestContext,
     QueryResolution,
     resolution_to_trace,
     resolve_query,
 )
+from .evidence_select import select_evidence
+from .intent_classifier import classify
+from .llm import chat
+from .reflect import reflect
 
 log = get_logger("rag.qa_agentic")
 

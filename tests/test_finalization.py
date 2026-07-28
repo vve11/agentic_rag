@@ -157,8 +157,7 @@ def test_stream_answer_uses_selected_evidence_for_done_payload():
 
 
 def test_stream_answer_uses_resolved_question_in_retrieval_and_done_trace(monkeypatch):
-    from paper_rag.rag import context_resolver
-    from paper_rag.rag import qa_stream
+    from paper_rag.rag import context_resolver, qa_stream
 
     seen = {}
 
