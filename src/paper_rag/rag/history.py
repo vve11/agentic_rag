@@ -22,8 +22,6 @@ changes in qa_agentic for legacy callers.
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from ..utils.logger import get_logger
 from .llm import chat
 
@@ -32,76 +30,42 @@ _TABLE_READY = False
 
 
 def _ensure_table() -> None:
-    global _TABLE_READY
-    if _TABLE_READY:
-        return
-    from ..store.sqlite_store import get_engine
+    """Compatibility shim for tests that reset this module-level flag.
 
-    with get_engine().begin() as conn:
-        conn.exec_driver_sql(
-            """
-            CREATE TABLE IF NOT EXISTS qa_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT NOT NULL,
-                question TEXT NOT NULL,
-                answer TEXT NOT NULL,
-                citations_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.exec_driver_sql(
-            "CREATE INDEX IF NOT EXISTS qa_history_conv_idx ON qa_history(conversation_id, id)"
-        )
+    The canonical storage now lives in conversation_turn_store.
+    """
+    global _TABLE_READY
     _TABLE_READY = True
 
 
 def append(conversation_id: str, question: str, answer: str, citations: list[str]) -> None:
     if not conversation_id:
         return
-    import json as _json
-
-    from sqlalchemy import text
-
-    from ..store.sqlite_store import get_engine
+    from . import conversation_turn_store as store
 
     _ensure_table()
-    with get_engine().begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO qa_history (conversation_id, question, answer, citations_json, created_at) "
-                "VALUES (:c, :q, :a, :ci, :t)"
-            ),
-            {
-                "c": conversation_id,
-                "q": question,
-                "a": answer[:2000],  # cap to keep table small
-                "ci": _json.dumps(citations, ensure_ascii=False),
-                "t": datetime.utcnow().isoformat(),
-            },
-        )
+    store.append_turn(
+        user_id="system",
+        conversation_id=conversation_id,
+        raw_question=question,
+        effective_question=question,
+        answer=answer[:2000],
+        citations=citations,
+        paper_ids=[],
+        trace={},
+        resolution_source="history_facade",
+    )
 
 
 def recent(conversation_id: str, limit: int = 3) -> list[tuple[str, str]]:
     """Return last `limit` (question, answer) tuples in chronological order."""
     if not conversation_id:
         return []
-    from sqlalchemy import text
-
-    from ..store.sqlite_store import get_engine
+    from . import conversation_turn_store as store
 
     _ensure_table()
-    with get_engine().begin() as conn:
-        rows = list(
-            conn.execute(
-                text(
-                    "SELECT question, answer FROM qa_history "
-                    "WHERE conversation_id = :c ORDER BY id DESC LIMIT :n"
-                ),
-                {"c": conversation_id, "n": limit},
-            )
-        )
-    return [(r[0], r[1]) for r in reversed(rows)]
+    turns = store.recent_turns(user_id="system", conversation_id=conversation_id, limit=limit)
+    return [(turn.raw_question, turn.answer) for turn in turns]
 
 
 _REWRITE_PROMPT = """You rewrite a follow-up question into a self-contained
