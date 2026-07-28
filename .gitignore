@@ -122,6 +122,7 @@ grafana_data/
 # ── workbuddy / agent memory (local only) ────────────────────────────────────
 .workbuddy/
 .omc/
+.worktrees/
 
 # ── OS-level personal info that may leak ─────────────────────────────────────
 *.history
