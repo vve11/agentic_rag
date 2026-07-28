@@ -96,3 +96,38 @@ def test_legacy_research_memory_rows_migrate_under_system_user(monkeypatch, tmp_
     assert len(turns) == 1
     assert turns[0].raw_question == "Legacy Q"
     assert turns[0].resolution_source == "legacy_research_memory"
+
+
+def test_legacy_research_memory_rows_do_not_migrate_to_named_users(monkeypatch, tmp_path):
+    engine = _patch_engine(monkeypatch, tmp_path)
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE research_memory_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                citations_json TEXT NOT NULL,
+                trace_json TEXT NOT NULL,
+                paper_ids_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            INSERT INTO research_memory_turns
+            (conversation_id, question, answer, citations_json, trace_json, paper_ids_json, created_at)
+            VALUES ('legacy', 'Legacy Q', 'Legacy A', '["c1"]', '{"trace_id":"old"}', '["p1"]', '2026-07-27T00:00:00')
+            """
+        )
+
+    from paper_rag.rag import conversation_turn_store as store
+
+    store._TABLE_READY = False
+    alice_turns = store.recent_turns(user_id="alice", conversation_id="legacy")
+    system_turns = store.recent_turns(user_id="system", conversation_id="legacy")
+
+    assert alice_turns == []
+    assert [turn.raw_question for turn in system_turns] == ["Legacy Q"]

@@ -142,6 +142,8 @@ def _insert_turn(
 def _migrate_legacy_if_empty(user_id: str, conversation_id: str) -> None:
     if not conversation_id:
         return
+    if (user_id or "system") != "system":
+        return
     from ..store.sqlite_store import get_engine
 
     with get_engine().begin() as conn:
