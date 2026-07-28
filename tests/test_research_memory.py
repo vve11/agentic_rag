@@ -96,3 +96,35 @@ def test_research_memory_falls_back_when_summarizer_fails(monkeypatch, tmp_path)
     assert memory["has_compressed_memory"] is True
     assert "Question 6?" in memory["session_summary"]
     assert memory["research_memory"]["open_questions"] == ["Question 6?"]
+
+
+def test_research_memory_is_user_scoped(monkeypatch, tmp_path):
+    from paper_rag.rag import conversation_turn_store as store
+    from paper_rag.rag import research_memory
+
+    _patch_sqlite_engine(monkeypatch, tmp_path)
+    store._TABLE_READY = False
+    research_memory._TABLE_READY = False
+
+    research_memory.append(
+        "conv",
+        "Alice question",
+        "Alice answer",
+        ["c1"],
+        trace={"chunks": [{"paper_id": "paper-a"}]},
+        user_id="alice",
+    )
+    research_memory.append(
+        "conv",
+        "Bob question",
+        "Bob answer",
+        ["c2"],
+        trace={"chunks": [{"paper_id": "paper-b"}]},
+        user_id="bob",
+    )
+
+    alice = research_memory.load_for_question("conv", user_id="alice")
+    bob = research_memory.load_for_question("conv", user_id="bob")
+
+    assert [turn["question"] for turn in alice["recent_turns"]] == ["Alice question"]
+    assert [turn["question"] for turn in bob["recent_turns"]] == ["Bob question"]

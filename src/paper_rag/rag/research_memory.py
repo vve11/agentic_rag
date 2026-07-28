@@ -8,7 +8,6 @@ evidence. Final QA still has to retrieve paper chunks and cite them.
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any
 
 from ..utils.logger import get_logger
@@ -85,39 +84,9 @@ def _ensure_tables() -> None:
     global _TABLE_READY
     if _TABLE_READY:
         return
+    from . import conversation_turn_store as turns
 
-    from ..store.sqlite_store import get_engine
-
-    with get_engine().begin() as conn:
-        conn.exec_driver_sql(
-            """
-            CREATE TABLE IF NOT EXISTS research_memory_turns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT NOT NULL,
-                question TEXT NOT NULL,
-                answer TEXT NOT NULL,
-                citations_json TEXT NOT NULL,
-                trace_json TEXT NOT NULL,
-                paper_ids_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.exec_driver_sql(
-            "CREATE INDEX IF NOT EXISTS research_memory_turns_conv_idx "
-            "ON research_memory_turns(conversation_id, id)"
-        )
-        conn.exec_driver_sql(
-            """
-            CREATE TABLE IF NOT EXISTS research_memory_summaries (
-                conversation_id TEXT PRIMARY KEY,
-                session_summary TEXT NOT NULL,
-                research_memory_json TEXT NOT NULL,
-                n_turns INTEGER NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
+    turns._ensure_tables()
     _TABLE_READY = True
 
 
@@ -157,133 +126,120 @@ def append(
     citations: list[str],
     *,
     trace: dict[str, Any] | None = None,
+    user_id: str = "system",
+    effective_question: str | None = None,
+    resolution_source: str = "paper_rag",
 ) -> dict[str, Any]:
     """Append one turn and compress when the lightweight trigger fires."""
     if not conversation_id:
         return {"enabled": False, **_default_memory(conversation_id)}
 
-    from sqlalchemy import text
-
-    from ..store.sqlite_store import get_engine
+    from . import conversation_turn_store as turns
 
     _ensure_tables()
     paper_ids = _extract_paper_ids(trace)
-    with get_engine().begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO research_memory_turns "
-                "(conversation_id, question, answer, citations_json, trace_json, "
-                "paper_ids_json, created_at) "
-                "VALUES (:c, :q, :a, :ci, :tr, :p, :t)"
-            ),
-            {
-                "c": conversation_id,
-                "q": question,
-                "a": answer[:4000],
-                "ci": json.dumps(citations, ensure_ascii=False),
-                "tr": json.dumps(trace or {}, ensure_ascii=False),
-                "p": json.dumps(paper_ids, ensure_ascii=False),
-                "t": datetime.utcnow().isoformat(),
-            },
-        )
+    turns.append_turn(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        raw_question=question,
+        effective_question=effective_question or question,
+        answer=answer[:4000],
+        citations=citations,
+        paper_ids=paper_ids,
+        trace=trace or {},
+        resolution_source=resolution_source,
+    )
 
-    stats = _stats(conversation_id)
+    stats = _stats(conversation_id, user_id=user_id)
     compressed = False
     if (
         stats["turn_count"] > _COMPRESS_AFTER_TURNS
         or stats["answer_chars"] > _COMPRESS_AFTER_ANSWER_CHARS
     ):
-        summarize(conversation_id)
+        summarize(conversation_id, user_id=user_id)
         compressed = True
 
     return {
-        **load_for_question(conversation_id),
+        **load_for_question(conversation_id, user_id=user_id),
         "compressed": compressed,
     }
 
 
-def _stats(conversation_id: str) -> dict[str, int]:
+def _stats(conversation_id: str, *, user_id: str = "system") -> dict[str, int]:
     from sqlalchemy import text
 
     from ..store.sqlite_store import get_engine
+    from . import conversation_turn_store as turns
 
     _ensure_tables()
+    turns.recent_turns(user_id=user_id, conversation_id=conversation_id, limit=1)
     with get_engine().begin() as conn:
         row = conn.execute(
             text(
                 "SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(answer)), 0) AS chars "
-                "FROM research_memory_turns WHERE conversation_id = :c"
+                "FROM conversation_turns WHERE user_id = :u AND conversation_id = :c"
             ),
-            {"c": conversation_id},
+            {"u": user_id or "system", "c": conversation_id},
         ).fetchone()
     return {"turn_count": int(row[0] or 0), "answer_chars": int(row[1] or 0)}
 
 
-def _recent_rows(conversation_id: str, limit: int = _RECENT_LIMIT) -> list[dict[str, Any]]:
-    from sqlalchemy import text
-
-    from ..store.sqlite_store import get_engine
+def _recent_rows(
+    conversation_id: str,
+    limit: int = _RECENT_LIMIT,
+    *,
+    user_id: str = "system",
+) -> list[dict[str, Any]]:
+    from . import conversation_turn_store as turns
 
     _ensure_tables()
-    with get_engine().begin() as conn:
-        rows = list(
-            conn.execute(
-                text(
-                    "SELECT question, answer, citations_json, paper_ids_json, created_at "
-                    "FROM research_memory_turns WHERE conversation_id = :c "
-                    "ORDER BY id DESC LIMIT :n"
-                ),
-                {"c": conversation_id, "n": limit},
-            )
-        )
     out = []
-    for row in reversed(rows):
+    for turn in turns.recent_turns(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        limit=limit,
+    ):
         out.append(
             {
-                "question": row[0],
-                "answer_preview": (row[1] or "")[:500],
-                "citations": _json_loads(row[2], []),
-                "paper_ids": _json_loads(row[3], []),
-                "created_at": row[4],
+                "question": turn.raw_question,
+                "answer_preview": (turn.answer or "")[:500],
+                "citations": turn.citations,
+                "paper_ids": turn.paper_ids,
+                "created_at": turn.created_at,
             }
         )
     return out
 
 
-def _summary_row(conversation_id: str) -> dict[str, Any] | None:
-    from sqlalchemy import text
-
-    from ..store.sqlite_store import get_engine
+def _summary_row(conversation_id: str, *, user_id: str = "system") -> dict[str, Any] | None:
+    from . import conversation_turn_store as turns
 
     _ensure_tables()
-    with get_engine().begin() as conn:
-        row = conn.execute(
-            text(
-                "SELECT session_summary, research_memory_json, n_turns, updated_at "
-                "FROM research_memory_summaries WHERE conversation_id = :c"
-            ),
-            {"c": conversation_id},
-        ).fetchone()
+    row = turns.load_summary(user_id=user_id, conversation_id=conversation_id)
     if not row:
         return None
     return {
-        "session_summary": row[0],
-        "research_memory": _normalize_research_memory(_json_loads(row[1], {})),
-        "n_turns": int(row[2] or 0),
-        "updated_at": row[3],
+        "session_summary": row["session_summary"],
+        "research_memory": _normalize_research_memory(row["research_memory"]),
+        "n_turns": int(row["n_turns"] or 0),
+        "updated_at": row["updated_at"],
     }
 
 
-def load_for_question(conversation_id: str | None) -> dict[str, Any]:
+def load_for_question(
+    conversation_id: str | None,
+    *,
+    user_id: str = "system",
+) -> dict[str, Any]:
     """Load compressed memory plus recent turns for query rewriting."""
     if not conversation_id:
         return _default_memory(conversation_id)
 
     _ensure_tables()
-    stats = _stats(conversation_id)
-    summary = _summary_row(conversation_id)
+    stats = _stats(conversation_id, user_id=user_id)
+    summary = _summary_row(conversation_id, user_id=user_id)
     memory = _default_memory(conversation_id, turn_count=stats["turn_count"])
-    memory["recent_turns"] = _recent_rows(conversation_id)
+    memory["recent_turns"] = _recent_rows(conversation_id, user_id=user_id)
     if summary:
         memory["session_summary"] = summary["session_summary"]
         memory["research_memory"] = summary["research_memory"]
@@ -291,47 +247,37 @@ def load_for_question(conversation_id: str | None) -> dict[str, Any]:
     return memory
 
 
-def summarize(conversation_id: str) -> dict[str, Any]:
+def summarize(conversation_id: str, *, user_id: str = "system") -> dict[str, Any]:
     """Compress all turns for a conversation into a small research memory."""
     from sqlalchemy import text
 
     from ..store.sqlite_store import get_engine
+    from . import conversation_turn_store as turns
 
     _ensure_tables()
+    turns.recent_turns(user_id=user_id, conversation_id=conversation_id, limit=1)
     with get_engine().begin() as conn:
         rows = list(
             conn.execute(
                 text(
-                    "SELECT question, answer, citations_json, paper_ids_json "
-                    "FROM research_memory_turns WHERE conversation_id = :c "
+                    "SELECT raw_question, answer, citations_json, paper_ids_json "
+                    "FROM conversation_turns "
+                    "WHERE user_id = :u AND conversation_id = :c "
                     "ORDER BY id ASC"
                 ),
-                {"c": conversation_id},
+                {"u": user_id or "system", "c": conversation_id},
             )
         )
 
     payload = _summarize_rows(rows)
-    with get_engine().begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO research_memory_summaries "
-                "(conversation_id, session_summary, research_memory_json, n_turns, updated_at) "
-                "VALUES (:c, :s, :m, :n, :u) "
-                "ON CONFLICT(conversation_id) DO UPDATE SET "
-                "session_summary = excluded.session_summary, "
-                "research_memory_json = excluded.research_memory_json, "
-                "n_turns = excluded.n_turns, "
-                "updated_at = excluded.updated_at"
-            ),
-            {
-                "c": conversation_id,
-                "s": payload["session_summary"],
-                "m": json.dumps(payload["research_memory"], ensure_ascii=False),
-                "n": len(rows),
-                "u": datetime.utcnow().isoformat(),
-            },
-        )
-    return load_for_question(conversation_id)
+    turns.append_summary(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        session_summary=payload["session_summary"],
+        research_memory=payload["research_memory"],
+        n_turns=len(rows),
+    )
+    return load_for_question(conversation_id, user_id=user_id)
 
 
 def _summarize_rows(rows) -> dict[str, Any]:
@@ -393,9 +339,14 @@ def _normalize_research_memory(value: dict[str, Any]) -> dict[str, list[str]]:
     return out
 
 
-def rewrite_with_memory(question: str, conversation_id: str | None) -> tuple[str, dict[str, Any]]:
+def rewrite_with_memory(
+    question: str,
+    conversation_id: str | None,
+    *,
+    user_id: str = "system",
+) -> tuple[str, dict[str, Any]]:
     """Rewrite a question using compressed memory when available."""
-    memory = load_for_question(conversation_id)
+    memory = load_for_question(conversation_id, user_id=user_id)
     if not conversation_id or not memory.get("has_compressed_memory"):
         return question, memory
 
