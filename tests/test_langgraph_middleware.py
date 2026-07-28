@@ -54,6 +54,16 @@ def _load(name: str, rel: str):
 def _install_stubs():
     """Install minimal langchain.agents / langchain.agents.middleware /
     langgraph.runtime / langchain_core.messages stubs."""
+    try:
+        import langchain.agents  # noqa: F401
+        import langchain.agents.middleware  # noqa: F401
+        import langchain_core.messages  # noqa: F401
+        import langgraph.runtime  # noqa: F401
+
+        return
+    except Exception:
+        pass
+
     import types
 
     # langchain.agents.AgentState
