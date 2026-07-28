@@ -618,7 +618,7 @@ def test_async_answer_offloads_to_thread(monkeypatch):
     main_thread = threading.get_ident()
     seen_threads = []
 
-    def fake_answer(q, *, paper_ids=None, conversation_id=None):
+    def fake_answer(q, *, paper_ids=None, conversation_id=None, **kwargs):
         seen_threads.append(threading.get_ident())
         return {"answer": f"got:{q}", "citations": [], "chunks": []}
 
@@ -641,12 +641,23 @@ def test_async_answer_offloads_to_thread(monkeypatch):
 
 def test_async_stream_drains_sync_generator(monkeypatch):
     """stream_answer_async should yield every event the sync generator
-    produces, in order."""
+    produces, in order, while forwarding query-resolution context."""
     import asyncio
 
     from paper_rag.rag import async_api
 
-    def fake_stream(q, *, paper_ids=None):
+    captured = {}
+
+    def fake_stream(q, *, paper_ids=None, conversation_id=None, user_id="system", resolved_question=None):
+        captured.update(
+            {
+                "q": q,
+                "paper_ids": paper_ids,
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+                "resolved_question": resolved_question,
+            }
+        )
         yield {"event": "intent", "data": {}}
         yield {"event": "answer_chunk", "data": {"text": "hi"}}
         yield {"event": "done", "data": {}}
@@ -660,7 +671,13 @@ def test_async_stream_drains_sync_generator(monkeypatch):
 
     async def _drive():
         events = []
-        async for ev in async_api.stream_answer_async("q"):
+        async for ev in async_api.stream_answer_async(
+            "q",
+            paper_ids=["p1"],
+            conversation_id="thread-1",
+            user_id="alice",
+            resolved_question="effective",
+        ):
             events.append(ev["event"])
         return events
 
@@ -670,3 +687,10 @@ def test_async_stream_drains_sync_generator(monkeypatch):
     finally:
         _loop2.close()
     assert events == ["intent", "answer_chunk", "done"]
+    assert captured == {
+        "q": "q",
+        "paper_ids": ["p1"],
+        "conversation_id": "thread-1",
+        "user_id": "alice",
+        "resolved_question": "effective",
+    }

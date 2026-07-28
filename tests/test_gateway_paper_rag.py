@@ -243,6 +243,124 @@ def test_runtime_status_reports_wiki_unavailable_without_llm(monkeypatch):
     assert "LLM" in data["wiki_reason"]
 
 
+def test_qa_sync_forwards_user_conversation_and_resolved_question(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    app, auth = _make_app()
+    auth._AUTH_DISABLED = True
+    auth._DEV_USER_ID = "alice"
+    captured = {}
+
+    def fake_answer(
+        question,
+        *,
+        paper_ids=None,
+        conversation_id=None,
+        user_id="system",
+        resolved_question=None,
+    ):
+        captured.update(
+            {
+                "question": question,
+                "paper_ids": paper_ids,
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+                "resolved_question": resolved_question,
+            }
+        )
+        return {
+            "answer": "ok",
+            "citations": [],
+            "chunks": [],
+            "trace": {
+                "trace_id": "trace-1",
+                "abstain": {},
+                "query_resolution": {"effective_question": resolved_question},
+            },
+        }
+
+    monkeypatch.setitem(sys.modules, "paper_rag.rag.qa_agentic", type("M", (), {"answer": fake_answer}))
+
+    response = TestClient(app).post(
+        "/api/paper_rag/qa/sync",
+        json={
+            "question": "raw",
+            "paper_ids": ["p1"],
+            "conversation_id": "thread-1",
+            "resolved_question": "effective",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "question": "raw",
+        "paper_ids": ["p1"],
+        "conversation_id": "thread-1",
+        "user_id": "alice",
+        "resolved_question": "effective",
+    }
+    assert response.json()["trace"]["query_resolution"]["effective_question"] == "effective"
+
+
+def test_qa_stream_forwards_user_conversation_and_resolved_question(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    app, auth = _make_app()
+    auth._AUTH_DISABLED = True
+    auth._DEV_USER_ID = "alice"
+    captured = {}
+
+    def fake_stream(
+        question,
+        *,
+        paper_ids=None,
+        conversation_id=None,
+        user_id="system",
+        resolved_question=None,
+    ):
+        captured.update(
+            {
+                "question": question,
+                "paper_ids": paper_ids,
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+                "resolved_question": resolved_question,
+            }
+        )
+        yield {
+            "event": "done",
+            "data": {
+                "answer": "ok",
+                "citations": [],
+                "query_resolution": {"effective_question": resolved_question},
+            },
+        }
+
+    monkeypatch.setitem(sys.modules, "paper_rag.rag.qa_stream", type("M", (), {"stream_answer": fake_stream}))
+
+    with TestClient(app).stream(
+        "POST",
+        "/api/paper_rag/qa",
+        json={
+            "question": "raw",
+            "paper_ids": ["p1"],
+            "conversation_id": "thread-1",
+            "resolved_question": "effective",
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert captured == {
+        "question": "raw",
+        "paper_ids": ["p1"],
+        "conversation_id": "thread-1",
+        "user_id": "alice",
+        "resolved_question": "effective",
+    }
+    assert "effective" in body
+
+
 def test_knowledge_builds_dev_mode_returns_stage_status(tmp_path):
     """Knowledge Builder should expose ingest/index/wiki status for the UI."""
     import json

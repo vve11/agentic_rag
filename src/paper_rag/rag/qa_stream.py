@@ -20,6 +20,7 @@ Same hard caps as qa_agentic (max_inner_iters / max_inner_tokens).
 from __future__ import annotations
 
 from collections.abc import Generator
+from typing import Any
 
 from .. import config as cfg
 from ..retrieve.format import format_evidence
@@ -53,8 +54,63 @@ def _retrieve_round(query: str, paper_ids, top_k: int) -> tuple[list[dict], dict
     return retrieve_round_with_rewrite(query, paper_ids, top_k, rewrite_fn=rewrite)
 
 
-def stream_answer(question: str, *, paper_ids: list[str] | None = None) -> Generator[dict, None, None]:
+def _persist_stream_research_memory(
+    *,
+    conversation_id: str | None,
+    resolution,
+    done_data: dict[str, Any],
+    final_chunks: list[dict],
+    query_resolution: dict,
+    user_id: str,
+) -> None:
+    if not conversation_id:
+        return
+    try:
+        from . import research_memory
+
+        research_memory.append(
+            conversation_id,
+            resolution.raw_question,
+            done_data.get("answer", ""),
+            done_data.get("citations", []),
+            trace={
+                "chunks": final_chunks,
+                "query_resolution": query_resolution,
+                "abstain": done_data.get("abstain") or {},
+            },
+            user_id=user_id or "system",
+            effective_question=resolution.effective_question,
+            resolution_source=resolution.source,
+        )
+    except Exception as exc:
+        log.warning(f"stream research memory append failed (non-fatal): {exc}")
+
+
+def stream_answer(
+    question: str,
+    *,
+    paper_ids: list[str] | None = None,
+    conversation_id: str | None = None,
+    user_id: str = "system",
+    resolved_question: str | None = None,
+) -> Generator[dict, None, None]:
     """Yield events as the agentic pipeline progresses."""
+    from .context_resolver import QARequestContext, resolve_query, resolution_to_trace
+
+    resolution = resolve_query(
+        QARequestContext(
+            raw_question=question,
+            outer_resolved_question=resolved_question,
+            explicit_paper_ids=tuple(paper_ids or ()),
+            conversation_id=conversation_id,
+            user_id=user_id or "system",
+            caller="python",
+        )
+    )
+    query_resolution = resolution_to_trace(resolution)
+    question = resolution.effective_question
+    paper_ids = list(resolution.effective_paper_ids) or None
+
     c = cfg.load().rag
     intent_cfg = classify(question)
     yield {"event": "intent", "data": intent_cfg}
@@ -97,13 +153,23 @@ def stream_answer(question: str, *, paper_ids: list[str] | None = None) -> Gener
 
     final_chunks = list(all_chunks.values())[: top_k * 2]
     if not final_chunks:
-        yield {"event": "done", "data": {
+        done_data = {
             "answer": "(no evidence found)",
             "citations": [],
             "suspicious": {"count": 0},
             "degraded": "no_chunks",
             "abstain": {"decision": abstain_mod.DECISION_NO_CHUNKS},
-        }}
+            "query_resolution": query_resolution,
+        }
+        _persist_stream_research_memory(
+            conversation_id=conversation_id,
+            resolution=resolution,
+            done_data=done_data,
+            final_chunks=final_chunks,
+            query_resolution=query_resolution,
+            user_id=user_id,
+        )
+        yield {"event": "done", "data": done_data}
         return
 
     # === ADR-0014 abstain decision ===
@@ -120,13 +186,23 @@ def stream_answer(question: str, *, paper_ids: list[str] | None = None) -> Gener
     if abstain_result["decision"] == abstain_mod.DECISION_NO_EVIDENCE:
         # Skip the LLM stream entirely.
         yield {"event": "answer_chunk", "data": {"text": abstain_cfg.no_evidence_message}}
-        yield {"event": "done", "data": {
+        done_data = {
             "answer": abstain_cfg.no_evidence_message,
             "citations": [],
             "suspicious": {"count": 0},
             "abstain": abstain_result,
             "n_chunks": len(final_chunks),
-        }}
+            "query_resolution": query_resolution,
+        }
+        _persist_stream_research_memory(
+            conversation_id=conversation_id,
+            resolution=resolution,
+            done_data=done_data,
+            final_chunks=final_chunks,
+            query_resolution=query_resolution,
+            user_id=user_id,
+        )
+        yield {"event": "done", "data": done_data}
         return
 
     evidence_chunks, evidence_selection = select_evidence(
@@ -163,7 +239,7 @@ def stream_answer(question: str, *, paper_ids: list[str] | None = None) -> Gener
     if suspicious["count"]:
         cleaned = strip_suspicious_citation_forms(cleaned)
     paper_ids_used = sorted({c.get("paper_id") for c in final_chunks if c.get("paper_id")})
-    yield {"event": "done", "data": {
+    done_data = {
         "answer": cleaned,
         "citations": valid,
         "suspicious": suspicious,
@@ -172,7 +248,17 @@ def stream_answer(question: str, *, paper_ids: list[str] | None = None) -> Gener
         "evidence_chunks": evidence_chunks,
         "evidence_selection": evidence_selection,
         "paper_ids": paper_ids_used,
-    }}
+        "query_resolution": query_resolution,
+    }
+    _persist_stream_research_memory(
+        conversation_id=conversation_id,
+        resolution=resolution,
+        done_data=done_data,
+        final_chunks=final_chunks,
+        query_resolution=query_resolution,
+        user_id=user_id,
+    )
+    yield {"event": "done", "data": done_data}
 
 
 def _stream_chat(system: str, user: str):

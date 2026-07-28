@@ -94,6 +94,7 @@ class QARequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     paper_ids: list[str] | None = None
     conversation_id: str | None = None
+    resolved_question: str | None = None
 
 
 class QASyncResponse(BaseModel):
@@ -428,7 +429,13 @@ async def qa_stream(
 
     async def _gen() -> AsyncGenerator[dict[str, str], None]:
         loop = asyncio.get_running_loop()
-        gen = stream_answer(body.question, paper_ids=body.paper_ids)
+        gen = stream_answer(
+            body.question,
+            paper_ids=body.paper_ids,
+            conversation_id=body.conversation_id,
+            user_id=user_id,
+            resolved_question=body.resolved_question,
+        )
         touched_paper_ids: list[str] = []
         try:
             while True:
@@ -471,6 +478,8 @@ async def qa_sync(
                 body.question,
                 paper_ids=body.paper_ids,
                 conversation_id=body.conversation_id,
+                user_id=user_id,
+                resolved_question=body.resolved_question,
             ),
         )
     except Exception as exc:

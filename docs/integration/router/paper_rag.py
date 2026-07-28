@@ -154,6 +154,7 @@ class QARequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     paper_ids: list[str] | None = Field(default=None, description="Filter to these papers; null = whole library")
     conversation_id: str | None = Field(default=None, description="Multi-turn conversation thread id")
+    resolved_question: str | None = Field(default=None, description="Caller-resolved self-contained question")
 
 
 class QASyncResponse(BaseModel):
@@ -318,7 +319,13 @@ async def qa_stream(
         # stream_answer is a SYNCHRONOUS generator; iterate it in a thread
         # so the gateway event loop is never blocked. Each yielded dict is
         # serialized as one SSE event.
-        gen = stream_answer(body.question, paper_ids=body.paper_ids)
+        gen = stream_answer(
+            body.question,
+            paper_ids=body.paper_ids,
+            conversation_id=body.conversation_id,
+            user_id=user_id,
+            resolved_question=body.resolved_question,
+        )
         touched_paper_ids: list[str] = []
         try:
             while True:
@@ -524,6 +531,8 @@ async def qa_sync(
             body.question,
             paper_ids=body.paper_ids,
             conversation_id=body.conversation_id,
+            user_id=user_id,
+            resolved_question=body.resolved_question,
         ),
     )
     # M9 / ADR-0018: record paper_access for stale-card scanning. Run in the

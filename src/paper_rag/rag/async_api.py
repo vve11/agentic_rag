@@ -36,6 +36,8 @@ async def answer_async(
     *,
     paper_ids: list[str] | None = None,
     conversation_id: str | None = None,
+    user_id: str = "system",
+    resolved_question: str | None = None,
 ) -> dict:
     """Async wrapper around qa_agentic.answer.
 
@@ -49,6 +51,8 @@ async def answer_async(
             question,
             paper_ids=paper_ids,
             conversation_id=conversation_id,
+            user_id=user_id,
+            resolved_question=resolved_question,
         )
     )
 
@@ -57,6 +61,9 @@ async def stream_answer_async(
     question: str,
     *,
     paper_ids: list[str] | None = None,
+    conversation_id: str | None = None,
+    user_id: str = "system",
+    resolved_question: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Async wrapper around qa_stream.stream_answer.
 
@@ -68,7 +75,15 @@ async def stream_answer_async(
     from .qa_stream import stream_answer
 
     gen = await anyio.to_thread.run_sync(
-        lambda: iter(stream_answer(question, paper_ids=paper_ids))
+        lambda: iter(
+            stream_answer(
+                question,
+                paper_ids=paper_ids,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                resolved_question=resolved_question,
+            )
+        )
     )
 
     sentinel: Any = object()

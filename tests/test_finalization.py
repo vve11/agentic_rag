@@ -154,3 +154,51 @@ def test_stream_answer_uses_selected_evidence_for_done_payload():
             qa_stream.rewrite,
             qa_stream._stream_chat,
         ) = saved
+
+
+def test_stream_answer_uses_resolved_question_in_retrieval_and_done_trace(monkeypatch):
+    from paper_rag.rag import context_resolver
+    from paper_rag.rag import qa_stream
+
+    seen = {}
+
+    def fake_retrieve(q, p, k):
+        seen["query"] = q
+        return (
+            [
+                {
+                    "chunk_id": "c1",
+                    "paper_id": "p1",
+                    "text": "FLARE retrieves proactively.",
+                    "score_rerank": 0.9,
+                }
+            ],
+            {"dense_queries": [q], "bm25_query": q},
+        )
+
+    def fake_stream(system, user):
+        yield "FLARE retrieves proactively. [chunk:c1]"
+
+    monkeypatch.setattr(context_resolver, "_load_memory_scope_hint", lambda *args, **kwargs: [])
+    monkeypatch.setattr(qa_stream, "_retrieve_round", fake_retrieve)
+    monkeypatch.setattr(
+        qa_stream,
+        "classify",
+        lambda q: {"intent": "factual", "top_k": 2, "max_iter": 1, "rrf_k": 60},
+    )
+    monkeypatch.setattr(qa_stream, "_stream_chat", fake_stream)
+
+    events = list(
+        qa_stream.stream_answer(
+            "What about the second one?",
+            paper_ids=["p1"],
+            conversation_id="thread-1",
+            user_id="alice",
+            resolved_question="How does FLARE retrieve?",
+        )
+    )
+
+    done = events[-1]["data"]
+    assert seen["query"] == "How does FLARE retrieve?"
+    assert done["query_resolution"]["effective_question"] == "How does FLARE retrieve?"
+    assert done["query_resolution"]["outer_resolution_used"] is True
