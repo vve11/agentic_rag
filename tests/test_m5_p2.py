@@ -65,3 +65,64 @@ def test_qa_cache_key_normalization():
     # Different question -> different key
     k4 = _make_key("What is Y?", ["arxiv:1", "arxiv:2"])
     assert k1 != k4
+
+
+def test_qa_cache_key_includes_user_and_effective_context():
+    from paper_rag.rag.qa_cache import _make_key
+
+    a = _make_key(
+        "How does FLARE retrieve?\n\nwiki_context_fingerprint:w1\npipeline:qra-v1",
+        ["p1"],
+        user_id="alice",
+    )
+    b = _make_key(
+        "How does FLARE retrieve?\n\nwiki_context_fingerprint:w1\npipeline:qra-v1",
+        ["p1"],
+        user_id="bob",
+    )
+    c = _make_key(
+        "How does Self-RAG retrieve?\n\nwiki_context_fingerprint:w1\npipeline:qra-v1",
+        ["p1"],
+        user_id="alice",
+    )
+
+    assert a != b
+    assert a != c
+
+
+def test_cache_hit_returns_rehydrated_chunks(monkeypatch, tmp_path):
+    from sqlalchemy import create_engine
+
+    from paper_rag.rag import qa_cache
+    from paper_rag.store import sqlite_store
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'cache.sqlite'}")
+    monkeypatch.setattr(sqlite_store, "get_engine", lambda: engine)
+    monkeypatch.setattr(qa_cache, "_enabled", lambda: True)
+    sqlite_store.SQLModel.metadata.create_all(engine)
+    sqlite_store.upsert_sections_and_chunks(
+        "p1",
+        [],
+        [
+            {
+                "chunk_id": "c1",
+                "paper_id": "p1",
+                "text": "cached evidence",
+                "context_text": "cached evidence",
+            }
+        ],
+    )
+    qa_cache._TABLE_READY = False
+
+    answer = {
+        "answer": "cached [chunk:c1]",
+        "citations": ["c1"],
+        "chunks": [{"chunk_id": "c1", "paper_id": "p1", "text": "cached evidence"}],
+        "trace": {"trace_id": "old"},
+    }
+    qa_cache.put("effective\n\npipeline:qra-v1", ["p1"], answer, user_id="alice")
+    cached = qa_cache.get("effective\n\npipeline:qra-v1", ["p1"], user_id="alice")
+
+    assert cached is not None
+    assert cached["chunks"][0]["chunk_id"] == "c1"
+    assert cached["chunks"][0]["text"] == "cached evidence"

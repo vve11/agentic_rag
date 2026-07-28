@@ -15,6 +15,9 @@ class PaperSearchInput(BaseModel):
 class PaperQAInput(BaseModel):
     question: str
     paper_ids: list[str] | None = None
+    conversation_id: str | None = None
+    user_id: str = "system"
+    resolved_question: str | None = None
     top_k: int = Field(8, ge=1, le=20)
 
 

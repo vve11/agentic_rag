@@ -1,12 +1,12 @@
 """Lightweight question-answer cache.
 
 Why: same question asked twice within a short window is common in research
-(user re-runs a query to copy-paste). A 24h cache keyed on a normalized
-question saves both LLM tokens and wall time.
+(user re-runs a query to copy-paste). A 24h cache keyed on the resolved,
+tenant-scoped query saves both LLM tokens and wall time.
 
 Backed by SQLite. Lazy table creation. Cache key = sha1(normalized_question
-+ "|" + sorted_paper_ids). Stored value = JSON of `qa_agentic.answer`
-output (minus the heavy `chunks` field, only chunk_ids preserved).
++ user_id + sorted_paper_ids). Stored value = JSON of `qa_agentic.answer`
+output plus chunk ids/fingerprints so hits can rehydrate evidence chunks.
 
 Disabled by default; enable via `rag.qa_cache.enabled: true`.
 """
@@ -23,24 +23,37 @@ from ..utils.logger import get_logger
 
 log = get_logger("rag.qa_cache")
 _TABLE_READY = False
+_TABLE_ENGINE_KEY: int | None = None
 
 
 def _norm_question(q: str) -> str:
     return re.sub(r"\s+", " ", (q or "").strip().lower())
 
 
-def _make_key(question: str, paper_ids: list[str] | None) -> str:
-    base = _norm_question(question) + "|" + ",".join(sorted(paper_ids or []))
+def _make_key(
+    question: str,
+    paper_ids: list[str] | None,
+    *,
+    user_id: str = "system",
+) -> str:
+    base = "|".join(
+        [
+            f"user:{user_id or 'system'}",
+            f"question:{_norm_question(question)}",
+            f"papers:{','.join(sorted(paper_ids or []))}",
+        ]
+    )
     return hashlib.sha1(base.encode("utf-8")).hexdigest()
 
 
 def _ensure_table() -> None:
-    global _TABLE_READY
-    if _TABLE_READY:
-        return
     from ..store.sqlite_store import get_engine
 
     engine = get_engine()
+    global _TABLE_READY, _TABLE_ENGINE_KEY
+    engine_key = id(engine)
+    if _TABLE_READY and _TABLE_ENGINE_KEY == engine_key:
+        return
     with engine.begin() as conn:
         conn.exec_driver_sql(
             """
@@ -54,9 +67,44 @@ def _ensure_table() -> None:
             """
         )
     _TABLE_READY = True
+    _TABLE_ENGINE_KEY = engine_key
 
 
-def get(question: str, paper_ids: list[str] | None) -> dict | None:
+def _fingerprint_chunks(chunks: list[dict]) -> str:
+    parts = [
+        f"{chunk.get('chunk_id')}:{chunk.get('paper_id')}:{chunk.get('text') or ''}"
+        for chunk in chunks
+        if chunk.get("chunk_id")
+    ]
+    return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def _chunk_to_dict(chunk) -> dict:
+    if hasattr(chunk, "model_dump"):
+        return chunk.model_dump()
+    if hasattr(chunk, "dict"):
+        return chunk.dict()
+    return dict(chunk)
+
+
+def _rehydrate_chunks(chunk_ids: list[str]) -> list[dict] | None:
+    from ..store import sqlite_store
+
+    chunks: list[dict] = []
+    for chunk_id in chunk_ids:
+        chunk = sqlite_store.get_chunk(chunk_id)
+        if chunk is None:
+            return None
+        chunks.append(_chunk_to_dict(chunk))
+    return chunks
+
+
+def get(
+    question: str,
+    paper_ids: list[str] | None,
+    *,
+    user_id: str = "system",
+) -> dict | None:
     if not _enabled():
         return None
     _ensure_table()
@@ -64,7 +112,7 @@ def get(question: str, paper_ids: list[str] | None) -> dict | None:
 
     from ..store.sqlite_store import get_engine
 
-    key = _make_key(question, paper_ids)
+    key = _make_key(question, paper_ids, user_id=user_id)
     with get_engine().begin() as conn:
         row = conn.execute(
             text("SELECT answer_json, created_at FROM qa_cache WHERE key = :k"),
@@ -80,10 +128,36 @@ def get(question: str, paper_ids: list[str] | None) -> dict | None:
         _evict(key)
         return None
     log.info(f"qa_cache HIT (age={age})")
-    return json.loads(answer_json)
+    payload = json.loads(answer_json)
+    chunk_ids = [str(value) for value in payload.get("chunk_ids", []) if value]
+    if chunk_ids:
+        chunks = _rehydrate_chunks(chunk_ids)
+        if chunks is None:
+            log.info("qa_cache stale; cached chunks are no longer available")
+            _evict(key)
+            return None
+        stored_fingerprint = payload.get("chunk_fingerprint") or ""
+        if stored_fingerprint and _fingerprint_chunks(chunks) != stored_fingerprint:
+            log.info("qa_cache stale; cached chunks changed")
+            _evict(key)
+            return None
+        if not stored_fingerprint:
+            log.info("qa_cache stale; missing cached chunk fingerprint")
+            _evict(key)
+            return None
+        payload["chunks"] = chunks
+    else:
+        payload["chunks"] = []
+    return payload
 
 
-def put(question: str, paper_ids: list[str] | None, answer: dict) -> None:
+def put(
+    question: str,
+    paper_ids: list[str] | None,
+    answer: dict,
+    *,
+    user_id: str = "system",
+) -> None:
     if not _enabled():
         return
     _ensure_table()
@@ -91,11 +165,13 @@ def put(question: str, paper_ids: list[str] | None, answer: dict) -> None:
 
     from ..store.sqlite_store import get_engine
 
-    key = _make_key(question, paper_ids)
+    key = _make_key(question, paper_ids, user_id=user_id)
+    chunks = answer.get("chunks") or []
     payload = {
         "answer": answer.get("answer"),
         "citations": answer.get("citations", []),
-        "chunk_ids": [c.get("chunk_id") for c in (answer.get("chunks") or []) if c.get("chunk_id")],
+        "chunk_ids": [c.get("chunk_id") for c in chunks if c.get("chunk_id")],
+        "chunk_fingerprint": _fingerprint_chunks(chunks),
         "trace": answer.get("trace"),
         "suspicious_citations": answer.get("suspicious_citations"),
     }

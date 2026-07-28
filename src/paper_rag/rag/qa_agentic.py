@@ -34,6 +34,12 @@ from .evidence_select import select_evidence
 from .intent_classifier import classify
 from .llm import chat
 from .reflect import reflect
+from .context_resolver import (
+    QARequestContext,
+    QueryResolution,
+    resolution_to_trace,
+    resolve_query,
+)
 
 log = get_logger("rag.qa_agentic")
 
@@ -83,11 +89,26 @@ def _resolve_wiki_context_safe(question: str, paper_ids: list[str] | None) -> di
         return {"role": "background_not_evidence", "fingerprint": "", "entries": []}
 
 
-def _cache_question(question: str, wiki_context: dict | None) -> str:
+def _cache_question(
+    resolution: QueryResolution,
+    wiki_context: dict | None,
+    *,
+    user_id: str,
+) -> str:
+    trace = resolution_to_trace(resolution)
+    question = resolution.effective_question
+    parts = [
+        question,
+        "",
+        "pipeline:qra-v1",
+        f"user:{user_id or 'system'}",
+        f"memory_mode:{trace['memory_mode']}",
+        f"context_source:{trace['context_source']}",
+    ]
     fingerprint = (wiki_context or {}).get("fingerprint") or ""
-    if not fingerprint:
-        return question
-    return f"{question}\n\nwiki_context_fingerprint:{fingerprint}"
+    if fingerprint:
+        parts.append(f"wiki_context_fingerprint:{fingerprint}")
+    return "\n".join(parts)
 
 
 def _record_wiki_consumption_safe(
@@ -112,14 +133,20 @@ def _record_wiki_consumption_safe(
         log.warning(f"wiki consumption record failed (non-fatal): {e}")
 
 
-def _check_cache(question: str, paper_ids: list[str] | None, trace_id: str) -> dict | None:
+def _check_cache(
+    question: str,
+    paper_ids: list[str] | None,
+    trace_id: str,
+    *,
+    user_id: str = "system",
+) -> dict | None:
     """qa_cache short-circuit. Returns the cached response (already shaped
     for the public ``answer`` contract) or None if no hit."""
     try:
         from ..observability import counter
         from . import qa_cache
 
-        cached = qa_cache.get(question, paper_ids)
+        cached = qa_cache.get(question, paper_ids, user_id=user_id)
     except Exception as e:
         log.warning(f"qa_cache get failed (non-fatal): {e}")
         return None
@@ -129,7 +156,7 @@ def _check_cache(question: str, paper_ids: list[str] | None, trace_id: str) -> d
     return {
         "answer": cached.get("answer", ""),
         "citations": cached.get("citations", []),
-        "chunks": [],  # not re-fetched; chunk_ids preserved in trace
+        "chunks": cached.get("chunks") or [],
         "suspicious_citations": cached.get("suspicious_citations", _EMPTY_SUSPICIOUS),
         "trace": {
             **(cached.get("trace") or {}),
@@ -355,11 +382,17 @@ def _chat_failed_response(
     }
 
 
-def _store_in_cache(question: str, paper_ids: list[str] | None, out: dict) -> None:
+def _store_in_cache(
+    question: str,
+    paper_ids: list[str] | None,
+    out: dict,
+    *,
+    user_id: str = "system",
+) -> None:
     try:
         from . import qa_cache
 
-        qa_cache.put(question, paper_ids, out)
+        qa_cache.put(question, paper_ids, out, user_id=user_id)
     except Exception as e:
         log.warning(f"qa_cache put failed (non-fatal): {e}")
 
@@ -490,6 +523,10 @@ def _persist_research_memory(
     conversation_id: str | None,
     question: str,
     out: dict,
+    *,
+    user_id: str = "system",
+    effective_question: str | None = None,
+    resolution_source: str = "paper_rag",
 ) -> dict:
     if not conversation_id:
         return {
@@ -510,6 +547,9 @@ def _persist_research_memory(
             out.get("answer", ""),
             out.get("citations", []),
             trace=trace_for_memory,
+            user_id=user_id,
+            effective_question=effective_question,
+            resolution_source=resolution_source,
         )
     except Exception as e:
         log.warning(f"research_memory.append failed (non-fatal): {e}")
@@ -531,103 +571,148 @@ def answer(
     *,
     paper_ids: list[str] | None = None,
     conversation_id: str | None = None,
+    user_id: str = "system",
+    resolved_question: str | None = None,
 ) -> dict:
     from ..observability import histogram, new_trace_id
 
     trace_id = new_trace_id()
-    original_question = question
-    question, memory_before = _maybe_rewrite_with_research_memory(question, conversation_id)
+    resolution = resolve_query(
+        QARequestContext(
+            raw_question=question,
+            outer_resolved_question=resolved_question,
+            explicit_paper_ids=tuple(paper_ids or ()),
+            conversation_id=conversation_id,
+            user_id=user_id or "system",
+            caller="python",
+        )
+    )
+    effective_paper_ids = list(resolution.effective_paper_ids) or None
     timer = histogram("paper_rag_qa_latency_seconds")
     started = perf_counter()
     with timer.time():
         out = _answer_impl(
-            question,
-            paper_ids=paper_ids,
+            resolution,
+            paper_ids=effective_paper_ids,
             trace_id=trace_id,
             conversation_id=conversation_id,
+            user_id=user_id or "system",
         )
     latency_ms = int((perf_counter() - started) * 1000)
     _attach_loop_trace(out, latency_ms=latency_ms)
-    memory_after = _persist_research_memory(conversation_id, original_question, out)
-    out.setdefault("trace", {})["memory_before"] = memory_before
+    resolution_trace = resolution_to_trace(resolution)
+    out.setdefault("trace", {})["query_resolution"] = resolution_trace
+    out["query_resolution"] = resolution_trace
+    memory_after = _persist_research_memory(
+        conversation_id,
+        resolution.raw_question,
+        out,
+        user_id=user_id or "system",
+        effective_question=resolution.effective_question,
+        resolution_source=resolution.source,
+    )
     out.setdefault("trace", {})["memory"] = memory_after
-    _persist_history(conversation_id, original_question, out)
     return out
 
 
 def _answer_impl(
-    question: str,
+    question: str | QueryResolution,
     *,
     paper_ids: list[str] | None,
     trace_id: str,
     conversation_id: str | None = None,
+    user_id: str = "system",
 ) -> dict:
     from ..observability import counter
 
-    # Stage 1 — fold conversation history into a self-contained question.
-    question = _maybe_rewrite_with_history(question, conversation_id)
+    if isinstance(question, QueryResolution):
+        query_resolution = question
+    else:
+        query_resolution = QueryResolution(
+            raw_question=question,
+            effective_question=question,
+            source="none",
+            policy="single_turn",
+            rewrite_applied=False,
+            outer_resolution_used=False,
+            explicit_paper_ids=tuple(paper_ids or ()),
+            memory_paper_scope_hint=(),
+            effective_paper_ids=tuple(paper_ids or ()),
+            conflicts=(),
+        )
+    question = query_resolution.effective_question
+    effective_paper_ids = list(query_resolution.effective_paper_ids) or None
 
-    # Stage 2 — resolve wiki background. Wiki is query/prompt context only,
+    # Stage 1 — resolve wiki background. Wiki is query/prompt context only,
     # never final evidence.
-    wiki_context = _resolve_wiki_context_safe(question, paper_ids)
+    wiki_context = _resolve_wiki_context_safe(question, effective_paper_ids)
     _record_wiki_consumption_safe(
         question=question,
-        paper_ids=paper_ids,
+        paper_ids=effective_paper_ids,
         wiki_context=wiki_context,
         trace_id=trace_id,
     )
 
-    # Stage 3 — qa_cache short-circuit. The effective key includes wiki entry
-    # versions so a patched background note cannot reuse an older answer.
-    question_for_cache = _cache_question(question, wiki_context)
-    cached = _check_cache(question_for_cache, paper_ids, trace_id)
+    # Stage 2 — qa_cache short-circuit. The effective key includes query
+    # resolution policy, user scope, and wiki entry versions so context-specific
+    # questions like "it?" cannot reuse another thread's answer.
+    question_for_cache = _cache_question(query_resolution, wiki_context, user_id=user_id)
+    if (user_id or "system") == "system":
+        cached = _check_cache(question_for_cache, effective_paper_ids, trace_id)
+    else:
+        cached = _check_cache(
+            question_for_cache,
+            effective_paper_ids,
+            trace_id,
+            user_id=user_id,
+        )
     if cached is not None:
         return cached
 
-    # Stage 4 — pick intent + retrieve loop.
+    # Stage 3 — pick intent + retrieve loop.
     c = cfg.load().rag
     intent_cfg = classify(question)
     max_iter = min(intent_cfg["max_iter"], c.max_inner_iters)
     top_k = intent_cfg["top_k"]
     all_chunks, trace, stopped = _retrieve_loop(
         question,
-        paper_ids,
+        effective_paper_ids,
         top_k,
         max_iter,
         enable_reflect=c.enable_reflect,
         wiki_context=wiki_context,
     )
 
-    # Stage 5 — short-circuit if retrieve produced nothing.
+    # Stage 4 — short-circuit if retrieve produced nothing.
     final_chunks = list(all_chunks.values())[: top_k * 2]
     if not final_chunks:
         _enqueue_wiki_review_event(
             "qa_no_chunks",
             question=question,
-            paper_ids=paper_ids,
+            paper_ids=effective_paper_ids,
             wiki_context=wiki_context,
             reason="no_chunks",
             trace_id=trace_id,
             concept=_first_wiki_concept(wiki_context),
-            paper_id=_first_paper_id(paper_ids, []),
+            paper_id=_first_paper_id(effective_paper_ids, []),
         )
         return _no_chunks_response(intent_cfg, trace, stopped, trace_id, wiki_context)
 
-    # Stage 6 — abstain decision (after retrieve, before LLM, see ADR-0014).
+    # Stage 5 — abstain decision (after retrieve, before LLM, see ADR-0014).
     abstain_cfg = c.abstain
     abstain_result = _decide_abstain(final_chunks, abstain_cfg)
     if abstain_result["decision"] == abstain_mod.DECISION_NO_EVIDENCE:
         _enqueue_wiki_review_event(
             "qa_no_evidence",
             question=question,
-            paper_ids=paper_ids,
+            paper_ids=effective_paper_ids,
             chunks=final_chunks,
             wiki_context=wiki_context,
             reason="no_evidence",
             trace_id=trace_id,
             payload={"abstain": abstain_result},
             concept=_first_wiki_concept(wiki_context),
-            paper_id=_first_paper_id(paper_ids, final_chunks),
+            paper_id=_first_paper_id(effective_paper_ids, final_chunks),
         )
         return _no_evidence_response(
             intent_cfg, trace, abstain_result, abstain_cfg, final_chunks, trace_id, wiki_context
@@ -636,17 +721,17 @@ def _answer_impl(
         _enqueue_wiki_review_event(
             "qa_weak_evidence",
             question=question,
-            paper_ids=paper_ids,
+            paper_ids=effective_paper_ids,
             chunks=final_chunks,
             wiki_context=wiki_context,
             reason="weak_evidence",
             trace_id=trace_id,
             payload={"abstain": abstain_result},
             concept=_first_wiki_concept(wiki_context),
-            paper_id=_first_paper_id(paper_ids, final_chunks),
+            paper_id=_first_paper_id(effective_paper_ids, final_chunks),
         )
 
-    # Stage 7 — deterministic evidence selection + LLM call + citation cleanup.
+    # Stage 6 — deterministic evidence selection + LLM call + citation cleanup.
     evidence_chunks, evidence_selection = select_evidence(
         question,
         final_chunks,
@@ -703,5 +788,13 @@ def _answer_impl(
             "trace_id": trace_id,
         },
     }
-    _store_in_cache(question_for_cache, paper_ids, out)
+    if (user_id or "system") == "system":
+        _store_in_cache(question_for_cache, effective_paper_ids, out)
+    else:
+        _store_in_cache(
+            question_for_cache,
+            effective_paper_ids,
+            out,
+            user_id=user_id,
+        )
     return out

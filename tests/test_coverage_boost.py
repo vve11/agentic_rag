@@ -60,22 +60,42 @@ def test_schema_wiki_lookup_required():
 # ---------------------------------------------------------------------------
 
 
-def test_paper_qa_delegates_to_qa_agentic(monkeypatch):
+def test_paper_qa_delegates_contextual_fields(monkeypatch):
     from paper_rag.tools import paper_qa as t
     from paper_rag.tools._schema import PaperQAInput
 
     captured = {}
 
-    def fake_answer(q, *, paper_ids=None, **kw):
-        captured["q"] = q
-        captured["paper_ids"] = paper_ids
+    def fake_answer(q, *, paper_ids=None, conversation_id=None, user_id="system", resolved_question=None, **kw):
+        captured.update(
+            {
+                "q": q,
+                "paper_ids": paper_ids,
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+                "resolved_question": resolved_question,
+            }
+        )
         return {"answer": "ok", "citations": [], "chunks": []}
 
     monkeypatch.setattr(t, "answer", fake_answer)
-    out = t.paper_qa(PaperQAInput(question="What is X?", paper_ids=["a"]))
+    out = t.paper_qa(
+        PaperQAInput(
+            question="What is X?",
+            paper_ids=["a"],
+            conversation_id="thread-1",
+            user_id="alice",
+            resolved_question="How does X work?",
+        )
+    )
     assert out["answer"] == "ok"
-    assert captured["q"] == "What is X?"
-    assert captured["paper_ids"] == ["a"]
+    assert captured == {
+        "q": "What is X?",
+        "paper_ids": ["a"],
+        "conversation_id": "thread-1",
+        "user_id": "alice",
+        "resolved_question": "How does X work?",
+    }
 
 
 # ---------------------------------------------------------------------------
