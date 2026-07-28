@@ -74,6 +74,7 @@ integrations/deer-flow/frontend/public/demo/threads/*/user-data/
 
 # ── Virtual environments ─────────────────────────────────────────────────────
 .venv/
+.venv
 venv/
 env/
 ENV/
