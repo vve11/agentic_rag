@@ -66,6 +66,7 @@ rag:
     threshold_low: 0.21         # < low: no_evidence (LLM call SKIPPED, returns canned message)
     threshold_high: 0.48        # < high but >= low: weak_evidence (LLM called with insufficiency hint)
     min_chunks: 3               # number of top chunks averaged for the evidence score
+    min_lexical_overlap: 0.08   # dense-path gate: mean content-token overlap with top evidence
     no_evidence_message: "未在已索引文献中找到与该问题相关的内容。请确认问题与已入库的论文主题相符，或考虑通过 paper_ingest_tool 扩充语料库。"
 
 llm:

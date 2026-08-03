@@ -51,7 +51,7 @@ def test_qa_trace_and_prompt_include_wiki_context(monkeypatch):
     monkeypatch.setattr(qa_agentic, "_retrieve_loop", lambda *args, **kwargs: ({
         "abc123": {"chunk_id": "abc123", "paper_id": "p1", "text": "RAG retrieves docs.", "score_dense": 0.9}
     }, [{"query": "q", "n_retrieved": 1, "reflect": None}], "answered"))
-    monkeypatch.setattr(qa_agentic, "_decide_abstain", lambda chunks, cfg: {"decision": "confident", "evidence_score": 0.9})
+    monkeypatch.setattr(qa_agentic, "_decide_abstain", lambda chunks, cfg, **kwargs: {"decision": "confident", "evidence_score": 0.9})
     monkeypatch.setattr(qa_agentic, "classify", lambda question: {"intent": "factual", "top_k": 5, "max_iter": 1})
     monkeypatch.setattr(qa_agentic, "select_evidence", lambda question, chunks, intent=None: (chunks, {}))
     monkeypatch.setattr(qa_agentic, "_store_in_cache", lambda question, paper_ids, out: None)
@@ -88,7 +88,7 @@ def test_weak_evidence_enqueues_wiki_review(monkeypatch):
     monkeypatch.setattr(
         qa_agentic,
         "_decide_abstain",
-        lambda chunks, cfg: {"decision": abstain_mod.DECISION_WEAK, "evidence_score": 0.25},
+        lambda chunks, cfg, **kwargs: {"decision": abstain_mod.DECISION_WEAK, "evidence_score": 0.25},
     )
     monkeypatch.setattr(qa_agentic, "classify", lambda question: {"intent": "factual", "top_k": 5, "max_iter": 1})
     monkeypatch.setattr(qa_agentic, "select_evidence", lambda question, chunks, intent=None: (chunks, {}))
@@ -119,7 +119,7 @@ def test_qa_records_wiki_consumption(monkeypatch):
     monkeypatch.setattr(qa_agentic, "_retrieve_loop", lambda *args, **kwargs: ({
         "abc123": {"chunk_id": "abc123", "paper_id": "p1", "text": "RAG retrieves docs.", "score_dense": 0.9}
     }, [{"query": "q", "n_retrieved": 1, "reflect": None}], "answered"))
-    monkeypatch.setattr(qa_agentic, "_decide_abstain", lambda chunks, cfg: {"decision": "confident", "evidence_score": 0.9})
+    monkeypatch.setattr(qa_agentic, "_decide_abstain", lambda chunks, cfg, **kwargs: {"decision": "confident", "evidence_score": 0.9})
     monkeypatch.setattr(qa_agentic, "classify", lambda question: {"intent": "factual", "top_k": 5, "max_iter": 1})
     monkeypatch.setattr(qa_agentic, "select_evidence", lambda question, chunks, intent=None: (chunks, {}))
     monkeypatch.setattr(qa_agentic, "chat", lambda messages, **kwargs: "Answer [chunk:abc123].")

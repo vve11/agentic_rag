@@ -43,8 +43,10 @@ _SYSTEM = (
     "You are a careful academic research assistant. Answer ONLY using the "
     "evidence chunks provided. After each factual statement, cite the chunk "
     "with [chunk:<chunk_id>]. NEVER use [1], [2], or (Author 2020) style "
-    "citations. Keep the answer concise (≤200 words). If insufficient "
-    "evidence, say so explicitly."
+    "citations. Keep the answer concise (≤200 words). If the evidence does "
+    "not answer the user's question, say the evidence is insufficient — do "
+    "NOT pivot to a related paper topic or invent an answer from tangential "
+    "chunks."
 )
 
 
@@ -180,6 +182,8 @@ def stream_answer(
         threshold_low=abstain_cfg.threshold_low,
         threshold_high=abstain_cfg.threshold_high,
         min_chunks=abstain_cfg.min_chunks,
+        question=question,
+        min_lexical_overlap=getattr(abstain_cfg, "min_lexical_overlap", 0.08),
     )
     yield {"event": "abstain", "data": abstain_result}
 

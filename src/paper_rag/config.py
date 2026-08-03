@@ -94,6 +94,9 @@ class _Abstain(BaseModel):
     threshold_low: float = 0.20      # < low      -> no_evidence (LLM skipped)
     threshold_high: float = 0.40     # >= high    -> confident (normal flow)
     min_chunks: int = 3              # avg top-N chunk scores for decision
+    # Dense cosine can stay high for off-topic questions; require some
+    # content-token overlap with top evidence before calling the LLM.
+    min_lexical_overlap: float = 0.08
     no_evidence_message: str = (
         "未在已索引文献中找到与该问题相关的内容。请确认问题与已入库的论文主题"
         "相符，或考虑通过 paper_ingest_tool 扩充语料库。"  # noqa: RUF001

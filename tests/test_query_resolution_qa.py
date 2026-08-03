@@ -5,7 +5,7 @@ def _empty_wiki_context() -> dict:
     return {"role": "background_not_evidence", "fingerprint": "", "entries": []}
 
 
-def _confident_abstain(chunks, cfg):
+def _confident_abstain(chunks, cfg, **kwargs):
     return {
         "decision": "confident",
         "evidence_score": 0.9,

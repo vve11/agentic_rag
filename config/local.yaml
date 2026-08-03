@@ -67,6 +67,7 @@ rag:
     threshold_low: 0.50
     threshold_high: 0.58
     min_chunks: 3
+    min_lexical_overlap: 0.08
     no_evidence_message: "未在已索引文献中找到与该问题相关的内容。请确认问题与已入库的论文主题相符，或考虑通过 paper_ingest_tool 扩充语料库。"
 
 llm:

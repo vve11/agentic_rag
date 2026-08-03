@@ -49,8 +49,10 @@ _SYSTEM = (
     "with [chunk:<chunk_id>]. NEVER use [1], [2], or (Author 2020) style "
     "citations — they will be considered hallucinated. Keep the answer "
     "concise: at most 200 words, dense and informative, no padding. If the "
-    "evidence is insufficient, say so explicitly. Do NOT fabricate paper "
-    "titles, numbers, authors, or years."
+    "evidence does not answer the user's question, say the evidence is "
+    "insufficient — do NOT pivot to a related paper topic or invent an "
+    "answer from tangential chunks. Do NOT fabricate paper titles, "
+    "numbers, authors, or years."
 )
 
 _EMPTY_SUSPICIOUS: dict = {"numeric": [], "author_year": [], "count": 0}
@@ -256,7 +258,7 @@ def _no_chunks_response(
     }
 
 
-def _decide_abstain(final_chunks: list[dict], abstain_cfg) -> dict:
+def _decide_abstain(final_chunks: list[dict], abstain_cfg, *, question: str) -> dict:
     """Run abstain.decide and emit the matching counters/log line."""
     from ..observability import counter
 
@@ -266,6 +268,8 @@ def _decide_abstain(final_chunks: list[dict], abstain_cfg) -> dict:
         threshold_low=abstain_cfg.threshold_low,
         threshold_high=abstain_cfg.threshold_high,
         min_chunks=abstain_cfg.min_chunks,
+        question=question,
+        min_lexical_overlap=getattr(abstain_cfg, "min_lexical_overlap", 0.08),
     )
     counter("paper_rag_qa_abstain_total", {"decision": result["decision"]}).inc()
     if result.get("signal_quality") == "low_degraded":
@@ -276,6 +280,7 @@ def _decide_abstain(final_chunks: list[dict], abstain_cfg) -> dict:
         f"top={result['top_chunk_score']:.3f} "
         f"field={result['score_field']} "
         f"quality={result.get('signal_quality')} "
+        f"overlap={result.get('lexical_overlap')} "
         f"n={result['n_chunks']}"
     )
     return result
@@ -700,7 +705,7 @@ def _answer_impl(
 
     # Stage 5 — abstain decision (after retrieve, before LLM, see ADR-0014).
     abstain_cfg = c.abstain
-    abstain_result = _decide_abstain(final_chunks, abstain_cfg)
+    abstain_result = _decide_abstain(final_chunks, abstain_cfg, question=question)
     if abstain_result["decision"] == abstain_mod.DECISION_NO_EVIDENCE:
         _enqueue_wiki_review_event(
             "qa_no_evidence",

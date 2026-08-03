@@ -42,6 +42,7 @@ Industrial-grade properties
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 # Type alias for clarity
@@ -61,6 +62,10 @@ DECISION_NO_CHUNKS = "no_chunks"
 HIGH_QUALITY_FIELDS = frozenset({"score_rerank", "score_dense", "score"})
 LOW_QUALITY_FIELDS = frozenset({"score_bm25", "score_rrf"})
 
+# Dense absolute cosine can stay high for off-topic questions (e.g. "2+2"
+# vs Self-RAG chunks). Lexical gate only applies on these fields; rerank
+# keeps the calibrated score-only path.
+_DENSE_FIELDS = frozenset({"score_dense", "score"})
 
 # RRF scores are sums of 1/(k+rank) and typically live in (0, 0.05] for k=60.
 # Multiply by this factor to bring them into ~ (0, 1] for threshold comparison.
@@ -72,6 +77,14 @@ _RRF_NORMALIZE_FACTOR = 15.0
 # only used as a degraded-mode fallback when dense retrieval is unavailable.
 _BM25_SIGMOID_CENTER = 8.0
 _BM25_SIGMOID_SLOPE = 0.5
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+_STOPWORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how",
+    "in", "is", "it", "of", "on", "or", "that", "the", "this", "to", "was",
+    "what", "when", "where", "which", "who", "why", "with",
+})
+_DEFAULT_MIN_LEXICAL_OVERLAP = 0.08
 
 
 def _normalize(score: float, field: str) -> float:
@@ -193,6 +206,98 @@ def _top_chunk_score(chunks: list[dict], field_used: str | None) -> float:
     return max(scores) if scores else 0.0
 
 
+def _content_tokens(text: str) -> set[str]:
+    """Alphabetic/numeric tokens length >= 3 after stopword filtering."""
+    tokens = set()
+    for tok in _TOKEN_RE.findall(text.lower()):
+        if len(tok) < 3 or tok in _STOPWORDS:
+            continue
+        tokens.add(tok)
+    return tokens
+
+
+def _chunk_text(chunk: dict) -> str:
+    return " ".join(
+        str(chunk.get(key) or "")
+        for key in ("title", "section", "text", "raw_snippet")
+    )
+
+
+def _lexical_overlap(question: str, chunk: dict) -> float:
+    q_tokens = _content_tokens(question)
+    if not q_tokens:
+        return 0.0
+    text_tokens = _content_tokens(_chunk_text(chunk))
+    return len(q_tokens & text_tokens) / len(q_tokens)
+
+
+def _mean_lexical_overlap(
+    question: str,
+    chunks: list[dict],
+    *,
+    field_used: str | None,
+    min_chunks: int,
+) -> float | None:
+    """Mean overlap over the top-`min_chunks` chunks by the chosen score field.
+
+    Returns None when question is empty / not provided.
+    """
+    if not question or not question.strip():
+        return None
+    if not chunks:
+        return 0.0
+
+    ranked = list(chunks)
+    if field_used is not None:
+        def _key(ch: dict) -> float:
+            try:
+                return _normalize(float(ch.get(field_used, 0.0) or 0.0), field_used)
+            except (TypeError, ValueError):
+                return 0.0
+        ranked.sort(key=_key, reverse=True)
+    take = ranked[:min_chunks] if min_chunks > 0 else ranked
+    if not take:
+        return 0.0
+    return sum(_lexical_overlap(question, ch) for ch in take) / len(take)
+
+
+def _apply_lexical_gate(
+    *,
+    decision: str,
+    signal_quality: str,
+    enabled: bool,
+    field_used: str | None,
+    question: str | None,
+    chunks: list[dict],
+    min_chunks: int,
+    min_lexical_overlap: float,
+) -> tuple[str, str, float | None]:
+    """Force no_evidence for dense-path off-topic matches.
+
+    Returns (decision, signal_quality, lexical_overlap).
+    """
+    overlap = _mean_lexical_overlap(
+        question or "",
+        chunks,
+        field_used=field_used,
+        min_chunks=min_chunks,
+    )
+    if not enabled or question is None:
+        return decision, signal_quality, overlap
+    if field_used not in _DENSE_FIELDS:
+        return decision, signal_quality, overlap
+    if decision in (DECISION_NO_EVIDENCE, DECISION_NO_CHUNKS):
+        return decision, signal_quality, overlap
+
+    q_tokens = _content_tokens(question)
+    if not q_tokens:
+        # Pure math / symbol questions like "2+2" have no content tokens.
+        return DECISION_NO_EVIDENCE, "lexical_gate", overlap if overlap is not None else 0.0
+    if overlap is not None and overlap < min_lexical_overlap:
+        return DECISION_NO_EVIDENCE, "lexical_gate", overlap
+    return decision, signal_quality, overlap
+
+
 def decide(
     chunks: list[dict],
     *,
@@ -200,6 +305,8 @@ def decide(
     threshold_low: float = 0.20,
     threshold_high: float = 0.40,
     min_chunks: int = 3,
+    question: str | None = None,
+    min_lexical_overlap: float = _DEFAULT_MIN_LEXICAL_OVERLAP,
     score_fields: tuple[str, ...] = (
         "score_rerank",  # bge-reranker output (best signal when available)
         "score_dense",   # bge-m3 cosine (real semantic similarity)
@@ -219,12 +326,16 @@ def decide(
     threshold_low : below this -> no_evidence (LLM skipped).
     threshold_high : at or above this -> confident (normal flow).
     min_chunks : how many top chunks contribute to evidence_score mean.
+    question : optional user question; when set and score_field is dense,
+               a lexical-overlap gate can force no_evidence for off-topic hits.
+    min_lexical_overlap : dense-path gate threshold on mean content-token
+                          overlap with top evidence chunks.
     score_fields : which score fields to consult, in priority order.
 
     Returns
     -------
     dict with keys: decision, evidence_score, top_chunk_score, n_chunks,
-    score_field, threshold_low, threshold_high.
+    score_field, threshold_low, threshold_high, lexical_overlap.
     """
     n_chunks = len(chunks)
     if n_chunks == 0:
@@ -237,6 +348,7 @@ def decide(
             "threshold_low": threshold_low,
             "threshold_high": threshold_high,
             "enabled": enabled,
+            "lexical_overlap": None,
         }
 
     score, field_used, _ = evidence_score(
@@ -250,8 +362,18 @@ def decide(
         threshold_low=threshold_low,
         threshold_high=threshold_high,
     )
+    decision, signal_quality, lexical_overlap = _apply_lexical_gate(
+        decision=decision,
+        signal_quality=signal_quality,
+        enabled=enabled,
+        field_used=field_used,
+        question=question,
+        chunks=chunks,
+        min_chunks=min_chunks,
+        min_lexical_overlap=min_lexical_overlap,
+    )
 
-    return {
+    out = {
         "decision": decision,
         "evidence_score": round(score, 4),
         "top_chunk_score": round(top_score, 4),
@@ -261,7 +383,11 @@ def decide(
         "threshold_low": threshold_low,
         "threshold_high": threshold_high,
         "enabled": enabled,
+        "lexical_overlap": (
+            None if lexical_overlap is None else round(float(lexical_overlap), 4)
+        ),
     }
+    return out
 
 
 # Prompt suffix injected when decision == weak_evidence

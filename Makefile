@@ -6,6 +6,7 @@ DEERFLOW_DIR := integrations/deer-flow
 DEERFLOW_BACKEND_PY ?= $(CURDIR)/$(DEERFLOW_DIR)/backend/.venv/bin/python
 DEERFLOW_BACKEND_PORT ?= 8001
 DEERFLOW_FRONTEND_PORT ?= 3000
+DEERFLOW_CONFIG ?= $(if $(wildcard $(DEERFLOW_DIR)/config.yaml),$(DEERFLOW_DIR)/config.yaml,$(DEERFLOW_DIR)/config.example.yaml)
 
 .PHONY: help install install-dev lint format test test-pytest smoke secret-scan course-pdf mineru-doctor mineru-download-layout rebuild-index validate-metadata \
         qdrant-up qdrant-down init-store ingest ask eval clean clean-data \
@@ -108,7 +109,7 @@ validate-metadata:
 deerflow-backend:
 	set -a; [ ! -f .env ] || . ./.env; set +a; \
 	    DEER_FLOW_AUTH_DISABLED=1 \
-	    DEER_FLOW_CONFIG_PATH=$(CURDIR)/$(DEERFLOW_DIR)/config.example.yaml \
+	    DEER_FLOW_CONFIG_PATH=$(CURDIR)/$(DEERFLOW_CONFIG) \
 	    DEER_FLOW_HOME=$(CURDIR)/$(DEERFLOW_DIR)/.deer-flow-local \
 	    PAPER_RAG_HOME=$(CURDIR) \
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \

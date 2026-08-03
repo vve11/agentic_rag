@@ -190,3 +190,102 @@ def test_high_quality_signal_marks_high():
     res = abstain.decide(chunks, threshold_low=0.30, threshold_high=0.50)
     assert res["decision"] == abstain.DECISION_NO_EVIDENCE
     assert res["signal_quality"] == "high"
+
+
+def test_dense_high_score_zero_overlap_no_evidence():
+    """Off-topic math questions can still get high BGE cosine; lexical gate
+    must force no_evidence on the dense path."""
+    chunks = [
+        _ch(
+            score_field="score_dense",
+            value=0.75,
+            chunk_id=f"c{i}",
+            title="Self-RAG: Learning to Retrieve, Generate, and Critique",
+            text="Self-RAG uses reflection tokens to decide when to retrieve.",
+        )
+        for i in range(3)
+    ]
+    res = abstain.decide(
+        chunks,
+        question="What is 2 + 2?",
+        threshold_low=0.50,
+        threshold_high=0.58,
+        min_lexical_overlap=0.08,
+    )
+    assert res["decision"] == abstain.DECISION_NO_EVIDENCE
+    assert res["signal_quality"] == "lexical_gate"
+    assert res["score_field"] == "score_dense"
+    assert res["lexical_overlap"] is not None
+    assert res["lexical_overlap"] < 0.08
+
+
+def test_dense_high_score_with_overlap_stays_confident():
+    """In-domain questions with overlapping content tokens keep confident."""
+    chunks = [
+        _ch(
+            score_field="score_dense",
+            value=0.75,
+            chunk_id=f"c{i}",
+            title="Self-RAG: Learning to Retrieve, Generate, and Critique",
+            text="Self-RAG uses reflection tokens to decide when to retrieve.",
+        )
+        for i in range(3)
+    ]
+    res = abstain.decide(
+        chunks,
+        question="What is Self-RAG and what are reflection tokens?",
+        threshold_low=0.50,
+        threshold_high=0.58,
+        min_lexical_overlap=0.08,
+    )
+    assert res["decision"] == abstain.DECISION_CONFIDENT
+    assert res["signal_quality"] == "high"
+    assert res["lexical_overlap"] is not None
+    assert res["lexical_overlap"] >= 0.08
+
+
+def test_rerank_path_ignores_low_lexical_overlap():
+    """When score_rerank is available, keep the calibrated score-only path."""
+    chunks = [
+        _ch(
+            score_field="score_rerank",
+            value=0.85,
+            chunk_id=f"c{i}",
+            title="Self-RAG survey",
+            text="Reflection tokens control retrieval timing.",
+        )
+        for i in range(3)
+    ]
+    res = abstain.decide(
+        chunks,
+        question="What is 2 + 2?",
+        threshold_low=0.20,
+        threshold_high=0.40,
+        min_lexical_overlap=0.08,
+    )
+    assert res["decision"] == abstain.DECISION_CONFIDENT
+    assert res["score_field"] == "score_rerank"
+    assert res["signal_quality"] == "high"
+
+
+def test_shanghai_weather_dense_no_evidence():
+    """Classic ADR-0014 negative: weather query against NLP paper chunks."""
+    chunks = [
+        _ch(
+            score_field="score_dense",
+            value=0.72,
+            chunk_id=f"c{i}",
+            title="Retrieval-Augmented Generation for Knowledge-Intensive NLP",
+            text="RAG retrieves documents to ground generation in evidence.",
+        )
+        for i in range(3)
+    ]
+    res = abstain.decide(
+        chunks,
+        question="What is the weather in Shanghai tomorrow?",
+        threshold_low=0.50,
+        threshold_high=0.58,
+        min_lexical_overlap=0.08,
+    )
+    assert res["decision"] == abstain.DECISION_NO_EVIDENCE
+    assert res["signal_quality"] == "lexical_gate"

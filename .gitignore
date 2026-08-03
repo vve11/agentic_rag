@@ -6,7 +6,10 @@
 data/
 !data/README.md
 logs/
-models/
+# Local ML weight/cache dirs only — do not ignore Python packages named models/
+/models/
+!integrations/deer-flow/backend/packages/harness/deerflow/models/
+!integrations/deer-flow/backend/packages/harness/deerflow/persistence/models/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
