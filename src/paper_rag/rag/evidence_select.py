@@ -10,6 +10,50 @@ import re
 from collections import Counter
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "can",
+    "could",
+    "did",
+    "do",
+    "does",
+    "for",
+    "from",
+    "how",
+    "in",
+    "into",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "should",
+    "that",
+    "the",
+    "this",
+    "to",
+    "use",
+    "used",
+    "uses",
+    "using",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "whom",
+    "whose",
+    "why",
+    "with",
+    "would",
+}
 _SECTION_HINTS = (
     "abstract",
     "introduction",
@@ -110,11 +154,17 @@ def _model_score(chunk: dict) -> float:
 
 
 def _lexical_overlap(question: str, text: str) -> float:
-    q_tokens = set(_TOKEN_RE.findall(question.lower()))
+    q_tokens = _content_tokens(question)
     if not q_tokens:
         return 0.0
-    text_tokens = set(_TOKEN_RE.findall(text.lower()))
+    text_tokens = _content_tokens(text)
     return len(q_tokens & text_tokens) / len(q_tokens)
+
+
+def _content_tokens(text: str) -> set[str]:
+    tokens = set(_TOKEN_RE.findall(text.lower()))
+    filtered = {token for token in tokens if token not in _STOPWORDS}
+    return filtered or tokens
 
 
 def _section_hint(chunk: dict) -> int:

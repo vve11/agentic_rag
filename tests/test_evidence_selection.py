@@ -90,3 +90,34 @@ def test_select_evidence_scores_lexical_overlap_when_scores_tie():
 
     assert selected[0]["chunk_id"] == "bbbbbbbbbb"
     assert trace["candidates"][0]["lexical_overlap"] > trace["candidates"][1]["lexical_overlap"]
+
+
+def test_select_evidence_ignores_question_stopwords_for_focus_terms():
+    from paper_rag.rag.evidence_select import select_evidence
+
+    chunks = [
+        {
+            "chunk_id": "generic-rag",
+            "paper_id": "paper-a",
+            "text": "What is the origin of RAG and why use it in generation systems?",
+            "score_rerank": 0.5,
+        },
+        {
+            "chunk_id": "reranking",
+            "paper_id": "paper-b",
+            "text": (
+                "RAG reranking reorders retrieved document chunks to highlight "
+                "the most relevant evidence before generation."
+            ),
+            "score_rerank": 0.5,
+        },
+    ]
+
+    selected, trace = select_evidence(
+        "What is reranking in RAG and why use it?",
+        chunks,
+        max_chunks=1,
+    )
+
+    assert selected[0]["chunk_id"] == "reranking"
+    assert trace["candidates"][0]["chunk_id"] == "reranking"
