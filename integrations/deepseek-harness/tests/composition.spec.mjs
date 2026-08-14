@@ -187,4 +187,48 @@ describe("G0 component report", () => {
     expect(report.cases["DSH-G0-004"].status).toBe("BLOCKED");
     expect(report.cases["DSH-G0-009"].status).toBe("BLOCKED");
   });
+
+  test("marks the private MCP boundary pass when broker probe evidence exists", () => {
+    const paths = pathsFor({ integrationRoot });
+    const report = buildG0CompatReport({
+      commit: "abc123",
+      dirty: false,
+      paths,
+      configAudit: { passed: true, checks: [] },
+      presetDiscovery: { id: "paper-research", broken: undefined },
+      brokerProbe: {
+        mcp_boundary: {
+          raw_tool_names: ["fixture_status", "write_probe"],
+          model_tool_names: ["paper_status", "write_probe"],
+          bounded_projection_bytes: 11,
+          hidden_metadata_wire: "tools/call.params._meta.paper_rag",
+          result_private_metadata_stripped: true,
+        },
+        approval_bridge: {
+          allowed_once_calls_private_mcp: true,
+          rejected_skips_private_mcp: true,
+        },
+        credential_bridge: {
+          explicit_child_env: true,
+          parent_env_not_inherited_without_ref: true,
+          rotation: "new child generation",
+          redaction: true,
+        },
+      },
+    });
+
+    expect(report.cases["DSH-G0-004"].status).toBe("PASS");
+    expect(report.cases["DSH-G0-004"].evidence).toMatchObject({
+      hidden_metadata_wire: "tools/call.params._meta.paper_rag",
+      result_private_metadata_stripped: true,
+    });
+    expect(report.cases["DSH-G0-005"]).toMatchObject({
+      status: "BLOCKED",
+      reason: expect.stringContaining("Session"),
+    });
+    expect(report.cases["DSH-G0-008"]).toMatchObject({
+      status: "BLOCKED",
+      reason: expect.stringContaining("timeout"),
+    });
+  });
 });

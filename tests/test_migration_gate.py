@@ -110,6 +110,42 @@ def test_validate_report_requires_all_g0_cases(tmp_path: Path):
         migration_gate.validate_report(ROOT, SPEC / "test" / "test-manifest.json", "G0", path)
 
 
+def test_merge_component_reports_updates_required_cases(tmp_path: Path):
+    component_dir = tmp_path / "data/index/migration-gates/components/G0"
+    component_dir.mkdir(parents=True)
+    component = {
+        "schema_version": 1,
+        "gate": "G0",
+        "component": "dsh-g0-compat",
+        "cases": {
+            "DSH-G0-001": {"status": "PASS", "evidence": "ok"},
+            "DSH-G0-002": {"status": "BLOCKED", "reason": "pending"},
+            "IGNORED-001": {"status": "PASS", "evidence": "not required"},
+        },
+        "go_no_go": "no-go",
+    }
+    (component_dir / "dsh-g0-compat.json").write_text(
+        json.dumps(component), encoding="utf-8"
+    )
+    cases = {
+        "DSH-G0-001": {"status": "NOT_RUN"},
+        "DSH-G0-002": {"status": "NOT_RUN"},
+    }
+
+    components = migration_gate.merge_component_reports(tmp_path, "G0", cases)
+
+    assert components == [
+        {
+            "component": "dsh-g0-compat",
+            "report": "data/index/migration-gates/components/G0/dsh-g0-compat.json",
+            "go_no_go": "no-go",
+        }
+    ]
+    assert cases["DSH-G0-001"] == {"status": "PASS", "evidence": "ok"}
+    assert cases["DSH-G0-002"] == {"status": "BLOCKED", "reason": "pending"}
+    assert "IGNORED-001" not in cases
+
+
 def test_quality_gate_make_targets_use_migration_python():
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 

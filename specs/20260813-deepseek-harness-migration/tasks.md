@@ -28,13 +28,13 @@
 - [x] T013 建立 repo-local versioned `DSH_HOME` 与独立 credential provider path，加入 `.gitignore`。
 - [x] T014 建立最小 Web profile，默认 loopback、telemetry disabled，并断言 Host timeout policy active。
 - [x] T015 建立 `paper-research` Preset 源和同步脚本，验证 UI 可选择该 Preset。
-- [ ] T016 建立 Native Broker + 私有 stdio MCP fixture，验证 raw tools 不进入模型目录。
-- [ ] T017 实现 credential reference bridge，验证显式 child env、热轮换和 secret redaction。
-- [ ] T018 写工具 executor 按真实对象签名直接调用一次性 Approval 并传 `exec.signal`；验证 missing/mis-scope/HMR 全部 fail closed。
-- [ ] T019 拆分 `INHERITED_GLOBAL_ALLOW` 与 `FINAL_MODEL_CATALOG`，验证 agent-created restrict 与 pre-step schema invariant。
-- [ ] T020 实现 direct-human request boundary state，覆盖多消息批次、synthetic-only、user steering、resume。
+- [x] T016 建立 Native Broker + 私有 stdio MCP fixture，验证 raw tools 不进入模型目录。
+- [x] T017 实现 credential reference bridge，验证显式 child env、热轮换和 secret redaction。
+- [x] T018 写工具 executor 按真实对象签名直接调用一次性 Approval 并传 `exec.signal`；验证 missing/mis-scope/HMR 全部 fail closed。
+- [x] T019 拆分 `INHERITED_GLOBAL_ALLOW` 与 `FINAL_MODEL_CATALOG`，验证 agent-created restrict 与 pre-step schema invariant。
+- [x] T020 实现 direct-human request boundary state，覆盖多消息批次、synthetic-only、user steering、resume。
 - [ ] T021 验证 MCP child crash/reconnect、same-version Session resume、versioned root、standing generation 多 Agent 生命周期和 cancellation。
-- [ ] T022 实现统一 `run-gate` orchestrator、`dsh-g0-compat` 与结构化 report validator。
+- [x] T022 实现统一 `run-gate` orchestrator、`dsh-g0-compat` 与结构化 report validator。
 - [ ] T024 固定 hidden wire 为 `tools/call.params._meta.paper_rag`，验证 TS 发送/Python 接收且不落 Session。
 - [x] T025 将 Host timeout policy active 纳入 profile、doctor、dump-config 和 G0 fail-closed。
 - [ ] T023 只有 001..009 全 PASS、baseline/matrix/report validator 全通过才进入 G1。

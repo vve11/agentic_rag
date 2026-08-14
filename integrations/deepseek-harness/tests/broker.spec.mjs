@@ -1,0 +1,580 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, test } from "vitest";
+
+import {
+  INHERITED_GLOBAL_ALLOW,
+  PaperRagNativeBroker,
+  createBrokerExec,
+  deriveRequestBoundaryId,
+  redactSecrets,
+  toolSchemaHash,
+} from "../src/broker.mjs";
+import { pathsFor } from "../src/paths.mjs";
+
+const paths = pathsFor();
+const fixtureCommand = process.execPath;
+const fixtureArgs = [new URL("../fixtures/private-mcp-server.mjs", import.meta.url).pathname];
+const pythonFixtureCommand = join(paths.repoRoot, ".venv/bin/python");
+const pythonFixtureArgs = [
+  new URL("../fixtures/private_mcp_server.py", import.meta.url).pathname,
+];
+const cleanup = [];
+
+afterEach(async () => {
+  while (cleanup.length > 0) {
+    await cleanup.pop()();
+  }
+});
+
+/** @param {string | (() => string)} [value] */
+function credentials(value = "g0-secret-token") {
+  const currentValue = () => (typeof value === "function" ? value() : value);
+  return {
+    async describe(ref) {
+      return { configured: ref === "PAPER_RAG_TEST_TOKEN", writable: false, source: "test" };
+    },
+    async resolve(ref) {
+      return ref === "PAPER_RAG_TEST_TOKEN" ? { value: currentValue(), source: "test" } : undefined;
+    },
+  };
+}
+
+function approval(outcome = "allowed-once", calls = []) {
+  return {
+    async request(req) {
+      calls.push(req);
+      return outcome;
+    },
+  };
+}
+
+function cancellableApproval(calls = []) {
+  return {
+    request(req) {
+      calls.push(req);
+      return new Promise((_resolve, reject) => {
+        req.signal?.addEventListener("abort", () => reject(new Error("cancelled")), {
+          once: true,
+        });
+      });
+    },
+  };
+}
+
+async function startBroker(options = {}) {
+  const broker = new PaperRagNativeBroker({
+    command: options.command ?? fixtureCommand,
+    args: options.args ?? fixtureArgs,
+    cwd: paths.integrationRoot,
+    credentials: options.credentials ?? credentials(),
+    credentialRefs: Object.hasOwn(options, "credentialRefs")
+      ? options.credentialRefs
+      : ["PAPER_RAG_TEST_TOKEN"],
+    childEnv: options.childEnv ?? {},
+    activePresetId: options.activePresetId ?? "paper-research",
+    approval: Object.hasOwn(options, "approval") ? options.approval : approval(),
+  });
+  cleanup.push(() => broker.close());
+  await broker.activate();
+  return broker;
+}
+
+async function newAuditPath() {
+  const dir = await mkdtemp(join(tmpdir(), "paper-rag-broker-"));
+  cleanup.push(() => rm(dir, { recursive: true, force: true }));
+  return join(dir, "audit.jsonl");
+}
+
+async function readAuditLines(path) {
+  return (await readFile(path, "utf8"))
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+function establishBoundary(broker, exec, ids = ["msg-user"]) {
+  return broker.updateRequestBoundary(
+    exec.agent,
+    ids.map((id) => ({ id, source: { kind: "user" } })),
+  );
+}
+
+function delay(ms) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+describe("PaperRagNativeBroker private MCP boundary", () => {
+  test("discovers raw MCP tools but exposes only broker-owned native names", async () => {
+    const broker = await startBroker();
+
+    expect(broker.rawToolNames()).toContain("fixture_status");
+    expect(broker.rawToolNames()).toContain("write_probe");
+    expect(broker.modelCatalog().map((tool) => tool.name).sort()).toEqual([
+      "paper_status",
+      "write_probe",
+    ]);
+    expect(broker.modelCatalog().some((tool) => tool.name.startsWith("mcp__"))).toBe(false);
+    expect(broker.modelCatalog().some((tool) => tool.name === "fixture_status")).toBe(false);
+  });
+
+  test("renders bounded model text from the canonical private MCP result", async () => {
+    const broker = await startBroker();
+    const args = { question: "projection check" };
+    const result = await broker.execute(
+      "paper_status",
+      args,
+      createBrokerExec({ agentId: "agent-render", callId: "call-render" }),
+    );
+
+    const content = broker.renderForModel("paper_status", args, result);
+
+    expect(content).toHaveLength(1);
+    expect(content[0]).toMatchObject({ type: "text" });
+    const text = content[0].type === "text" ? content[0].text : "";
+    expect(text).toContain("ok");
+    expect(text.length).toBeLessThan(1024);
+  });
+
+  test("sends hidden paper_rag metadata through tools/call params _meta, not model arguments", async () => {
+    const auditPath = await newAuditPath();
+    const broker = await startBroker({
+      childEnv: { PAPER_RAG_PRIVATE_AUDIT_PATH: auditPath },
+    });
+
+    const result = await broker.execute(
+      "paper_status",
+      { question: "indexed corpus status?" },
+      createBrokerExec({ agentId: "agent-123", sessionId: "session-456", callId: "call-789" }),
+    );
+
+    expect(result.structuredContent.received_arguments).toEqual({
+      question: "indexed corpus status?",
+    });
+    expect(result.structuredContent.received_meta).toEqual({});
+    expect(JSON.stringify(result)).not.toContain("conversation_id");
+    expect(JSON.stringify(result.structuredContent.received_arguments)).not.toContain(
+      "conversation_id",
+    );
+
+    const [audit] = await readAuditLines(auditPath);
+    expect(audit.received_arguments).toEqual({
+      question: "indexed corpus status?",
+    });
+    expect(audit.received_meta.paper_rag).toMatchObject({
+      conversation_id: "agent-123",
+      actor_id: "system",
+      caller: "deepseek_harness",
+      tool_call_id: "call-789",
+    });
+  });
+
+  test("sends hidden paper_rag metadata to a Python stdio MCP receiver", async () => {
+    const auditPath = await newAuditPath();
+    const broker = await startBroker({
+      command: pythonFixtureCommand,
+      args: pythonFixtureArgs,
+      childEnv: { PAPER_RAG_PRIVATE_AUDIT_PATH: auditPath },
+    });
+
+    const result = await broker.execute(
+      "paper_status",
+      { question: "python wire check" },
+      createBrokerExec({ agentId: "agent-python", callId: "call-python" }),
+    );
+
+    expect(result.structuredContent.received_arguments).toEqual({
+      question: "python wire check",
+    });
+    expect(JSON.stringify(result)).not.toContain("agent-python");
+    const [audit] = await readAuditLines(auditPath);
+    expect(audit.receiver).toBe("python");
+    expect(audit.received_meta.paper_rag).toMatchObject({
+      conversation_id: "agent-python",
+      caller: "deepseek_harness",
+      tool_call_id: "call-python",
+    });
+  });
+
+  test("derives request boundary from the claimed direct-user message batch", async () => {
+    const broker = await startBroker();
+    const exec = createBrokerExec({
+      agentId: "agent-boundary",
+      sessionId: "session-boundary",
+      callId: "call-boundary",
+    });
+
+    const boundary = broker.updateRequestBoundary(exec.agent, [
+      { id: "user-1", source: { kind: "user" } },
+      { id: "user-2", source: { kind: "user" } },
+    ]);
+
+    expect(boundary).toBe(deriveRequestBoundaryId("session-boundary", ["user-1", "user-2"]));
+    expect(
+      broker.updateRequestBoundary(exec.agent, [
+        { id: "synthetic-1", source: { kind: "skill" } },
+        { id: "synthetic-2", source: { kind: "goal" } },
+      ]),
+    ).toBe(boundary);
+
+    const steeringBoundary = broker.updateRequestBoundary(exec.agent, [
+      { id: "user-steering", source: { kind: "user" } },
+    ]);
+    expect(steeringBoundary).toBe(
+      deriveRequestBoundaryId("session-boundary", ["user-steering"]),
+    );
+    expect(steeringBoundary).not.toBe(boundary);
+  });
+
+  test("resume without a new direct-user message denies writes before approval", async () => {
+    const approvalCalls = [];
+    const broker = await startBroker({ approval: approval("allowed-once", approvalCalls) });
+    const exec = createBrokerExec({ agentId: "agent-resume", callId: "call-resume" });
+
+    const read = await broker.execute(
+      "paper_status",
+      { question: "read after resume" },
+      exec,
+    );
+    expect(read.structuredContent.ok).toBe(true);
+
+    await expect(broker.execute("write_probe", { note: "resume write" }, exec)).rejects.toThrow(
+      "DIRECT_USER_AUTHORITY_REQUIRED",
+    );
+    expect(approvalCalls).toHaveLength(0);
+    const status = await broker.execute(
+      "paper_status",
+      { question: "write count" },
+      createBrokerExec({ agentId: "agent-resume", callId: "call-resume-status" }),
+    );
+    expect(status.structuredContent.write_call_count).toBe(0);
+  });
+
+  test("request boundary rides hidden metadata and stays out of arguments and results", async () => {
+    const auditPath = await newAuditPath();
+    const broker = await startBroker({
+      childEnv: { PAPER_RAG_PRIVATE_AUDIT_PATH: auditPath },
+    });
+    const exec = createBrokerExec({
+      agentId: "agent-boundary-wire",
+      sessionId: "session-boundary-wire",
+      callId: "call-boundary-wire",
+    });
+    const boundary = establishBoundary(broker, exec, ["user-wire-1", "user-wire-2"]);
+
+    const result = await broker.execute("write_probe", { note: "hidden boundary" }, exec);
+
+    expect(result.structuredContent.received_arguments).toEqual({ note: "hidden boundary" });
+    expect(JSON.stringify(result)).not.toContain(boundary);
+    expect(JSON.stringify(result.structuredContent.received_arguments)).not.toContain(
+      "request_boundary_id",
+    );
+    const audit = (await readAuditLines(auditPath)).find(
+      (line) => line.tool_name === "write_probe",
+    );
+    expect(audit.received_meta.paper_rag.request_boundary_id).toBe(boundary);
+  });
+
+  test("private MCP child crash is diagnosable and restart restores tool calls", async () => {
+    const broker = await startBroker();
+    const originalPid = broker.privateMcpPid();
+    expect(originalPid).toEqual(expect.any(Number));
+
+    process.kill(originalPid, "SIGTERM");
+    await delay(50);
+
+    await expect(
+      broker.execute(
+        "paper_status",
+        { question: "after crash" },
+        createBrokerExec({ agentId: "agent-crash", callId: "call-crash" }),
+      ),
+    ).rejects.toThrow();
+
+    await broker.restart();
+    const restartedPid = broker.privateMcpPid();
+    expect(restartedPid).toEqual(expect.any(Number));
+    expect(restartedPid).not.toBe(originalPid);
+    const recovered = await broker.execute(
+      "paper_status",
+      { question: "after restart" },
+      createBrokerExec({ agentId: "agent-crash", callId: "call-restart" }),
+    );
+    expect(recovered.structuredContent.ok).toBe(true);
+  });
+
+  test("standing broker generation serves multiple agents with isolated boundaries", async () => {
+    const broker = await startBroker();
+    const sharedPid = broker.privateMcpPid();
+    const agentA = createBrokerExec({
+      agentId: "agent-a",
+      sessionId: "session-a",
+      callId: "call-a",
+    });
+    const agentB = createBrokerExec({
+      agentId: "agent-b",
+      sessionId: "session-b",
+      callId: "call-b",
+    });
+
+    const boundaryA = establishBoundary(broker, agentA, ["user-a"]);
+    const boundaryB = establishBoundary(broker, agentB, ["user-b"]);
+
+    expect(boundaryA).not.toBe(boundaryB);
+    expect(broker.currentRequestBoundaryId(agentA.agent)).toBe(boundaryA);
+    expect(broker.currentRequestBoundaryId(agentB.agent)).toBe(boundaryB);
+    expect(broker.privateMcpPid()).toBe(sharedPid);
+    await expect(
+      broker.execute("paper_status", { question: "agent a" }, agentA),
+    ).resolves.toMatchObject({ structuredContent: { ok: true } });
+    await expect(
+      broker.execute("paper_status", { question: "agent b" }, agentB),
+    ).resolves.toMatchObject({ structuredContent: { ok: true } });
+    expect(broker.privateMcpPid()).toBe(sharedPid);
+  });
+
+  test("passes credentials only as explicit child env and redacts secret-shaped evidence", async () => {
+    const broker = await startBroker({ credentials: credentials("rotate-me-secret") });
+
+    const result = await broker.execute(
+      "paper_status",
+      { question: "credential check" },
+      createBrokerExec({ agentId: "agent-cred", callId: "call-cred" }),
+    );
+
+    expect(result.structuredContent.has_test_credential).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("rotate-me-secret");
+    expect(redactSecrets("token=rotate-me-secret", ["rotate-me-secret"])).toBe(
+      "token=[REDACTED]",
+    );
+  });
+
+  test("does not inherit parent credential env without an explicit credential ref", async () => {
+    const previous = process.env.PAPER_RAG_TEST_TOKEN;
+    process.env.PAPER_RAG_TEST_TOKEN = "parent-only-test-token";
+    try {
+      const broker = await startBroker({ credentialRefs: [] });
+
+      const result = await broker.execute(
+        "paper_status",
+        { question: "parent env check" },
+        createBrokerExec({ agentId: "agent-parent", callId: "call-parent" }),
+      );
+
+      expect(result.structuredContent.has_test_credential).toBe(false);
+      expect(result.structuredContent.credential_generation).toBe("absent");
+      expect(JSON.stringify(result)).not.toContain("parent-only-test-token");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.PAPER_RAG_TEST_TOKEN;
+      } else {
+        process.env.PAPER_RAG_TEST_TOKEN = previous;
+      }
+    }
+  });
+
+  test("rotates credentials by restarting a private child generation", async () => {
+    let currentCredential = "initial-test-token";
+    const broker = await startBroker({ credentials: credentials(() => currentCredential) });
+
+    const initial = await broker.execute(
+      "paper_status",
+      { question: "initial credential" },
+      createBrokerExec({ agentId: "agent-rotate", callId: "call-rotate-1" }),
+    );
+    expect(initial.structuredContent.credential_generation).toBe("initial");
+
+    currentCredential = "rotated-test-token";
+    await broker.restart();
+    const rotated = await broker.execute(
+      "paper_status",
+      { question: "rotated credential" },
+      createBrokerExec({ agentId: "agent-rotate", callId: "call-rotate-2" }),
+    );
+
+    expect(rotated.structuredContent.credential_generation).toBe("rotated");
+    expect(JSON.stringify(rotated)).not.toContain("rotated-test-token");
+  });
+
+  test("write tools request one-shot approval with the real exec signal before MCP call", async () => {
+    const approvalCalls = [];
+    const broker = await startBroker({ approval: approval("allowed-once", approvalCalls) });
+    const exec = createBrokerExec({
+      agentId: "agent-write",
+      sessionId: "session-write",
+      callId: "call-write",
+    });
+    establishBoundary(broker, exec);
+
+    const result = await broker.execute("write_probe", { note: "ok" }, exec);
+
+    expect(approvalCalls).toHaveLength(1);
+    expect(approvalCalls[0]).toMatchObject({
+      agent: exec.agent,
+      toolName: "write_probe",
+      callId: "call-write",
+    });
+    expect(approvalCalls[0].signal).toBe(exec.signal);
+    expect(result.structuredContent.approved).toBe(true);
+  });
+
+  test("write tools do not call private MCP when approval is rejected", async () => {
+    const broker = await startBroker({ approval: approval("rejected") });
+    const exec = createBrokerExec({ agentId: "agent-reject", callId: "call-reject" });
+    establishBoundary(broker, exec);
+
+    await expect(
+      broker.execute("write_probe", { note: "deny" }, exec),
+    ).rejects.toThrow("approval rejected");
+
+    const status = await broker.execute(
+      "paper_status",
+      { question: "write count" },
+      createBrokerExec({ agentId: "agent-reject", callId: "call-reject-status" }),
+    );
+    expect(status.structuredContent.write_call_count).toBe(0);
+  });
+
+  test("write tools fail closed when approval is unavailable", async () => {
+    const broker = await startBroker({ approval: approval("unavailable") });
+    const exec = createBrokerExec({ agentId: "agent-deny", callId: "call-deny" });
+    establishBoundary(broker, exec);
+
+    await expect(
+      broker.execute("write_probe", { note: "deny" }, exec),
+    ).rejects.toThrow("approval unavailable");
+  });
+
+  test("write tools fail closed when approval service is missing", async () => {
+    const broker = await startBroker({ approval: undefined });
+    const exec = createBrokerExec({ agentId: "agent-missing", callId: "call-missing" });
+    establishBoundary(broker, exec);
+
+    await expect(
+      broker.execute("write_probe", { note: "missing approval" }, exec),
+    ).rejects.toThrow("approval unavailable");
+
+    const status = await broker.execute(
+      "paper_status",
+      { question: "write count" },
+      createBrokerExec({ agentId: "agent-missing", callId: "call-missing-status" }),
+    );
+    expect(status.structuredContent.write_call_count).toBe(0);
+  });
+
+  test("write tools propagate approval cancellation before private MCP call", async () => {
+    const approvalCalls = [];
+    const broker = await startBroker({ approval: cancellableApproval(approvalCalls) });
+    const controller = new AbortController();
+    const exec = createBrokerExec({
+      agentId: "agent-cancel",
+      callId: "call-cancel",
+      signal: controller.signal,
+    });
+    establishBoundary(broker, exec);
+    const pending = broker.execute("write_probe", { note: "cancel" }, exec);
+
+    controller.abort();
+
+    await expect(pending).rejects.toThrow("cancelled");
+    expect(approvalCalls).toHaveLength(1);
+    const status = await broker.execute(
+      "paper_status",
+      { question: "write count" },
+      createBrokerExec({ agentId: "agent-cancel", callId: "call-cancel-status" }),
+    );
+    expect(status.structuredContent.write_call_count).toBe(0);
+  });
+
+  test("disposed broker generation rejects before approval or private MCP", async () => {
+    const approvalCalls = [];
+    const broker = await startBroker({ approval: approval("allowed-once", approvalCalls) });
+
+    await broker.close();
+
+    await expect(
+      broker.execute(
+        "write_probe",
+        { note: "disposed" },
+        createBrokerExec({ agentId: "agent-disposed", callId: "call-disposed" }),
+      ),
+    ).rejects.toThrow("native broker is not active");
+    expect(approvalCalls).toHaveLength(0);
+  });
+
+  test("mis-scoped broker generation fails closed during activation", async () => {
+    await expect(startBroker({ activePresetId: "root" })).rejects.toThrow(
+      "native broker scope mismatch",
+    );
+  });
+
+  test("applies only inherited global allowlist to agent-created restrict", async () => {
+    const broker = await startBroker();
+    const restrictCalls = [];
+    const agent = {
+      ctx: {
+        tools: {
+          restrict(request) {
+            restrictCalls.push(request);
+          },
+        },
+      },
+    };
+
+    broker.applyAgentCreatedRestriction(agent);
+
+    expect(INHERITED_GLOBAL_ALLOW).toEqual([]);
+    expect(restrictCalls).toEqual([{ allow: [] }]);
+    expect(restrictCalls[0].allow).not.toContain("skill");
+    expect(restrictCalls[0].allow).not.toContain("ask_user_question");
+    expect(restrictCalls[0].allow).not.toContain("paper_status");
+  });
+
+  test("pre-step catalog invariant rejects extra, missing, or changed tool schemas", async () => {
+    const broker = await startBroker();
+    const catalog = broker.finalModelCatalog();
+
+    expect(catalog.map((tool) => tool.name)).toEqual([
+      "skill",
+      "ask_user_question",
+      "paper_status",
+      "write_probe",
+    ]);
+    expect(() => broker.assertPreStepToolCatalog(catalog)).not.toThrow();
+
+    expect(() =>
+      broker.assertPreStepToolCatalog([
+        ...catalog,
+        { name: "web_search", description: "blocked", parameters: {} },
+      ]),
+    ).toThrow("extra=web_search");
+    expect(() =>
+      broker.assertPreStepToolCatalog(catalog.filter((tool) => tool.name !== "skill")),
+    ).toThrow("missing=skill");
+    expect(() =>
+      broker.assertPreStepToolCatalog(
+        catalog.map((tool) =>
+          tool.name === "paper_status"
+            ? {
+                ...tool,
+                parameters: {
+                  type: "object",
+                  properties: {
+                    conversation_id: { type: "string" },
+                  },
+                  additionalProperties: false,
+                },
+              }
+            : tool,
+        ),
+      ),
+    ).toThrow("changed=paper_status");
+
+    expect(toolSchemaHash(catalog.find((tool) => tool.name === "paper_status"))).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
+  });
+});

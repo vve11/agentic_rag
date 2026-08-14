@@ -2,6 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
+import { runBrokerCompatibilityProbe } from "../src/broker-probe.mjs";
 import { pathsFor } from "../src/paths.mjs";
 import { buildG0CompatReport, writeJsonAtomic } from "../src/report.mjs";
 import { runDoctor } from "./doctor.mjs";
@@ -25,12 +26,14 @@ function git(paths, args) {
 try {
   const paths = pathsFor();
   const doctor = await runDoctor(paths);
+  const brokerProbe = await runBrokerCompatibilityProbe(paths);
   const report = buildG0CompatReport({
     commit: git(paths, ["rev-parse", "HEAD"]),
     dirty: git(paths, ["status", "--porcelain"]).length > 0,
     paths,
     configAudit: doctor.audit,
     presetDiscovery: doctor.preset,
+    brokerProbe,
   });
   const reportPath = argValue("--report");
   if (reportPath !== undefined) {

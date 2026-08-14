@@ -27,6 +27,7 @@ export function buildG0CompatReport({
   paths,
   configAudit,
   presetDiscovery,
+  brokerProbe = undefined,
   startedAt = new Date().toISOString(),
 }) {
   const deterministicEvidence = {
@@ -45,12 +46,30 @@ export function buildG0CompatReport({
       presetDiscovery?.id === "paper-research" && presetDiscovery?.broken === undefined
         ? pass("DSH discoverPresets found paper-research in versioned DSH_HOME")
         : blocked(presetDiscovery?.broken ?? "paper-research preset was not discovered"),
-    "DSH-G0-004": blocked("Native Broker + private stdio MCP fixture not implemented yet"),
-    "DSH-G0-005": blocked("write-tool approval proof not implemented yet"),
+    "DSH-G0-004": brokerProbe?.mcp_boundary
+      ? pass(brokerProbe.mcp_boundary)
+      : blocked("Native Broker + private stdio MCP fixture not implemented yet"),
+    "DSH-G0-005": blocked(
+      brokerProbe?.approval_bridge
+        ? "Broker approval executor proof passes; DSH Session approval-decision recording runner is still pending"
+        : "write-tool approval proof not implemented yet",
+    ),
     "DSH-G0-006": blocked("same-version DSH session resume proof not implemented yet"),
-    "DSH-G0-007": blocked("MCP crash/reconnect proof not implemented yet"),
-    "DSH-G0-008": blocked("cancel/timeout/credential bridge proof not implemented yet"),
-    "DSH-G0-009": blocked("standing Broker generation proof not implemented yet"),
+    "DSH-G0-007": blocked(
+      brokerProbe?.lifecycle?.restart_restores_private_mcp
+        ? "MCP crash/reconnect proof passes; same-version Session resume and cancellation runner are still pending"
+        : "MCP crash/reconnect proof not implemented yet",
+    ),
+    "DSH-G0-008": blocked(
+      brokerProbe?.credential_bridge
+        ? "credential bridge proof passes; DSH timeout/cancel/session convergence runner is still pending"
+        : "cancel/timeout/credential bridge proof not implemented yet",
+    ),
+    "DSH-G0-009": blocked(
+      brokerProbe?.lifecycle?.standing_generation_child_shared_by_agents
+        ? "standing Broker generation proof passes for shared child and isolated agent state; full Host lifecycle runner is still pending"
+        : "standing Broker generation proof not implemented yet",
+    ),
   };
 
   return {
@@ -67,6 +86,7 @@ export function buildG0CompatReport({
       node: process.version,
     },
     config_audit: configAudit,
+    broker_probe: brokerProbe,
     paths: deterministicEvidence,
     cases: Object.fromEntries(G0_CASES.map((caseId) => [caseId, cases[caseId]])),
     go_no_go: "no-go",

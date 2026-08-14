@@ -235,6 +235,35 @@ def validate_report(
     }
 
 
+def merge_component_reports(
+    repo_root: Path, gate: str, cases: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    component_dir = repo_root / "data" / "index" / "migration-gates" / "components" / gate
+    if not component_dir.exists():
+        return []
+
+    components: list[dict[str, Any]] = []
+    for path in sorted(component_dir.glob("*.json")):
+        report = _read_json(path)
+        if report.get("gate") != gate:
+            raise GateError(
+                f"component report gate mismatch for {_relpath(path, repo_root)}: "
+                f"expected {gate}, got {report.get('gate')}"
+            )
+        component = report.get("component") or path.stem
+        components.append(
+            {
+                "component": component,
+                "report": _relpath(path, repo_root),
+                "go_no_go": report.get("go_no_go"),
+            }
+        )
+        for case_id, case in report.get("cases", {}).items():
+            if case_id in cases:
+                cases[case_id] = case
+    return components
+
+
 def run_gate(repo_root: Path, manifest_path: Path, gate: str, report_path: Path) -> dict[str, Any]:
     if git_dirty(repo_root):
         raise GateError("run-gate requires clean checkout")
@@ -257,6 +286,9 @@ def run_gate(repo_root: Path, manifest_path: Path, gate: str, report_path: Path)
         }
         for case_id in required
     }
+    components = merge_component_reports(repo_root, gate, cases)
+    required_pass = all(cases[case_id].get("status") == "PASS" for case_id in required)
+    commands_pass = all(command.get("exit_code") == 0 for command in commands)
     result = {
         "schema_version": 1,
         "gate": gate,
@@ -264,8 +296,9 @@ def run_gate(repo_root: Path, manifest_path: Path, gate: str, report_path: Path)
         "dirty": git_dirty(repo_root),
         "created_at": time.time(),
         "commands": commands,
+        "components": components,
         "cases": cases,
-        "go_no_go": "no-go",
+        "go_no_go": "go" if required_pass and commands_pass else "no-go",
     }
     _write_json_atomic(report_path, result)
     return result

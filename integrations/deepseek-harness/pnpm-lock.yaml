@@ -23,6 +23,9 @@ importers:
       '@deepseek-ai/dsh-compaction-basic':
         specifier: 0.1.0-rc.6
         version: 0.1.0-rc.6(10c6649d8370ac2ec419418ccae10fa4)
+      '@deepseek-ai/dsh-credentials':
+        specifier: 0.1.0-rc.6
+        version: 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
       '@deepseek-ai/dsh-mcp-client':
         specifier: 0.1.0-rc.6
         version: 0.1.0-rc.6(d9ec2605a01b4fe7b4e01a4a94e11c5c)
@@ -35,6 +38,15 @@ importers:
       '@deepseek-ai/dsh-tool-skill':
         specifier: 0.1.0-rc.6
         version: 0.1.0-rc.6(30a4350f01e549bfff3ff21713aca8ff)
+      '@deepseek-ai/dsh-tools':
+        specifier: 0.1.0-rc.6
+        version: 0.1.0-rc.6(f8724372086ccc1457fc84e7becee2e0)
+      '@modelcontextprotocol/sdk':
+        specifier: 1.30.0
+        version: 1.30.0(zod@4.4.3)
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: 24.0.0
