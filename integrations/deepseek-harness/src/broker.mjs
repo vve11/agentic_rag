@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { delimiter, join } from "node:path";
 
 import { credentialRef } from "@deepseek-ai/dsh-credentials";
 import { defineTool } from "@deepseek-ai/dsh-tools";
@@ -17,6 +18,16 @@ const READONLY_TOOL_NAMES = Object.freeze([
   "paper_section",
   "paper_compare",
   "wiki_lookup",
+]);
+const MCP_CHILD_ENV_ALLOWLIST = Object.freeze([
+  "CHAT_MODEL",
+  "HOME",
+  "OPENAI_BASE_URL",
+  "PATH",
+  "REQUESTS_CA_BUNDLE",
+  "SMALL_MODEL",
+  "SSL_CERT_FILE",
+  "TMPDIR",
 ]);
 
 export const INHERITED_GLOBAL_ALLOW = Object.freeze([]);
@@ -125,6 +136,90 @@ export function redactSecrets(value, secrets = []) {
     text = replaceAllLiteral(text, secret, "[REDACTED]");
   }
   return text;
+}
+
+export function environmentCredentialProvider(sourceEnv = process.env) {
+  return {
+    async describe(ref) {
+      return {
+        configured: typeof sourceEnv[ref] === "string" && sourceEnv[ref].length > 0,
+        writable: false,
+        source: "environment",
+      };
+    },
+    async resolve(ref) {
+      const value = sourceEnv[ref];
+      return typeof value === "string" && value.length > 0
+        ? { value, source: "environment" }
+        : undefined;
+    },
+  };
+}
+
+/**
+ * @param {{
+ *   repoRoot?: string,
+ *   artifactRoot?: string,
+ *   importRoot?: string,
+ *   toolset?: string,
+ *   actorId?: string,
+ *   sourceEnv?: Record<string, string | undefined>,
+ * }} options
+ * @returns {Record<string, string>}
+ */
+export function buildPaperRagMcpChildEnv({
+  repoRoot,
+  artifactRoot,
+  importRoot,
+  toolset = "readonly",
+  actorId = "system",
+  sourceEnv = process.env,
+} = {}) {
+  if (typeof repoRoot !== "string" || repoRoot.length === 0) {
+    throw new Error("repoRoot is required for Paper RAG MCP child env");
+  }
+
+  /** @type {Record<string, string>} */
+  const env = {
+    PAPER_RAG_ACTOR_ID: actorId,
+    PAPER_RAG_MCP_TOOLSET: toolset,
+  };
+  const srcPath = join(repoRoot, "src");
+  env.PYTHONPATH =
+    typeof sourceEnv.PYTHONPATH === "string" && sourceEnv.PYTHONPATH.length > 0
+      ? `${srcPath}${delimiter}${sourceEnv.PYTHONPATH}`
+      : srcPath;
+  if (typeof artifactRoot === "string" && artifactRoot.length > 0) {
+    env.PAPER_RAG_ARTIFACT_ROOT = artifactRoot;
+  }
+  if (typeof importRoot === "string" && importRoot.length > 0) {
+    env.PAPER_RAG_IMPORT_ROOT = importRoot;
+  }
+
+  for (const key of MCP_CHILD_ENV_ALLOWLIST) {
+    const value = sourceEnv[key];
+    if (typeof value === "string" && value.length > 0) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
+export function registerPaperRagNativeTools(ctx, broker) {
+  if (typeof ctx?.tools?.register !== "function") {
+    throw new Error("DSH tools registry unavailable for Paper RAG native broker");
+  }
+  const disposers = broker.toolDefinitions().map((tool) => ctx.tools.register(tool));
+  let disposed = false;
+  return () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    for (const dispose of disposers.slice().reverse()) {
+      dispose();
+    }
+  };
 }
 
 /**
@@ -396,6 +491,10 @@ export class PaperRagNativeBroker {
       description: tool.description,
       parameters: tool.parameters,
     }));
+  }
+
+  toolDefinitions() {
+    return Array.from(this.#toolDefinitions.values());
   }
 
   finalModelCatalog() {

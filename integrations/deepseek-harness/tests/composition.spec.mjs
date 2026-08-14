@@ -54,6 +54,9 @@ describe("repo-local DeepSeek Harness runtime", () => {
     await expect(
       readFile(join(result.destDir, "agent.cordis.yml"), "utf8"),
     ).resolves.toContain("@deepseek-ai/dsh-tool-ask-user");
+    await expect(
+      readFile(join(result.destDir, "agent.cordis.yml"), "utf8"),
+    ).resolves.toContain("paper-rag-native-broker-plugin.mjs");
 
     const discovered = await discoverPaperResearchPreset(paths);
     expect(discovered).toMatchObject({

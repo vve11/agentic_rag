@@ -2,15 +2,17 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   INHERITED_GLOBAL_ALLOW,
   PaperRagBrokerGenerationHost,
   PaperRagNativeBroker,
+  buildPaperRagMcpChildEnv,
   createBrokerExec,
   deriveRequestBoundaryId,
   redactSecrets,
+  registerPaperRagNativeTools,
   toolSchemaHash,
 } from "../src/broker.mjs";
 import { pathsFor } from "../src/paths.mjs";
@@ -144,6 +146,60 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
     );
     expect(broker.modelCatalog().some((tool) => tool.name.startsWith("mcp__"))).toBe(false);
     expect(broker.modelCatalog().some((tool) => tool.name === "write_probe")).toBe(false);
+  });
+
+  test("registers broker-owned native tools through the DSH tool registry", () => {
+    const broker = createTestBroker();
+    const registered = [];
+    const disposers = [];
+    const ctx = {
+      tools: {
+        register(definition) {
+          const dispose = vi.fn();
+          registered.push(definition);
+          disposers.push(dispose);
+          return dispose;
+        },
+      },
+    };
+
+    const dispose = registerPaperRagNativeTools(ctx, broker);
+
+    expect(registered.map((tool) => tool.name).sort()).toEqual(READONLY_MODEL_TOOL_NAMES);
+    expect(registered.some((tool) => tool.name.startsWith("mcp__"))).toBe(false);
+    expect(registered.every((tool) => typeof tool.execute === "function")).toBe(true);
+
+    dispose();
+    expect(disposers.map((fn) => fn.mock.calls.length)).toEqual(
+      Array.from({ length: READONLY_MODEL_TOOL_NAMES.length }, () => 1),
+    );
+  });
+
+  test("builds an explicit MCP child env without inheriting API keys", () => {
+    const env = buildPaperRagMcpChildEnv({
+      repoRoot: "/repo",
+      artifactRoot: "/repo/data/artifacts",
+      importRoot: "/repo/data/imports",
+      sourceEnv: {
+        OPENAI_API_KEY: "sk-secret",
+        RANDOM_SERVICE_TOKEN: "secret-token",
+        OPENAI_BASE_URL: "https://api.deepseek.com",
+        CHAT_MODEL: "deepseek-v4-flash",
+        SMALL_MODEL: "deepseek-v4-flash",
+        PATH: "/usr/bin",
+        HOME: "/tmp/home",
+      },
+    });
+
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.RANDOM_SERVICE_TOKEN).toBeUndefined();
+    expect(env.OPENAI_BASE_URL).toBe("https://api.deepseek.com");
+    expect(env.CHAT_MODEL).toBe("deepseek-v4-flash");
+    expect(env.SMALL_MODEL).toBe("deepseek-v4-flash");
+    expect(env.PYTHONPATH).toBe("/repo/src");
+    expect(env.PAPER_RAG_MCP_TOOLSET).toBe("readonly");
+    expect(env.PAPER_RAG_ARTIFACT_ROOT).toBe("/repo/data/artifacts");
+    expect(env.PAPER_RAG_IMPORT_ROOT).toBe("/repo/data/imports");
   });
 
   test("renders bounded model text from the canonical private MCP result", async () => {
