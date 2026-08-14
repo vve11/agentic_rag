@@ -1,8 +1,9 @@
 # Embedded DeerFlow Integration
 
-This repository now carries a modified DeerFlow checkout at
-`integrations/deer-flow`. It is the runnable host application for the
-`paper_rag` gateway and UI integration.
+This repository still carries a modified DeerFlow checkout at
+`integrations/deer-flow`. As of the DeepSeek Harness migration G4 work, this is
+a legacy fallback for rollback and comparison before G5; the default local UI is
+the DeepSeek Harness `paper-research` preset.
 
 ## Layout
 
@@ -28,7 +29,7 @@ For DeepSeek/OpenAI-compatible QA, keep real keys only in `.env`:
 ```bash
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=sk-...
-CHAT_MODEL=deepseek-chat
+CHAT_MODEL=deepseek-v4-flash
 PAPER_RAG_CONFIG=config/local.yaml
 ```
 

@@ -7,15 +7,15 @@
 [![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Paper RAG Agent 是一个面向学术论文的本地 RAG / Agentic RAG 项目。它可以把 arXiv、PDF URL 或本地 PDF 入库，解析论文，切分 chunk，建立 SQLite + Qdrant 混合索引，然后用带引用约束的 Agentic QA 回答论文问题。项目同时包含一个可运行的 DeerFlow 工作区 UI，让用户在浏览器里完成论文发现、入库、问答、证据追踪、知识构建、反馈和订阅。
+Paper RAG Agent 是一个面向学术论文的本地 RAG / Agentic RAG 项目。它可以把 arXiv、PDF URL 或本地 PDF 入库，解析论文，切分 chunk，建立 SQLite + Qdrant 混合索引，然后用带引用约束的 Agentic QA 回答论文问题。默认交互入口是 DeepSeek Harness 的 `paper-research` 预设；仓库仍保留 DeerFlow 工作区作为 legacy fallback，方便 G5 前回滚和对照验证。
 
 这个仓库现在有三种使用方式：
 
 | 模式 | 适合谁 | 入口 |
 |---|---|---|
+| DeepSeek Harness 本地应用 | 想直接打开默认论文研究 UI | `make dsh-start`、`integrations/deepseek-harness/` |
 | Standalone Python 包 | 想在命令行或自己的服务里调用论文 RAG | `src/paper_rag/`、`scripts/` |
-| DeerFlow 本地应用 | 想直接打开网页体验完整产品 | `integrations/deer-flow/` |
-| DeerFlow Agent 扩展 | 想让 DeerFlow lead agent 自动调用论文工具 | `deerflow.community.paper_rag`、`paper-research` subagent |
+| DeerFlow legacy fallback | G5 前需要回滚或对照旧宿主 | `integrations/deer-flow/`、`make deerflow-*` |
 
 本地体验是当前重点。生产部署、云上权限、备份恢复、成本核算和多租户隔离已有部分工程基础，但默认 README 以本地可跑通为主。
 
@@ -30,31 +30,32 @@ Paper RAG Agent 是一个面向学术论文的本地 RAG / Agentic RAG 项目。
 | Trace 与可审计性 | QA 返回 intent、rewrite、retrieval rounds、selected evidence、abstain 决策和 citations，方便定位从检索到答案的问题 |
 | 引用约束 | 回答必须基于检索 chunk，使用 `[chunk:<id>]` 形式，避免伪造 `[1]`、作者年份引用 |
 | Paper Discovery | 按研究主题发现候选论文，返回候选分数、选中/跳过原因；候选必须入库后才能成为最终证据 |
-| Knowledge Builder | 在 UI 中查看 fetch、parse、chunk、embed、index、wiki 等构建状态 |
+| DeepSeek Harness UI | 默认 `paper-research` 预设提供 QA、Discovery、Knowledge Builder、Wiki、Feedback、Inbox、Subscriptions |
 | Research Memory | 多轮研究对话压缩记忆，只作为上下文，不作为最终证据 |
 | Wiki 自演化 | 对已入库论文生成概念笔记、相关概念和开放问题，默认关闭，可配置开启 |
 | 交付物生成 | 支持 Markdown survey、PPTX、DOCX、LaTeX/BibTeX、PDF |
 | Feedback 闭环 | 记录 thumbs/copy 等反馈，沉淀 hard cases，支撑后续评测和阈值校准 |
 | Proactive Agent | 订阅、inbox、digest、stale paper 提醒、auto-ingest hook |
-| DeerFlow UI | `/workspace/paper-rag` 页面提供 QA、Discovery、Knowledge Builder、Wiki、Feedback、Inbox、Subscriptions |
-| DeerFlow Agent Tools | `paper_ingest`、`paper_qa`、`paper_search`、`paper_section`、`paper_compare`、`paper_discover`、`wiki_lookup`、`export_bibtex`、`paper_deliver` |
-| RAG / Agent 评测 | retrieval golden、QA no-judge、citation audit、claim eval、ablation、LLM recall、DeerFlow Harness/Gateway 回归，覆盖从召回到 Agent 工具答复 |
-| 安全与用户边界 | DeerFlow gateway 对 Paper RAG 路由有认证要求和 user_id 透传测试；本地 demo 可关闭 auth，生产必须开启 |
-| 观测与运维 | Gateway metrics、Prometheus、Grafana dashboard、secret scan、smoke test |
+| MCP 工具 | `paper_ingest`、`paper_qa`、`paper_search`、`paper_section`、`paper_compare`、`paper_discover`、`wiki_lookup`、`export_bibtex`、`paper_deliver` |
+| DeerFlow fallback | `/workspace/paper-rag` 和旧 Harness tools 保留到 G5，用于回滚和对照验证 |
+| RAG / Agent 评测 | retrieval golden、QA no-judge、citation audit、claim eval、ablation、LLM recall、MCP/DSH/legacy 回归，覆盖从召回到 Agent 工具答复 |
+| 安全与用户边界 | DSH Native Broker + 私有 MCP 维持本地用户边界；DeerFlow fallback 的 auth/user_id 测试继续保留到 G5 |
+| 观测与运维 | DSH smoke、Gateway metrics、Prometheus、Grafana dashboard、secret scan |
 
 ## 架构
 
 ```mermaid
 flowchart TB
-    U["User"] --> FE["DeerFlow Next.js UI<br/>/workspace/paper-rag"]
+    U["User"] --> FE["DeepSeek Harness Web<br/>paper-research preset"]
     U --> CLI["CLI scripts<br/>scripts/*.py"]
-    U --> AGENT["DeerFlow lead agent<br/>paper-research subagent"]
+    U --> LEGACY["DeerFlow legacy fallback<br/>/workspace/paper-rag"]
 
-    FE --> GW["DeerFlow Gateway<br/>FastAPI"]
-    AGENT --> HARNESS["DeerFlow Harness tools<br/>paper_ingest / paper_qa / paper_deliver"]
+    FE --> BROKER["DSH Native Broker<br/>private MCP child"]
+    BROKER --> MCP["Paper RAG MCP tools<br/>paper_ingest / paper_qa / paper_deliver"]
     CLI --> PKG["paper_rag Python package"]
-    GW --> ROUTER["/api/paper_rag/* router"]
-    HARNESS --> PKG
+    LEGACY --> GW["DeerFlow Gateway<br/>FastAPI"]
+    GW --> ROUTER["legacy /api/paper_rag/* router"]
+    MCP --> PKG
     ROUTER --> PKG
 
     PKG --> INGEST["ingest / parse / chunk"]
@@ -80,9 +81,9 @@ Discovery 只负责找候选论文。候选论文的摘要、标题、外部 met
 
 | 组件 | 推荐版本 | 说明 |
 |---|---|---|
-| Python | 3.12 用于 DeerFlow；standalone 包支持 3.10+ | DeerFlow backend 当前建议 3.12 |
-| Node.js | 20+ | DeerFlow frontend 使用 pnpm / Corepack |
-| uv | 最新稳定版 | 用于安装 DeerFlow backend 依赖 |
+| Python | 3.10+；DeerFlow fallback 建议 3.12 | 核心包和 migration-owned gate 不依赖 DeerFlow venv |
+| Node.js | 20+ | DeepSeek Harness 使用 pnpm / Corepack |
+| uv | 最新稳定版 | 仅在启动 DeerFlow fallback backend 时需要 |
 | Docker | 可选 | 仅在使用 Qdrant server、proactive sidecar、观测栈时需要 |
 | LLM Key | OpenAI-compatible | DeepSeek、OpenAI、DashScope/Qwen 等兼容接口都可 |
 
@@ -96,7 +97,7 @@ qdrant:
 
 因此最小本地 demo 不强制启动 Docker Qdrant。
 
-## 快速开始：完整 DeerFlow UI
+## 快速开始：DeepSeek Harness UI
 
 ### 1. 克隆项目
 
@@ -105,30 +106,22 @@ git clone https://github.com/Ttttt-s/paper-rag-agent.git
 cd paper-rag-agent
 ```
 
-### 2. 准备 DeerFlow backend Python 环境
+### 2. 准备 Paper RAG Python 环境
 
 ```bash
-python3 -m pip install -U uv
-uv python install 3.12
-
-cd integrations/deer-flow/backend
-uv sync --python 3.12
-cd ../../..
-
-export PY="$PWD/integrations/deer-flow/backend/.venv/bin/python"
+python3 -m venv .venv
+source .venv/bin/activate
+export PY="$PWD/.venv/bin/python"
 $PY -m pip install -U pip
-$PY -m pip install -e ".[dev,embed,ingest,deliver,deliver-pdf,proactive,deerflow]"
+$PY -m pip install -e ".[dev,embed,ingest,deliver,deliver-pdf,proactive]"
 ```
 
 如果只想跑轻量测试，可以不装 `embed`；如果要真实入库和 QA，建议按上面的 extras 安装。
 
-### 3. 安装前端依赖
+### 3. 安装 DeepSeek Harness 依赖
 
 ```bash
-cd integrations/deer-flow/frontend
-corepack enable
-corepack pnpm install
-cd ../../..
+make dsh-install
 ```
 
 ### 4. 配置 LLM
@@ -178,22 +171,15 @@ $PY scripts/ingest_one.py --pdf /absolute/path/to/paper.pdf --title "My Paper"
 
 ### 6. 启动后端和前端
 
-终端 1：
-
 ```bash
-make deerflow-backend
-```
-
-终端 2：
-
-```bash
-make deerflow-frontend
+make dsh-doctor
+make dsh-start
 ```
 
 打开：
 
 ```text
-http://127.0.0.1:3000/workspace/paper-rag
+http://127.0.0.1:3080
 ```
 
 可以尝试：
@@ -206,6 +192,17 @@ http://127.0.0.1:3000/workspace/paper-rag
 - Feedback：对回答点 helpful / not helpful
 - Subscriptions：新增、暂停、恢复、删除主题订阅
 - Deliver：生成 Markdown survey、PPT、Word、LaTeX/BibTeX 或 PDF
+
+## DeerFlow legacy fallback
+
+G5 删除前，DeerFlow 仍保留为 legacy fallback。需要回滚或对照旧宿主时，可启动：
+
+```bash
+make deerflow-backend
+make deerflow-frontend
+```
+
+然后打开 `http://127.0.0.1:3000/workspace/paper-rag`。DeerFlow 路径不再是默认入口，新功能优先接入 DeepSeek Harness + MCP。
 
 ## 命令行用法
 

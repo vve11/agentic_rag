@@ -6,30 +6,32 @@
 
 ## 1. TL;DR（30 秒版）
 
-paper_rag 是一个 **Agentic RAG 学术论文研读系统**，集成在 DeerFlow 框架上，
-支持自然语言问答、跨文献综述生成、知识演化、订阅推送、自动入库 5 大产品能
-力，覆盖 0 → 1 完整数据闭环。
+paper_rag 是一个 **Agentic RAG 学术论文研读系统**。默认交互入口正在切换到
+DeepSeek Harness 的 `paper-research` 预设，通过私有 MCP 调用稳定的
+`paper_rag` 核心能力；DeerFlow 在 G5 前只保留为 legacy fallback。系统支持
+自然语言问答、跨文献综述生成、知识演化、订阅推送、自动入库 5 大产品能力，
+覆盖 0 → 1 完整数据闭环。
 
 技术栈：bge-m3 embedding + Qdrant 向量库 + SQLite + FTS5 混合检索 + BGE-
-reranker-v2-m3 + Qwen-plus 通过 OpenAI 兼容协议。后端 Python 3.10+，前端
-Next.js，部署 docker-compose。**149 个测试全绿、21 份 ADR、19 个 HTTP 端
-点、4 类交付物**。
+reranker-v2-m3 + DeepSeek/OpenAI 兼容协议。后端 Python 3.10+，DeepSeek
+Harness 本地 UI 使用 Node 20 + pnpm；DeerFlow Gateway/Next.js 路径保留为旧
+宿主对照。**迁移 gate 覆盖 retrieval、QA/citation、claim、MCP、DSH smoke 和
+旧能力矩阵**。
 
 ## 2. 架构图（高层）
 
 ```
-                 ┌─────────────────┐
-                 │  Frontend (NX)  │
-                 │  inbox / qa UI  │
-                 └────────┬────────┘
-                          │ HTTPS
-                  ┌───────▼────────┐
-                  │  DeerFlow Gateway (FastAPI) │
-                  │  + BetterAuth middleware    │  ← user_id 强隔离
-                  │  + paper_rag router (20 ep) │
-                  │  + /metrics (Prometheus)    │
-                  └───────┬─────────────────────┘
-                          │  PYTHONPATH=/opt/paper_rag/src
+                 ┌────────────────────────┐
+                 │ DeepSeek Harness Web   │
+                 │ paper-research preset  │
+                 └──────────┬─────────────┘
+                            │ private stdio MCP
+                  ┌─────────▼────────────┐
+                  │ Native Broker         │
+                  │ + paper_rag MCP tools │
+                  │ + approvals/sessions  │
+                  └─────────┬────────────┘
+                            │ PYTHONPATH=/opt/paper_rag/src
                   ┌───────▼────────────────────────┐
                   │  paper_rag package             │
                   │   ┌─────────┐  ┌───────────┐   │
@@ -59,6 +61,9 @@ Next.js，部署 docker-compose。**149 个测试全绿、21 份 ADR、19 个 HT
        │ Webhooks       │ DingTalk / Feishu / WeCom / Email
        │ (P3-13)        │ (best-effort, never block inbox.write)
        └────────────────┘
+
+DeerFlow Gateway + `/workspace/paper-rag` 仍可作为 legacy fallback 启动，但不再是
+默认入口。
 ```
 
 ## 3. 关键决策（10 个 ADR 速览）
@@ -140,4 +145,3 @@ Next.js，部署 docker-compose。**149 个测试全绿、21 份 ADR、19 个 HT
    - M9 proactive：cron + matcher + webhook fan-out
    - 双 SQLite 边界（ADR-0019）
 4. **5 min 后续 roadmap**：本文 §7
-

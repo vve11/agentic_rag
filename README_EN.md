@@ -7,15 +7,15 @@
 [![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Paper RAG Agent is a local RAG / Agentic RAG system for academic papers. It can ingest arXiv papers, PDF URLs, or local PDFs; parse and chunk them; build a SQLite + Qdrant hybrid index; and answer paper questions through an evidence-constrained Agentic QA loop. The repository also embeds a runnable DeerFlow workspace UI for paper discovery, ingestion, QA, trace inspection, knowledge building, feedback, subscriptions, and deliverable generation.
+Paper RAG Agent is a local RAG / Agentic RAG system for academic papers. It can ingest arXiv papers, PDF URLs, or local PDFs; parse and chunk them; build a SQLite + Qdrant hybrid index; and answer paper questions through an evidence-constrained Agentic QA loop. The default interactive entry point is now the DeepSeek Harness `paper-research` preset; the repository still keeps the DeerFlow workspace as a legacy fallback for rollback and comparison before G5.
 
 The repository can be used in three modes:
 
 | Mode | Best for | Entry point |
 |---|---|---|
+| DeepSeek Harness local app | Running the default paper research UI locally | `make dsh-start`, `integrations/deepseek-harness/` |
 | Standalone Python package | Calling paper RAG from CLI scripts or your own service | `src/paper_rag/`, `scripts/` |
-| DeerFlow local app | Running the full browser product locally | `integrations/deer-flow/` |
-| DeerFlow Agent extension | Letting the DeerFlow lead agent call paper tools automatically | `deerflow.community.paper_rag`, `paper-research` subagent |
+| DeerFlow legacy fallback | Rollback or compare the old host before G5 | `integrations/deer-flow/`, `make deerflow-*` |
 
 Local usage is the main path documented here. Production deployment, cloud permissions, backup and restore, cost controls, and multi-tenant isolation have partial engineering support, but this README focuses on getting the project running locally.
 
@@ -30,31 +30,32 @@ Local usage is the main path documented here. Production deployment, cloud permi
 | Trace and auditability | QA returns intent, rewrites, retrieval rounds, selected evidence, abstain decisions, and citations for debugging the path from retrieval to final answer |
 | Citation constraints | Answers must cite retrieved chunks with `[chunk:<id>]`; fabricated `[1]` or author-year citations are rejected |
 | Paper Discovery | Finds candidate papers for a topic and explains candidate scores and selected/skipped reasons |
-| Knowledge Builder | Shows fetch, parse, chunk, embed, index, and wiki build state in the UI |
+| DeepSeek Harness UI | Default `paper-research` preset for QA, Discovery, Knowledge Builder, Wiki, Feedback, Inbox, and Subscriptions |
 | Research Memory | Compresses multi-turn research context; memory is context only, not final evidence |
 | Self-evolving Wiki | Generates concept notes, related concepts, and open questions for indexed papers; disabled by default |
 | Deliverables | Markdown survey, PPTX, DOCX, LaTeX/BibTeX, and PDF outputs |
 | Feedback loop | Captures thumbs/copy events and hard cases for later evaluation and threshold tuning |
 | Proactive Agent | Subscriptions, inbox, digest, stale paper reminders, and auto-ingest hook |
-| DeerFlow UI | `/workspace/paper-rag` page for QA, Discovery, Knowledge Builder, Wiki, Feedback, Inbox, and Subscriptions |
-| DeerFlow Agent tools | `paper_ingest`, `paper_qa`, `paper_search`, `paper_section`, `paper_compare`, `paper_discover`, `wiki_lookup`, `export_bibtex`, `paper_deliver` |
-| RAG / Agent evaluation | Retrieval golden set, QA no-judge eval, citation audit, claim eval, ablation, LLM recall comparison, and DeerFlow Harness/Gateway regressions from recall to Agent tool answers |
-| Security and user boundary | DeerFlow gateway routes require auth and have user_id propagation tests; local demo may disable auth, production must enable it |
-| Observability | Gateway metrics, Prometheus, Grafana dashboard, secret scan, smoke test |
+| MCP tools | `paper_ingest`, `paper_qa`, `paper_search`, `paper_section`, `paper_compare`, `paper_discover`, `wiki_lookup`, `export_bibtex`, `paper_deliver` |
+| DeerFlow fallback | `/workspace/paper-rag` and old Harness tools remain until G5 for rollback and comparison |
+| RAG / Agent evaluation | Retrieval golden set, QA no-judge eval, citation audit, claim eval, ablation, LLM recall comparison, and MCP/DSH/legacy regressions from recall to Agent tool answers |
+| Security and user boundary | DSH Native Broker + private MCP preserve the local user boundary; DeerFlow fallback auth/user_id tests remain until G5 |
+| Observability | DSH smoke, Gateway metrics, Prometheus, Grafana dashboard, secret scan |
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    U["User"] --> FE["DeerFlow Next.js UI<br/>/workspace/paper-rag"]
+    U["User"] --> FE["DeepSeek Harness Web<br/>paper-research preset"]
     U --> CLI["CLI scripts<br/>scripts/*.py"]
-    U --> AGENT["DeerFlow lead agent<br/>paper-research subagent"]
+    U --> LEGACY["DeerFlow legacy fallback<br/>/workspace/paper-rag"]
 
-    FE --> GW["DeerFlow Gateway<br/>FastAPI"]
-    AGENT --> HARNESS["DeerFlow Harness tools<br/>paper_ingest / paper_qa / paper_deliver"]
+    FE --> BROKER["DSH Native Broker<br/>private MCP child"]
+    BROKER --> MCP["Paper RAG MCP tools<br/>paper_ingest / paper_qa / paper_deliver"]
     CLI --> PKG["paper_rag Python package"]
-    GW --> ROUTER["/api/paper_rag/* router"]
-    HARNESS --> PKG
+    LEGACY --> GW["DeerFlow Gateway<br/>FastAPI"]
+    GW --> ROUTER["legacy /api/paper_rag/* router"]
+    MCP --> PKG
     ROUTER --> PKG
 
     PKG --> INGEST["ingest / parse / chunk"]
@@ -80,9 +81,9 @@ Discovery only finds candidate papers. Candidate titles, abstracts, and external
 
 | Component | Recommended version | Notes |
 |---|---|---|
-| Python | 3.12 for DeerFlow; standalone package supports 3.10+ | DeerFlow backend currently recommends 3.12 |
-| Node.js | 20+ | DeerFlow frontend uses pnpm / Corepack |
-| uv | Latest stable | Used for DeerFlow backend dependencies |
+| Python | 3.10+; DeerFlow fallback recommends 3.12 | Core package and migration-owned gates do not depend on the DeerFlow venv |
+| Node.js | 20+ | DeepSeek Harness uses pnpm / Corepack |
+| uv | Latest stable | Needed only when starting the DeerFlow fallback backend |
 | Docker | Optional | Needed only for Qdrant server, proactive sidecar, or observability stack |
 | LLM key | OpenAI-compatible | DeepSeek, OpenAI, DashScope/Qwen, and similar compatible endpoints |
 
@@ -96,7 +97,7 @@ qdrant:
 
 So the minimal local demo does not require a separate Docker Qdrant service.
 
-## Quick Start: Full DeerFlow UI
+## Quick Start: DeepSeek Harness UI
 
 ### 1. Clone
 
@@ -105,30 +106,22 @@ git clone https://github.com/Ttttt-s/paper-rag-agent.git
 cd paper-rag-agent
 ```
 
-### 2. Prepare the DeerFlow backend Python environment
+### 2. Prepare the Paper RAG Python environment
 
 ```bash
-python3 -m pip install -U uv
-uv python install 3.12
-
-cd integrations/deer-flow/backend
-uv sync --python 3.12
-cd ../../..
-
-export PY="$PWD/integrations/deer-flow/backend/.venv/bin/python"
+python3 -m venv .venv
+source .venv/bin/activate
+export PY="$PWD/.venv/bin/python"
 $PY -m pip install -U pip
-$PY -m pip install -e ".[dev,embed,ingest,deliver,deliver-pdf,proactive,deerflow]"
+$PY -m pip install -e ".[dev,embed,ingest,deliver,deliver-pdf,proactive]"
 ```
 
 If you only need lightweight tests, you may omit `embed`. For real ingestion and QA, install the extras above.
 
-### 3. Install frontend dependencies
+### 3. Install DeepSeek Harness dependencies
 
 ```bash
-cd integrations/deer-flow/frontend
-corepack enable
-corepack pnpm install
-cd ../../..
+make dsh-install
 ```
 
 ### 4. Configure the LLM provider
@@ -142,8 +135,8 @@ Edit `.env` with your OpenAI-compatible provider:
 ```bash
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=sk-your-key-here
-CHAT_MODEL=deepseek-chat
-SMALL_MODEL=deepseek-chat
+CHAT_MODEL=deepseek-v4-flash
+SMALL_MODEL=deepseek-v4-flash
 PAPER_RAG_CONFIG=config/local.yaml
 ```
 
@@ -176,24 +169,17 @@ You can also ingest a local PDF:
 $PY scripts/ingest_one.py --pdf /absolute/path/to/paper.pdf --title "My Paper"
 ```
 
-### 6. Start backend and frontend
-
-Terminal 1:
+### 6. Start the DeepSeek Harness UI
 
 ```bash
-make deerflow-backend
-```
-
-Terminal 2:
-
-```bash
-make deerflow-frontend
+make dsh-doctor
+make dsh-start
 ```
 
 Open:
 
 ```text
-http://127.0.0.1:3000/workspace/paper-rag
+http://127.0.0.1:3080
 ```
 
 Try:
@@ -206,6 +192,17 @@ Try:
 - Feedback: mark answers helpful or not helpful
 - Subscriptions: create, pause, resume, and delete topic subscriptions
 - Deliver: generate Markdown survey, PPT, Word, LaTeX/BibTeX, or PDF output
+
+## DeerFlow legacy fallback
+
+Before G5 removes the old host, DeerFlow remains available as a legacy fallback. Use it only for rollback or comparison:
+
+```bash
+make deerflow-backend
+make deerflow-frontend
+```
+
+Then open `http://127.0.0.1:3000/workspace/paper-rag`. DeerFlow is no longer the default entry point; new work should target DeepSeek Harness + MCP.
 
 ## CLI Usage
 

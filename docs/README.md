@@ -11,6 +11,7 @@
 | [`ACCEPTANCE_REPORT.md`](./ACCEPTANCE_REPORT.md) | 端到端验收的真实数据 |
 | [`INTERVIEW_NOTES.md`](./INTERVIEW_NOTES.md) | 面试讲解硬料 |
 | [`RAG_EVAL_GUIDE.md`](./RAG_EVAL_GUIDE.md) | 全部评测集、命令、指标、gate 和报告说明 |
+| [`adrs/0022-deepseek-harness-mcp-boundary.md`](./adrs/0022-deepseek-harness-mcp-boundary.md) | DeepSeek Harness + MCP 默认宿主边界 |
 | [`M8_PRD.md`](./M8_PRD.md) | 服务化 PRD（接入 DeerFlow gateway / BetterAuth / Qdrant 容器化） |
 | [`M10_PRD.md`](./M10_PRD.md) | 交付物 PRD（Markdown 综述 / PPT / Word / LaTeX bib） |
 | [`M11_PRD.md`](./M11_PRD.md) | 数据闭环 PRD（行为埋点 / hard case / abstain 自适应） |

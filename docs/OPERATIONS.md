@@ -167,7 +167,28 @@ python scripts/ingest_batch.py --file ids.txt
 
 > Embedding 模型一旦换 → 等于换库 → 必须删 Qdrant `paper_chunks` 重做。
 
-## 7. DeerFlow 集成
+## 7. DeepSeek Harness 默认入口
+
+本地交互默认使用 DeepSeek Harness 的 `paper-research` 预设。它通过 Native
+Broker 启动私有 Paper RAG MCP child，不需要启动 DeerFlow 进程。
+
+```bash
+cp .env.example .env
+# 只把真实 key 写入 .env，不提交 .env
+make dsh-install
+make dsh-doctor
+make dsh-start
+```
+
+默认模型是 `deepseek-v4-flash`，默认端口是 `PAPER_RAG_DSH_PORT=3080`。只做确定性
+验证时可运行：
+
+```bash
+make dsh-test
+make dsh-smoke
+```
+
+## 8. DeerFlow legacy fallback
 
 `paper_rag/` 不需要 `pip install` 也能被 DeerFlow 找到（适配层走 sys.path 兜底，从 deer-flow 根向上找）。生产部署时建议设：
 
@@ -177,4 +198,5 @@ export PAPER_RAG_HOME=/abs/path/to/paper_rag
 
 然后启动 DeerFlow gateway 即可。Paper RAG 会通过
 `deerflow.community.paper_rag.tools` 暴露为 Harness tools，并通过内置
-`paper-research` subagent 进入 DeerFlow lead agent 的委派体系。
+`paper-research` subagent 进入 DeerFlow lead agent 的委派体系。G5 前这个路径只
+用于回滚和对照验证，新功能默认接入 DeepSeek Harness + MCP。

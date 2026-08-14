@@ -359,6 +359,62 @@ def test_run_gate_maps_g3_proactive_cases_from_python_core(
     assert report["go_no_go"] == "go"
 
 
+def test_run_gate_maps_g4_cutover_cases_from_component_validators(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    manifest = {
+        "owned_test_commands": [
+            {
+                "id": "cutover-defaults",
+                "repository": ".",
+                "command": f"{sys.executable} -c \"print('cutover defaults ok')\"",
+            },
+            {
+                "id": "live-report-g4",
+                "repository": ".",
+                "command": f"{sys.executable} -c \"print('observation ok')\"",
+            },
+            {
+                "id": "clean-checkout",
+                "repository": ".",
+                "command": f"{sys.executable} -c \"print('clean checkout ok')\"",
+            },
+        ],
+        "gate_components": {
+            "G4": ["cutover-defaults", "live-report-g4", "clean-checkout"]
+        },
+        "required_cases": {"G4": ["CUT-002", "CUT-003", "CUT-005"]},
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(migration_gate, "git_dirty", lambda _repo_root: False)
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+
+    report = migration_gate.run_gate(tmp_path, manifest_path, "G4", tmp_path / "G4.json")
+
+    assert report["cases"]["CUT-002"] == {
+        "status": "PASS",
+        "evidence": "command cutover-defaults passed",
+    }
+    assert report["cases"]["CUT-003"] == {
+        "status": "PASS",
+        "evidence": "command live-report-g4 passed",
+    }
+    assert report["cases"]["CUT-005"] == {
+        "status": "PASS",
+        "evidence": "command clean-checkout passed",
+    }
+    assert report["go_no_go"] == "go"
+
+
+def test_validate_cutover_defaults_requires_dsh_default_entrypoints():
+    result = migration_gate.validate_cutover_defaults(ROOT)
+
+    assert result["schema_version"] == 1
+    assert result["checks"]
+    assert all(check["status"] == "PASS" for check in result["checks"])
+
+
 def test_validate_live_requires_authorized_fresh_pass_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     report_path = tmp_path / "data/index/migration-gates/live/LIVE-001.json"
     report_path.parent.mkdir(parents=True)

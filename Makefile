@@ -2,6 +2,9 @@
 
 PY ?= python3
 PYTHONPATH := src:tests
+DSH_DIR := integrations/deepseek-harness
+DSH_PORT ?= 3080
+DSH_RUNTIME_ROOT := data/runtime/deepseek-harness
 DEERFLOW_DIR := integrations/deer-flow
 DEERFLOW_BACKEND_PY ?= $(CURDIR)/$(DEERFLOW_DIR)/backend/.venv/bin/python
 DEERFLOW_BACKEND_PORT ?= 8001
@@ -10,10 +13,18 @@ DEERFLOW_FRONTEND_PORT ?= 3000
 .PHONY: help install install-dev lint format test test-pytest smoke secret-scan course-pdf mineru-doctor mineru-download-layout rebuild-index validate-metadata \
         qdrant-up qdrant-down init-store ingest ask eval clean clean-data \
         docker-build docker-build-bake docker-up-proactive docker-cli docker-shell \
-        calibrate-abstain hard-cases eval-golden eval-golden-qa eval-report eval-citation-audit eval-ablation eval-claims eval-claims-report eval-claims-judge eval-llm-recall verify-p0 deerflow-backend deerflow-frontend deerflow-smoke deerflow-rebuild-index deerflow-paper-rag-test
+        calibrate-abstain hard-cases eval-golden eval-golden-qa eval-report eval-citation-audit eval-ablation eval-claims eval-claims-report eval-claims-judge eval-llm-recall verify-p0 \
+        dsh-install dsh-doctor dsh-start dsh-smoke dsh-test dsh-clean-runtime \
+        deerflow-backend deerflow-frontend deerflow-smoke deerflow-rebuild-index deerflow-paper-rag-test
 
 help:
 	@echo "Targets:"
+	@echo "  dsh-install   Install DeepSeek Harness dependencies"
+	@echo "  dsh-doctor    Audit DeepSeek Harness config and paper-research preset"
+	@echo "  dsh-start     Start DeepSeek Harness Paper RAG UI on 127.0.0.1:$(DSH_PORT)"
+	@echo "  dsh-smoke     Run DeepSeek Harness smoke checks"
+	@echo "  dsh-test      Run DeepSeek Harness deterministic tests"
+	@echo "  dsh-clean-runtime  Remove DSH versioned sessions/storages/presets, preserving credentials"
 	@echo "  install        Install runtime deps (editable)"
 	@echo "  install-dev    Install dev + mineru extras"
 	@echo "  lint           Run ruff check"
@@ -53,11 +64,11 @@ help:
 	@echo "  docker-shell   Drop into bash inside fresh container"
 	@echo "  obs-up         Start Prometheus + Grafana monitoring stack"
 	@echo "  obs-down       Stop monitoring stack"
-	@echo "  deerflow-backend   Start embedded DeerFlow gateway with paper_rag"
-	@echo "  deerflow-frontend  Start embedded DeerFlow Next.js UI"
-	@echo "  deerflow-smoke     Check embedded DeerFlow paper_rag endpoints"
-	@echo "  deerflow-paper-rag-test  Run DeerFlow backend paper_rag integration tests"
-	@echo "  deerflow-rebuild-index  Rebuild local embedded Qdrant from parsed papers"
+	@echo "  deerflow-backend   Legacy fallback: start embedded DeerFlow gateway with paper_rag"
+	@echo "  deerflow-frontend  Legacy fallback: start embedded DeerFlow Next.js UI"
+	@echo "  deerflow-smoke     Legacy fallback: check embedded DeerFlow paper_rag endpoints"
+	@echo "  deerflow-paper-rag-test  Legacy fallback: run DeerFlow backend paper_rag integration tests"
+	@echo "  deerflow-rebuild-index  Legacy fallback: rebuild local embedded Qdrant from parsed papers"
 	@echo "  publish        Publish to GitHub (REPO=... WORKDIR=...)"
 	@echo "  publish-dryrun Preview what would be committed"
 	@echo "  clean          Remove pycache & build artifacts"
@@ -104,6 +115,25 @@ rebuild-index:
 
 validate-metadata:
 	$(PY) scripts/validate_metadata_paths.py --strict
+
+dsh-install:
+	cd $(DSH_DIR) && pnpm install --frozen-lockfile
+
+dsh-doctor:
+	cd $(DSH_DIR) && PAPER_RAG_DSH_PORT=$(DSH_PORT) pnpm dsh:dump-config
+
+dsh-start:
+	set -a; [ ! -f .env ] || . ./.env; set +a; \
+	    cd $(DSH_DIR) && PAPER_RAG_DSH_PORT=$(DSH_PORT) pnpm start
+
+dsh-smoke:
+	cd $(DSH_DIR) && PAPER_RAG_DSH_PORT=$(DSH_PORT) pnpm smoke
+
+dsh-test:
+	cd $(DSH_DIR) && pnpm test
+
+dsh-clean-runtime:
+	rm -rf $(DSH_RUNTIME_ROOT)/versions
 
 deerflow-backend:
 	set -a; [ ! -f .env ] || . ./.env; set +a; \

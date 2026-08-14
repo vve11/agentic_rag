@@ -71,3 +71,32 @@ jobs:
         with:
           files: ./coverage.xml
           fail_ci_if_error: false   # codecov outage must not block CI
+
+  deepseek-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install DeepSeek Harness deps
+        working-directory: integrations/deepseek-harness
+        run: pnpm install --frozen-lockfile
+
+      - name: DeepSeek Harness typecheck
+        working-directory: integrations/deepseek-harness
+        run: pnpm typecheck
+
+      - name: DeepSeek Harness tests
+        working-directory: integrations/deepseek-harness
+        run: pnpm test
+
+      - name: DeepSeek Harness smoke
+        working-directory: integrations/deepseek-harness
+        run: pnpm smoke

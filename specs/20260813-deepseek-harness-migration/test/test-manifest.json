@@ -127,6 +127,13 @@
       "status": "pending-implementation"
     },
     {
+      "id": "cutover-defaults",
+      "repository": ".",
+      "command": ".venv/bin/python scripts/migration_gate.py validate-cutover-defaults",
+      "suite": "cutover-defaults",
+      "status": "pending-implementation"
+    },
+    {
       "id": "dsh-typecheck",
       "repository": "integrations/deepseek-harness",
       "command": "pnpm typecheck",
@@ -642,6 +649,7 @@
       "mcp-artifacts",
       "mcp-operations",
       "mcp-parity",
+      "cutover-defaults",
       "dsh-install",
       "dsh-typecheck",
       "dsh-test",

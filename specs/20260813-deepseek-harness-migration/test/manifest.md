@@ -110,6 +110,7 @@
 必需：
 
 - G3 全部
+- `cutover-defaults`
 - clean install rehearsal
 - 观察报告
 - `LIVE-005`

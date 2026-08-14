@@ -60,6 +60,14 @@ OBSERVATION_ZERO_METRICS = (
     "p1_open_crash",
     "p1_unrecoverable_resume",
 )
+DSH_CUTOVER_TARGETS = (
+    "dsh-install",
+    "dsh-doctor",
+    "dsh-start",
+    "dsh-smoke",
+    "dsh-test",
+    "dsh-clean-runtime",
+)
 LIVE001_MODEL = "deepseek-v4-flash"
 LIVE_G2_TOPIC = "retrieval augmented generation with self reflection"
 LIVE_G2_ACTOR = "live-g2"
@@ -152,6 +160,15 @@ CASE_COVERAGE_BY_COMMAND = {
         "PRO-003",
         "PRO-004",
         "PRO-005",
+    ),
+    "cutover-defaults": (
+        "CUT-002",
+    ),
+    "live-report-g4": (
+        "CUT-003",
+    ),
+    "clean-checkout": (
+        "CUT-005",
     ),
 }
 
@@ -457,6 +474,88 @@ def validate_observation(
         "natural_days": natural_days,
         "qualified_sessions": qualified_sessions,
         "zero_metrics": list(OBSERVATION_ZERO_METRICS),
+    }
+
+
+def validate_cutover_defaults(repo_root: Path) -> dict[str, Any]:
+    makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
+    readme_zh = (repo_root / "README.md").read_text(encoding="utf-8")
+    readme_en = (repo_root / "README_EN.md").read_text(encoding="utf-8")
+    env_example = (repo_root / ".env.example").read_text(encoding="utf-8")
+    ci_workflow = (repo_root / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    operations = (repo_root / "docs" / "OPERATIONS.md").read_text(encoding="utf-8")
+    architecture = (repo_root / "docs" / "ARCHITECTURE.md").read_text(
+        encoding="utf-8"
+    )
+
+    checks = [
+        _cutover_check(
+            "makefile-dsh-targets",
+            all(f"\n{target}:" in f"\n{makefile}" for target in DSH_CUTOVER_TARGETS),
+            f"Makefile must define {', '.join(DSH_CUTOVER_TARGETS)}",
+        ),
+        _cutover_check(
+            "makefile-dsh-before-deerflow",
+            0 <= makefile.find("dsh-start") < makefile.find("deerflow-backend"),
+            "DSH targets must be presented before DeerFlow fallback targets",
+        ),
+        _cutover_check(
+            "readme-zh-dsh-quick-start",
+            "快速开始" in readme_zh
+            and "DeepSeek Harness" in readme_zh
+            and "make dsh-start" in readme_zh,
+            "README.md Quick Start must default to DeepSeek Harness",
+        ),
+        _cutover_check(
+            "readme-en-dsh-quick-start",
+            "Quick Start: DeepSeek Harness" in readme_en and "make dsh-start" in readme_en,
+            "README_EN.md Quick Start must default to DeepSeek Harness",
+        ),
+        _cutover_check(
+            "readmes-deerflow-legacy",
+            "legacy fallback" in readme_zh and "legacy fallback" in readme_en,
+            "DeerFlow must be marked as legacy fallback in both READMEs",
+        ),
+        _cutover_check(
+            "env-example-dsh",
+            "PAPER_RAG_DSH_PORT=3080" in env_example
+            and "CHAT_MODEL=deepseek-v4-flash" in env_example
+            and "SMALL_MODEL=deepseek-v4-flash" in env_example,
+            ".env.example must include DSH port and flash model defaults",
+        ),
+        _cutover_check(
+            "ci-dsh-job",
+            "deepseek-harness:" in ci_workflow
+            and "pnpm test" in ci_workflow
+            and "pnpm smoke" in ci_workflow,
+            "CI must include a DeepSeek Harness deterministic test/smoke job",
+        ),
+        _cutover_check(
+            "docs-dsh-default",
+            "DeepSeek Harness 默认入口" in operations
+            and "Native Broker" in architecture
+            and "DeerFlow fallback" in readme_zh,
+            "Operations, architecture, and README docs must mark DSH as default",
+        ),
+    ]
+    failed = [check for check in checks if check["status"] != "PASS"]
+    if failed:
+        details = "; ".join(f"{check['id']}: {check['detail']}" for check in failed)
+        raise GateError(f"cutover default check failed: {details}")
+    return {
+        "schema_version": 1,
+        "checks": checks,
+        "targets": list(DSH_CUTOVER_TARGETS),
+    }
+
+
+def _cutover_check(check_id: str, passed: bool, detail: str) -> dict[str, str]:
+    return {
+        "id": check_id,
+        "status": "PASS" if passed else "FAIL",
+        "detail": detail,
     }
 
 
@@ -2102,6 +2201,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--min-natural-days", type=int, default=7)
     p.add_argument("--min-qualified-sessions", type=int, default=20)
 
+    sub.add_parser("validate-cutover-defaults")
+
     p = sub.add_parser("diff-check")
     p.add_argument("--base-env", required=True)
     p.add_argument("--head", required=True)
@@ -2150,6 +2251,8 @@ def main(argv: list[str] | None = None) -> int:
                     "min_qualified_sessions": args.min_qualified_sessions,
                 },
             )
+        elif args.command == "validate-cutover-defaults":
+            result = validate_cutover_defaults(repo_root)
         elif args.command == "diff-check":
             result = diff_check(repo_root, args.base_env, args.head)
         else:  # pragma: no cover - argparse enforces command
