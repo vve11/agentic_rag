@@ -55,6 +55,21 @@ _SYSTEM = (
 )
 
 _EMPTY_SUSPICIOUS: dict = {"numeric": [], "author_year": [], "count": 0}
+_INSUFFICIENT_EVIDENCE_HINTS = (
+    "does not contain",
+    "does not mention",
+    "not contain",
+    "not provided",
+    "cannot answer",
+    "can't answer",
+    "insufficient evidence",
+    "evidence is insufficient",
+    "cannot provide an answer",
+    "without fabricating",
+    "未在",
+    "没有",
+    "无法回答",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +297,18 @@ def _decide_abstain(final_chunks: list[dict], abstain_cfg) -> dict:
     return result
 
 
+def _looks_like_insufficient_evidence_answer(answer: str) -> bool:
+    low = (answer or "").lower()
+    return any(hint in low for hint in _INSUFFICIENT_EVIDENCE_HINTS)
+
+
+def _weak_evidence_answer_abstained(answer: str, abstain_result: dict) -> bool:
+    return (
+        abstain_result.get("decision") == abstain_mod.DECISION_WEAK
+        and _looks_like_insufficient_evidence_answer(answer)
+    )
+
+
 def _no_evidence_response(
     intent_cfg: dict,
     trace: list[dict],
@@ -332,11 +359,20 @@ def _build_user_prompt(
         f"[chunk:{ch['chunk_id']}]" for ch in final_chunks if ch.get("chunk_id")
     )
     wiki_section = f"\n\n{wiki_block}\n" if wiki_block else ""
+    if abstain_result["decision"] == abstain_mod.DECISION_WEAK:
+        citation_rule = (
+            "Use a citation only if a chunk directly supports the answer. If "
+            "the evidence is insufficient, do not include citation tokens."
+        )
+    else:
+        citation_rule = (
+            "Use one citation. Choose the single chunk that most directly supports "
+            "the answer; do not cite background chunks just because they are available."
+        )
     user = (
         f"Question: {question}{wiki_section}\nEvidence:\n{evidence}\n\n"
         f"Allowed citation tokens: {allowed_citations}\n\n"
-        "Use one citation. Choose the single chunk that most directly supports "
-        "the answer; do not cite background chunks just because they are available.\n\n"
+        f"{citation_rule}\n\n"
         "Answer (copy citation tokens EXACTLY from the allowed list; never invent "
         "[chunk:1], [chunk:2], [1], or (Author 2020) citations):"
     )
@@ -765,7 +801,8 @@ def _answer_impl(
         log.warning(f"suspicious citations detected: {suspicious}")
         cleaned = strip_suspicious_citation_forms(cleaned)
     raw_valid = list(valid)
-    max_citations = 1
+    weak_answer_abstain = _weak_evidence_answer_abstained(cleaned, abstain_result)
+    max_citations = 0 if weak_answer_abstain else 1
     cleaned, valid = compact_citations(
         cleaned,
         valid,
@@ -780,26 +817,33 @@ def _answer_impl(
     if suspicious["count"]:
         counter("paper_rag_qa_suspicious_total").inc(suspicious["count"])
 
+    trace_payload = {
+        "intent": intent_cfg,
+        "iters": trace,
+        "stopped_by": stopped,
+        "abstain": abstain_result,
+        "evidence_selection": evidence_selection,
+        "citation_compaction": {
+            "max_citations": max_citations,
+            "raw_valid_citations": raw_valid,
+            "kept_citations": valid,
+            "weak_evidence_insufficient_abstain": weak_answer_abstain,
+        },
+        "wiki_context": wiki_context,
+        "trace_id": trace_id,
+    }
+    if weak_answer_abstain:
+        trace_payload["post_llm_abstain"] = {
+            "reason": "weak_evidence_insufficient_answer",
+        }
+
     out = {
         "answer": cleaned,
         "citations": valid,
         "chunks": final_chunks,
         "evidence_chunks": evidence_chunks,
         "suspicious_citations": suspicious,
-        "trace": {
-            "intent": intent_cfg,
-            "iters": trace,
-            "stopped_by": stopped,
-            "abstain": abstain_result,
-            "evidence_selection": evidence_selection,
-            "citation_compaction": {
-                "max_citations": max_citations,
-                "raw_valid_citations": raw_valid,
-                "kept_citations": valid,
-            },
-            "wiki_context": wiki_context,
-            "trace_id": trace_id,
-        },
+        "trace": trace_payload,
     }
     if (user_id or "system") == "system":
         _store_in_cache(question_for_cache, effective_paper_ids, out)

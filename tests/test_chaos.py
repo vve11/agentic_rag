@@ -211,6 +211,38 @@ def test_abstain_weak_evidence_calls_llm_with_hint():
         qa_agentic.classify = saved_classify
 
 
+def test_weak_evidence_insufficient_answer_drops_tangential_citations():
+    """If the LLM abstains after weak evidence, unrelated citations are not exposed."""
+    from paper_rag.rag import abstain as abstain_mod
+    from paper_rag.rag import qa_agentic
+
+    def fake_retrieve(query, paper_ids, top_k):
+        return [
+            {"chunk_id": f"mid{i}", "text": "retrieval background, not the answer", "score_rerank": 0.30}
+            for i in range(5)
+        ]
+
+    def fake_chat(messages, **kwargs):
+        return "The evidence is insufficient to answer this question. [chunk:mid0]"
+
+    saved_retrieve = qa_agentic._retrieve_round
+    saved_chat = qa_agentic.chat
+    saved_classify = qa_agentic.classify
+    qa_agentic._retrieve_round = fake_retrieve
+    qa_agentic.chat = fake_chat
+    qa_agentic.classify = lambda q: {"intent": "factual", "top_k": 5,
+                                     "max_iter": 1, "rrf_k": 60}
+    try:
+        out = qa_agentic.answer("future unsupported question")
+        assert out["trace"]["abstain"]["decision"] == abstain_mod.DECISION_WEAK
+        assert out["citations"] == []
+        assert "[chunk:" not in out["answer"]
+    finally:
+        qa_agentic._retrieve_round = saved_retrieve
+        qa_agentic.chat = saved_chat
+        qa_agentic.classify = saved_classify
+
+
 def test_qa_agentic_returns_structured_loop_and_memory_trace(monkeypatch, tmp_path):
     """QA trace should be product-readable: loop state + memory state.
 
