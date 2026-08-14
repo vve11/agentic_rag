@@ -1128,6 +1128,7 @@ def _run_live002_workflow(
             request_boundary_id=LIVE_G2_BOUNDARY_ID,
         )
         ingest_payload, ingest_tool = _live_g2_ingest_payload(selected)
+        _ensure_live_g2_qdrant_collections()
         ingest = _mcp_structured(_mcp_call(ingest_tool, ingest_payload, ingest_ctx))
         ingest_result = _first_ingest_result(ingest)
         paper_id = str(ingest_result.get("paper_id") or selected.get("paper_id") or "")
@@ -1431,6 +1432,12 @@ def _mcp_structured(result: dict[str, Any]) -> dict[str, Any]:
             f"{error.get('code', 'UNKNOWN')} {error.get('message', '')}"
         )
     return structured
+
+
+def _ensure_live_g2_qdrant_collections() -> None:
+    from paper_rag.tools import paper_index
+
+    paper_index._ensure_qdrant_collections()
 
 
 def _select_live_g2_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:

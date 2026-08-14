@@ -711,6 +711,90 @@ def test_live_g2_env_adds_repo_src_to_import_path(tmp_path: Path):
     assert sys.path == before
 
 
+def test_live002_workflow_initializes_qdrant_before_candidate_ingest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    workspace = migration_gate.LiveG2Workspace(
+        work_root=tmp_path / "work",
+        data_root=tmp_path / "work/data",
+        index_root=tmp_path / "work/data/index",
+        artifact_root=tmp_path / "work/artifacts",
+        import_root=tmp_path / "work/imports",
+        dsh_home=tmp_path / "work/runtime/deepseek-harness/versions/0.1.0-rc.6/dsh-home",
+        config_path=tmp_path / "work/config.live-g2.yaml",
+        feedback_path=tmp_path / "work/data/index/feedback.sqlite",
+    )
+    env = {"PAPER_RAG_REPO_ROOT": str(tmp_path)}
+    ensure_calls = []
+    tool_calls = []
+
+    monkeypatch.setattr(migration_gate, "_reset_paper_rag_runtime", lambda: None)
+    monkeypatch.setattr(
+        migration_gate, "_live_g2_mcp_context", lambda *args, **kwargs: object()
+    )
+    monkeypatch.setattr(
+        migration_gate,
+        "_ensure_live_g2_qdrant_collections",
+        lambda: ensure_calls.append("ensure"),
+        raising=False,
+    )
+
+    def fake_mcp_call(name, args, ctx):
+        del args, ctx
+        tool_calls.append(name)
+        if name == "paper_discover":
+            return {
+                "structuredContent": {
+                    "ok": True,
+                    "tool": name,
+                    "data": {
+                        "candidates": [
+                            {
+                                "id": 11,
+                                "selected": True,
+                                "paper_id": "arxiv:2601.00001",
+                                "title": "Candidate",
+                            }
+                        ]
+                    },
+                }
+            }
+        if name == "discovery_candidate_ingest":
+            return {
+                "structuredContent": {
+                    "ok": True,
+                    "tool": name,
+                    "data": {
+                        "results": [
+                            {
+                                "paper_id": "arxiv:2601.00001",
+                                "status": "ingested",
+                            }
+                        ]
+                    },
+                }
+            }
+        return {
+            "structuredContent": {
+                "ok": True,
+                "tool": name,
+                "trace_id": "trace-1",
+                "data": {
+                    "citations": ["chunk-1"],
+                    "chunks": [{"chunk_id": "chunk-1"}],
+                },
+            }
+        }
+
+    monkeypatch.setattr(migration_gate, "_mcp_call", fake_mcp_call)
+
+    result = migration_gate._run_live002_workflow(tmp_path, workspace, env)
+
+    assert result["checks"][-2]["id"] == "qa-citations"
+    assert ensure_calls == ["ensure"]
+    assert tool_calls == ["paper_discover", "discovery_candidate_ingest", "paper_qa"]
+
+
 def test_live001_summary_requires_paper_qa_citation_and_abstain():
     events = [
         {
