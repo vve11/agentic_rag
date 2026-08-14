@@ -38,7 +38,17 @@
       - id: deepseek-v4-flash
         name: DeepSeek V4 Flash
 
+- id: headless-runner
+  disabled: true
+
 - insert:
+    - id: paper-rag-headless-runner
+      name: ./src/paper-rag-headless-runner.mjs
+      inject: [headlessStartup]
+      config:
+        task: !!js ctx.headlessStartup.task
+        preset: paper-research
+
     - id: agent-presets
       name: '@deepseek-ai/dsh-agent-presets'
       config:
