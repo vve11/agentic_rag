@@ -53,6 +53,13 @@ ALLOWED_LEGACY_CLASSIFICATIONS = {
 }
 TERMINAL_CASE_STATUSES = {"PASS", "FAIL", "BLOCKED", "NOT_RUN", "NOT_APPLICABLE"}
 LIVE_REPORT_STATUSES = {"PASS", "FAIL", "BLOCKED"}
+OBSERVATION_ZERO_METRICS = (
+    "p0_data_corruption",
+    "p0_approval_bypass",
+    "p0_fabricated_citation",
+    "p1_open_crash",
+    "p1_unrecoverable_resume",
+)
 LIVE001_MODEL = "deepseek-v4-flash"
 LIVE_G2_TOPIC = "retrieval augmented generation with self reflection"
 LIVE_G2_ACTOR = "live-g2"
@@ -363,6 +370,17 @@ def validate_live(repo_root: Path, manifest_path: Path, gate: str) -> dict[str, 
             raise GateError(f"live report is not PASS for {case_id}")
         if live_case.get("requires_authorization") and report.get("authorized") is not True:
             raise GateError(f"live report not authorized for {case_id}")
+        validity = live_case.get("validity") or {}
+        if validity.get("kind") == "observation-window":
+            validate_observation(
+                repo_root,
+                report_path,
+                expected_id=str(case_id),
+                expected_gate=gate,
+                validity=validity,
+            )
+            validated.append(str(case_id))
+            continue
         max_age_hours = live_case.get("max_age_hours")
         if max_age_hours is not None:
             created_at = report.get("created_at")
@@ -375,6 +393,70 @@ def validate_live(repo_root: Path, manifest_path: Path, gate: str) -> dict[str, 
         "schema_version": 1,
         "gate": gate,
         "live_cases": validated,
+    }
+
+
+def validate_observation(
+    repo_root: Path,
+    report_path: Path,
+    *,
+    expected_id: str = "LIVE-005",
+    expected_gate: str = "G4",
+    validity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    validity = validity or {}
+    min_natural_days = int(validity.get("min_natural_days", 7))
+    min_qualified_sessions = int(validity.get("min_qualified_sessions", 20))
+    if not report_path.exists():
+        raise GateError(f"observation report not found: {_relpath(report_path, repo_root)}")
+
+    report = _read_json(report_path)
+    if report.get("id") != expected_id:
+        raise GateError(f"observation report id mismatch: expected {expected_id}")
+    if report.get("gate") != expected_gate:
+        raise GateError(f"observation report gate mismatch: expected {expected_gate}")
+    if report.get("commit") != git_head(repo_root):
+        raise GateError("observation report commit does not match HEAD")
+    if report.get("status") != "PASS":
+        raise GateError("observation report is not PASS")
+    if report.get("authorized") is not True:
+        raise GateError("observation report not authorized")
+
+    observation = report.get("observation")
+    if not isinstance(observation, dict):
+        raise GateError("observation report missing observation object")
+    natural_days = _coerce_non_negative_number(
+        observation.get("natural_days"), "observation natural days"
+    )
+    qualified_sessions = _coerce_non_negative_number(
+        observation.get("qualified_sessions"), "observation qualified sessions"
+    )
+    if natural_days < min_natural_days:
+        raise GateError(
+            f"observation natural days {natural_days:g} < {min_natural_days}"
+        )
+    if qualified_sessions < min_qualified_sessions:
+        raise GateError(
+            f"observation qualified sessions {qualified_sessions:g} < "
+            f"{min_qualified_sessions}"
+        )
+
+    metrics = report.get("metrics")
+    if not isinstance(metrics, dict):
+        raise GateError("observation report missing metrics object")
+    for metric in OBSERVATION_ZERO_METRICS:
+        value = _coerce_non_negative_number(metrics.get(metric), metric)
+        if value != 0:
+            raise GateError(f"observation metric {metric} must be 0, got {value:g}")
+
+    return {
+        "schema_version": 1,
+        "id": expected_id,
+        "gate": expected_gate,
+        "report": _relpath(report_path, repo_root),
+        "natural_days": natural_days,
+        "qualified_sessions": qualified_sessions,
+        "zero_metrics": list(OBSERVATION_ZERO_METRICS),
     }
 
 
@@ -2013,6 +2095,13 @@ def main(argv: list[str] | None = None) -> int:
         default="specs/20260813-deepseek-harness-migration/test/test-manifest.json",
     )
 
+    p = sub.add_parser("validate-observation")
+    p.add_argument("--report", required=True)
+    p.add_argument("--id", default="LIVE-005")
+    p.add_argument("--gate", default="G4")
+    p.add_argument("--min-natural-days", type=int, default=7)
+    p.add_argument("--min-qualified-sessions", type=int, default=20)
+
     p = sub.add_parser("diff-check")
     p.add_argument("--base-env", required=True)
     p.add_argument("--head", required=True)
@@ -2050,6 +2139,17 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "validate-live":
             result = validate_live(repo_root, repo_root / args.manifest, args.gate)
+        elif args.command == "validate-observation":
+            result = validate_observation(
+                repo_root,
+                repo_root / args.report,
+                expected_id=args.id,
+                expected_gate=args.gate,
+                validity={
+                    "min_natural_days": args.min_natural_days,
+                    "min_qualified_sessions": args.min_qualified_sessions,
+                },
+            )
         elif args.command == "diff-check":
             result = diff_check(repo_root, args.base_env, args.head)
         else:  # pragma: no cover - argparse enforces command
@@ -2155,6 +2255,15 @@ def _read_json(path: Path) -> dict[str, Any]:
         raise GateError(f"json file not found: {path}") from exc
     except json.JSONDecodeError as exc:
         raise GateError(f"invalid json {path}: {exc}") from exc
+
+
+def _coerce_non_negative_number(value: Any, label: str) -> float:
+    if not isinstance(value, (int, float)):
+        raise GateError(f"{label} must be numeric")
+    value = float(value)
+    if value < 0:
+        raise GateError(f"{label} must be non-negative")
+    return value
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:

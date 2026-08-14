@@ -439,6 +439,128 @@ def test_validate_live_rejects_missing_or_unauthorized_report(
         migration_gate.validate_live(tmp_path, manifest_path, "G1")
 
 
+def test_validate_observation_requires_window_and_zero_p0_p1_metrics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    report_path = tmp_path / "data/index/migration-gates/live/LIVE-005.json"
+    report_path.parent.mkdir(parents=True)
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "LIVE-005",
+                "gate": "G4",
+                "commit": "test-head",
+                "status": "PASS",
+                "authorized": True,
+                "observation": {
+                    "started_at": "2026-08-01",
+                    "ended_at": "2026-08-08",
+                    "natural_days": 7,
+                    "qualified_sessions": 20,
+                },
+                "metrics": {
+                    "p0_data_corruption": 0,
+                    "p0_approval_bypass": 0,
+                    "p0_fabricated_citation": 0,
+                    "p1_open_crash": 0,
+                    "p1_unrecoverable_resume": 0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = migration_gate.validate_observation(
+        tmp_path,
+        report_path,
+        expected_id="LIVE-005",
+        expected_gate="G4",
+        validity={"min_natural_days": 7, "min_qualified_sessions": 20},
+    )
+
+    assert result["report"] == "data/index/migration-gates/live/LIVE-005.json"
+    assert result["natural_days"] == 7
+    assert result["qualified_sessions"] == 20
+
+    too_short = json.loads(report_path.read_text(encoding="utf-8"))
+    too_short["observation"]["natural_days"] = 6
+    report_path.write_text(json.dumps(too_short), encoding="utf-8")
+
+    with pytest.raises(migration_gate.GateError, match="natural days"):
+        migration_gate.validate_observation(
+            tmp_path,
+            report_path,
+            expected_id="LIVE-005",
+            expected_gate="G4",
+            validity={"min_natural_days": 7, "min_qualified_sessions": 20},
+        )
+
+    bad_metric = json.loads(report_path.read_text(encoding="utf-8"))
+    bad_metric["observation"]["natural_days"] = 7
+    bad_metric["metrics"]["p0_fabricated_citation"] = 1
+    report_path.write_text(json.dumps(bad_metric), encoding="utf-8")
+
+    with pytest.raises(migration_gate.GateError, match="p0_fabricated_citation"):
+        migration_gate.validate_observation(
+            tmp_path,
+            report_path,
+            expected_id="LIVE-005",
+            expected_gate="G4",
+            validity={"min_natural_days": 7, "min_qualified_sessions": 20},
+        )
+
+
+def test_validate_live_applies_observation_window_validity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    report_path = tmp_path / "data/index/migration-gates/live/LIVE-005.json"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "LIVE-005",
+                "gate": "G4",
+                "commit": "test-head",
+                "status": "PASS",
+                "authorized": True,
+                "observation": {"natural_days": 7, "qualified_sessions": 19},
+                "metrics": {
+                    "p0_data_corruption": 0,
+                    "p0_approval_bypass": 0,
+                    "p0_fabricated_citation": 0,
+                    "p1_open_crash": 0,
+                    "p1_unrecoverable_resume": 0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = {
+        "live_cases": [
+            {
+                "id": "LIVE-005",
+                "gate": "G4",
+                "report": "data/index/migration-gates/live/LIVE-005.json",
+                "requires_authorization": True,
+                "validity": {
+                    "kind": "observation-window",
+                    "min_natural_days": 7,
+                    "min_qualified_sessions": 20,
+                },
+            }
+        ]
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+
+    with pytest.raises(migration_gate.GateError, match="qualified sessions"):
+        migration_gate.validate_live(tmp_path, manifest_path, "G4")
+
+
 def test_run_live_requires_explicit_authorization_before_side_effects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
