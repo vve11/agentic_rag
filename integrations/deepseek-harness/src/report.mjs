@@ -57,12 +57,12 @@ export function buildG0CompatReport({
     "DSH-G0-006": blocked("same-version DSH session resume proof not implemented yet"),
     "DSH-G0-007": blocked(
       brokerProbe?.lifecycle?.restart_restores_private_mcp
-        ? "MCP crash/reconnect proof passes; same-version Session resume and cancellation runner are still pending"
+        ? "MCP crash/reconnect and cancellation proof pass; same-version Session resume runner is still pending"
         : "MCP crash/reconnect proof not implemented yet",
     ),
     "DSH-G0-008": blocked(
       brokerProbe?.credential_bridge
-        ? "credential bridge proof passes; DSH timeout/cancel/session convergence runner is still pending"
+        ? "credential bridge and cancellation proof pass; DSH timeout/session convergence runner is still pending"
         : "cancel/timeout/credential bridge proof not implemented yet",
     ),
     "DSH-G0-009": blocked(

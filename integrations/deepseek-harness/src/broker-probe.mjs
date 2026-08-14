@@ -240,7 +240,10 @@ export async function runBrokerCompatibilityProbe(paths) {
     );
     assert.equal(rejectedStatus.structuredContent.write_call_count, 0);
 
-    const lifecycleBroker = await startBroker();
+    const lifecycleAuditPath = join(auditDir, "lifecycle-audit.jsonl");
+    const lifecycleBroker = await startBroker({
+      childEnv: { PAPER_RAG_PRIVATE_AUDIT_PATH: lifecycleAuditPath },
+    });
     const crashedPid = lifecycleBroker.privateMcpPid();
     assert.equal(typeof crashedPid, "number");
     process.kill(crashedPid, "SIGTERM");
@@ -264,6 +267,30 @@ export async function runBrokerCompatibilityProbe(paths) {
       createBrokerExec({ agentId: "agent-crash", callId: "call-restart" }),
     );
     assert.equal(recovered.structuredContent.ok, true);
+
+    const cancelController = new AbortController();
+    const pendingSlowCall = lifecycleBroker.execute(
+      "paper_status",
+      { question: "slow-cancel" },
+      createBrokerExec({
+        agentId: "agent-cancel-mcp",
+        callId: "call-cancel-mcp",
+        signal: cancelController.signal,
+      }),
+    );
+    await delay(25);
+    cancelController.abort(new Error("cancelled by probe"));
+    await assert.rejects(() => pendingSlowCall, /cancelled by probe/);
+    await delay(25);
+    const lifecycleAudit = await readAuditLines(lifecycleAuditPath);
+    assert.equal(lifecycleAudit.some((line) => line.lifecycle === "cancelled"), true);
+    const afterCancel = await lifecycleBroker.execute(
+      "paper_status",
+      { question: "after cancel" },
+      createBrokerExec({ agentId: "agent-cancel-mcp", callId: "call-after-cancel" }),
+    );
+    assert.equal(afterCancel.structuredContent.ok, true);
+
     const agentA = createBrokerExec({
       agentId: "agent-a",
       sessionId: "session-a",
@@ -322,6 +349,8 @@ export async function runBrokerCompatibilityProbe(paths) {
       lifecycle: {
         child_crash_is_diagnosable: true,
         restart_restores_private_mcp: true,
+        cancellation_aborts_inflight_call: true,
+        child_usable_after_cancellation: true,
         multi_agent_boundaries_are_isolated: true,
         standing_generation_child_shared_by_agents: true,
       },

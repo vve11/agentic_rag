@@ -306,6 +306,38 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
     expect(recovered.structuredContent.ok).toBe(true);
   });
 
+  test("cancels an in-flight private MCP call and keeps the child usable", async () => {
+    const auditPath = await newAuditPath();
+    const broker = await startBroker({
+      childEnv: { PAPER_RAG_PRIVATE_AUDIT_PATH: auditPath },
+    });
+    const controller = new AbortController();
+    const pending = broker.execute(
+      "paper_status",
+      { question: "slow-cancel" },
+      createBrokerExec({
+        agentId: "agent-cancel-mcp",
+        callId: "call-cancel-mcp",
+        signal: controller.signal,
+      }),
+    );
+
+    await delay(25);
+    controller.abort(new Error("cancelled by test"));
+
+    await expect(pending).rejects.toThrow("cancelled by test");
+    await delay(25);
+    const audit = await readAuditLines(auditPath);
+    expect(audit.some((line) => line.lifecycle === "cancelled")).toBe(true);
+
+    const recovered = await broker.execute(
+      "paper_status",
+      { question: "after cancel" },
+      createBrokerExec({ agentId: "agent-cancel-mcp", callId: "call-after-cancel" }),
+    );
+    expect(recovered.structuredContent.ok).toBe(true);
+  });
+
   test("standing broker generation serves multiple agents with isolated boundaries", async () => {
     const broker = await startBroker();
     const sharedPid = broker.privateMcpPid();

@@ -32,7 +32,7 @@ const structuredOutputSchema = {
 
 let writeCallCount = 0;
 
-async function auditToolCall(toolName, args, receivedMeta) {
+async function auditToolCall(toolName, args, receivedMeta, extra = {}) {
   if (process.env.PAPER_RAG_PRIVATE_AUDIT_PATH === undefined) {
     return;
   }
@@ -43,9 +43,36 @@ async function auditToolCall(toolName, args, receivedMeta) {
       tool_name: toolName,
       received_arguments: args,
       received_meta: receivedMeta,
+      ...extra,
     })}\n`,
     "utf8",
   );
+}
+
+function abortReason(signal) {
+  if (signal?.reason instanceof Error) {
+    return signal.reason;
+  }
+  return new Error(String(signal?.reason ?? "cancelled"));
+}
+
+function delayOrAbort(signal, ms) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortReason(signal));
+      return;
+    }
+
+    const timeout = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        reject(abortReason(signal));
+      },
+      { once: true },
+    );
+  });
 }
 
 function credentialGeneration() {
@@ -87,12 +114,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const args = request.params.arguments ?? {};
   const receivedMeta = request.params._meta ?? {};
   await auditToolCall(request.params.name, args, receivedMeta);
 
   if (request.params.name === "fixture_status") {
+    if (args.question === "slow-cancel") {
+      try {
+        await delayOrAbort(extra.signal, 1000);
+      } catch (error) {
+        await auditToolCall(request.params.name, args, receivedMeta, {
+          lifecycle: "cancelled",
+        });
+        throw error;
+      }
+    }
+
     const structuredContent = {
       ok: true,
       received_arguments: args,
