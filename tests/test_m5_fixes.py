@@ -52,6 +52,23 @@ def test_validate_citations_drops_unknown():
     assert set(valid) == {"a1b2c3d4", "deadbeef"}
 
 
+def test_compact_citations_removes_extra_chunk_tokens_from_answer():
+    from paper_rag.rag.citation_check import compact_citations
+
+    answer = (
+        "Direct support [chunk:aaa111]. "
+        "Adjacent background [chunk:bbb222]. "
+        "Repeat support [chunk:aaa111]."
+    )
+
+    cleaned, kept = compact_citations(answer, ["aaa111", "bbb222"], max_citations=1)
+
+    assert kept == ["aaa111"]
+    assert "[chunk:aaa111]" in cleaned
+    assert "[chunk:bbb222]" not in cleaned
+    assert "Adjacent background ." not in cleaned
+
+
 def test_strip_suspicious_citation_forms_keeps_chunk_citations():
     from paper_rag.rag.citation_check import strip_suspicious_citation_forms
 

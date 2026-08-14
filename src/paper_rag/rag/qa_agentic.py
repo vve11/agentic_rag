@@ -26,6 +26,7 @@ from ..retrieve.pipeline import retrieve_round as _retrieve_round
 from ..utils.logger import get_logger
 from . import abstain as abstain_mod
 from .citation_check import (
+    compact_citations,
     detect_suspicious_citations,
     strip_suspicious_citation_forms,
     validate_citations,
@@ -334,7 +335,7 @@ def _build_user_prompt(
     user = (
         f"Question: {question}{wiki_section}\nEvidence:\n{evidence}\n\n"
         f"Allowed citation tokens: {allowed_citations}\n\n"
-        "Use at most 2 citations. Choose the chunks that most directly support "
+        "Use one citation. Choose the single chunk that most directly supports "
         "the answer; do not cite background chunks just because they are available.\n\n"
         "Answer (copy citation tokens EXACTLY from the allowed list; never invent "
         "[chunk:1], [chunk:2], [1], or (Author 2020) citations):"
@@ -763,6 +764,13 @@ def _answer_impl(
     if suspicious["count"]:
         log.warning(f"suspicious citations detected: {suspicious}")
         cleaned = strip_suspicious_citation_forms(cleaned)
+    raw_valid = list(valid)
+    max_citations = 1
+    cleaned, valid = compact_citations(
+        cleaned,
+        valid,
+        max_citations=max_citations,
+    )
     log.info(
         f"qa_agentic done: trace_id={trace_id} iters={len(trace)} "
         f"stop={stopped} cites={len(valid)}"
@@ -784,6 +792,11 @@ def _answer_impl(
             "stopped_by": stopped,
             "abstain": abstain_result,
             "evidence_selection": evidence_selection,
+            "citation_compaction": {
+                "max_citations": max_citations,
+                "raw_valid_citations": raw_valid,
+                "kept_citations": valid,
+            },
             "wiki_context": wiki_context,
             "trace_id": trace_id,
         },

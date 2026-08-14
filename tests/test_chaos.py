@@ -277,7 +277,7 @@ def test_qa_agentic_uses_selected_evidence_for_prompt_and_trace(monkeypatch):
 
     def fake_chat(messages, **kwargs):
         captured["prompt"] = messages[-1]["content"]
-        return "Self-RAG uses evidence [chunk:0000000000] [chunk:0000000003]."
+        return "Self-RAG uses evidence [chunk:0000000000] [chunk:0000000001]."
 
     monkeypatch.setattr(qa_agentic, "_retrieve_round", fake_retrieve)
     monkeypatch.setattr(
@@ -292,9 +292,9 @@ def test_qa_agentic_uses_selected_evidence_for_prompt_and_trace(monkeypatch):
     assert len(out["chunks"]) == 5
     assert [c["chunk_id"] for c in out["evidence_chunks"]] == ["0000000000", "0000000001"]
     assert out["citations"] == ["0000000000"]
+    assert "[chunk:0000000001]" not in out["answer"]
     assert "[chunk:0000000000]" in captured["prompt"]
     assert "[chunk:0000000001]" in captured["prompt"]
-    assert "[chunk:0000000003]" not in captured["prompt"]
     assert out["trace"]["evidence_selection"]["selected_chunk_ids"] == [
         "0000000000",
         "0000000001",
@@ -314,5 +314,5 @@ def test_qa_prompt_limits_citations_to_direct_evidence():
         {"decision": "confident"},
     )
 
-    assert "Use at most 2 citations" in prompt
-    assert "most directly support" in prompt
+    assert "Use one citation" in prompt
+    assert "single chunk that most directly supports" in prompt

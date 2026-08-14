@@ -47,6 +47,28 @@ def validate_citations(answer: str, retrieved: list[dict]) -> tuple[str, list[st
     return cleaned, valid
 
 
+def compact_citations(
+    answer: str,
+    citations: list[str],
+    *,
+    max_citations: int,
+) -> tuple[str, list[str]]:
+    """Keep the first N valid chunk citations and remove the rest from text."""
+    if max_citations < 1:
+        keep: list[str] = []
+    else:
+        keep = list(citations[:max_citations])
+    keep_set = set(keep)
+
+    def _sub(m):
+        return m.group(0) if m.group(1) in keep_set else ""
+
+    cleaned = _ANY_CHUNK_CITE_RE.sub(_sub, answer)
+    cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip(), keep
+
+
 def detect_suspicious_citations(answer: str) -> dict:
     """Return a structured report of non-`[chunk:]` citation forms in `answer`.
 
@@ -79,6 +101,7 @@ def strip_suspicious_citation_forms(answer: str) -> str:
 
 
 __all__ = [
+    "compact_citations",
     "detect_suspicious_citations",
     "strip_suspicious_citation_forms",
     "validate_citations",
