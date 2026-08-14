@@ -98,6 +98,9 @@ CASE_COVERAGE_BY_COMMAND = {
         "MCP-RO-004",
         "MCP-RO-005",
     ),
+    "mcp-operations": (
+        "MCP-008",
+    ),
     "dsh-test": (
         "AGENT-001",
         "AGENT-002",

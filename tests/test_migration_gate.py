@@ -232,12 +232,26 @@ def test_run_gate_inherits_previous_gate_cases_and_marks_command_covered_cases(
                 "id": "mcp-contract",
                 "repository": ".",
                 "command": f"{sys.executable} -c \"print('contract ok')\"",
+            },
+            {
+                "id": "mcp-operations",
+                "repository": ".",
+                "command": f"{sys.executable} -c \"print('operations ok')\"",
             }
         ],
-        "gate_components": {"G1": ["mcp-contract"]},
+        "gate_components": {"G1": ["mcp-contract", "mcp-operations"]},
         "required_cases": {
             "G0": ["DSH-G0-001"],
-            "G1": ["MCP-001", "MCP-002", "MCP-003", "MCP-004", "MCP-005", "MCP-006", "MCP-007"],
+            "G1": [
+                "MCP-001",
+                "MCP-002",
+                "MCP-003",
+                "MCP-004",
+                "MCP-005",
+                "MCP-006",
+                "MCP-007",
+                "MCP-008",
+            ],
         },
         "inherits_required_cases": {"G1": ["G0"]},
     }
@@ -252,6 +266,7 @@ def test_run_gate_inherits_previous_gate_cases_and_marks_command_covered_cases(
     assert report["cases"]["DSH-G0-001"]["status"] == "PASS"
     assert report["cases"]["MCP-001"]["status"] == "PASS"
     assert report["cases"]["MCP-007"]["evidence"] == "command mcp-contract passed"
+    assert report["cases"]["MCP-008"]["evidence"] == "command mcp-operations passed"
     assert report["go_no_go"] == "go"
 
 
