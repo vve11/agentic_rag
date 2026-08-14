@@ -67,6 +67,7 @@ def test_validate_committed_legacy_matrix_covers_all_65_tests():
 
 def test_freeze_baseline_records_dataset_hashes_and_quality_commands(tmp_path: Path):
     out = tmp_path / "baseline.json"
+    expected_dirty = migration_gate.git_dirty(ROOT)
 
     result = migration_gate.freeze_baseline(
         ROOT, SPEC, out, require_clean=False, execute_commands=False
@@ -74,7 +75,7 @@ def test_freeze_baseline_records_dataset_hashes_and_quality_commands(tmp_path: P
 
     assert result["schema_version"] == 1
     assert result["commit"]
-    assert result["dirty"] is True
+    assert result["dirty"] == expected_dirty
     paths = {fp["path"] for fp in result["fingerprints"]}
     assert {
         "tests/eval/qa_set.golden.jsonl",
