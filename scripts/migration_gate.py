@@ -559,6 +559,17 @@ def _cutover_check(check_id: str, passed: bool, detail: str) -> dict[str, str]:
     }
 
 
+def validate_clean_checkout(repo_root: Path) -> dict[str, Any]:
+    if git_dirty(repo_root):
+        raise GateError("clean checkout required")
+    return {
+        "schema_version": 1,
+        "commit": git_head(repo_root),
+        "dirty": False,
+        "status": "PASS",
+    }
+
+
 def run_live(
     repo_root: Path,
     manifest_path: Path,
@@ -2202,6 +2213,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--min-qualified-sessions", type=int, default=20)
 
     sub.add_parser("validate-cutover-defaults")
+    sub.add_parser("validate-clean-checkout")
 
     p = sub.add_parser("diff-check")
     p.add_argument("--base-env", required=True)
@@ -2253,6 +2265,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "validate-cutover-defaults":
             result = validate_cutover_defaults(repo_root)
+        elif args.command == "validate-clean-checkout":
+            result = validate_clean_checkout(repo_root)
         elif args.command == "diff-check":
             result = diff_check(repo_root, args.base_env, args.head)
         else:  # pragma: no cover - argparse enforces command

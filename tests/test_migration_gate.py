@@ -415,6 +415,27 @@ def test_validate_cutover_defaults_requires_dsh_default_entrypoints():
     assert all(check["status"] == "PASS" for check in result["checks"])
 
 
+def test_validate_clean_checkout_reports_clean(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(migration_gate, "git_dirty", lambda _repo_root: False)
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "clean-head")
+
+    result = migration_gate.validate_clean_checkout(ROOT)
+
+    assert result == {
+        "schema_version": 1,
+        "commit": "clean-head",
+        "dirty": False,
+        "status": "PASS",
+    }
+
+
+def test_validate_clean_checkout_rejects_dirty(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(migration_gate, "git_dirty", lambda _repo_root: True)
+
+    with pytest.raises(migration_gate.GateError, match="clean checkout required"):
+        migration_gate.validate_clean_checkout(ROOT)
+
+
 def test_validate_live_requires_authorized_fresh_pass_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     report_path = tmp_path / "data/index/migration-gates/live/LIVE-001.json"
     report_path.parent.mkdir(parents=True)
