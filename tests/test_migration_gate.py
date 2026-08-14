@@ -202,6 +202,16 @@ def test_quality_gate_make_targets_use_migration_python():
         assert "$(PY)" in body
 
 
+def test_g0_manifest_citation_audit_writes_to_gate_artifact_dir():
+    manifest = json.loads((SPEC / "test" / "test-manifest.json").read_text(encoding="utf-8"))
+    command_by_id = {command["id"]: command["command"] for command in manifest["owned_test_commands"]}
+
+    command = command_by_id["eval-citation-audit"]
+
+    assert "EVAL_CITATION_AUDIT_MD=data/index/migration-gates/" in command
+    assert "docs/RAG_CITATION_AUDIT.md" not in command
+
+
 def test_dsh_package_uses_exact_compatible_versions():
     result = migration_gate.validate_dsh_package(
         ROOT / "integrations" / "deepseek-harness" / "package.json",

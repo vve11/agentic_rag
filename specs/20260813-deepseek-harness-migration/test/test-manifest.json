@@ -52,7 +52,7 @@
     {
       "id": "eval-citation-audit",
       "repository": ".",
-      "command": "make eval-citation-audit PY=.venv/bin/python",
+      "command": "EVAL_CITATION_AUDIT_MD=data/index/migration-gates/artifacts/RAG_CITATION_AUDIT.md make eval-citation-audit PY=.venv/bin/python",
       "suite": "citation-audit",
       "status": "pending-migration-env"
     },
