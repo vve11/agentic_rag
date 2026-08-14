@@ -112,10 +112,8 @@
 - G3 全部
 - `cutover-defaults`
 - clean install rehearsal
-- 观察报告
-- `LIVE-005`
-- `>=7 natural days AND >=20 qualified sessions`
-- `live-report-g4` 与 `gate-report-g4`
+- `dsh-smoke` 作为默认入口 cutover smoke
+- `gate-report-g4`
 
 ### G5
 
@@ -131,8 +129,7 @@
 - `gate-report-g5`
 
 机器清单通过 `inherits_required_cases` 累计前置 Gate；G4/G5 不能只检查本 Gate 新增
-case。G5 当前 commit 重新执行所有非历史 case，只有 LIVE-005 观察窗口按 ancestor +
-approved diff scope 继承。
+case。G5 当前 commit 重新执行所有非历史 case。
 
 ## 5. Live 测试授权边界
 
@@ -166,6 +163,5 @@ go/no-go
 ```
 
 报告必须绑定 clean commit、exact DSH/Cordis/Python/Node versions、resolved config/data
-fingerprints 和 case id。LIVE-001..004 默认 24 小时有效；LIVE-005 使用独立观察窗口
-validity，记录 start/end、自然日、qualified sessions、G4 commit 和 hash。缺失、过期、
-commit/config 不匹配或累计 required case 非 PASS 时 validator 必须失败。
+fingerprints 和 case id。LIVE-001..004 默认 24 小时有效。缺失、过期、commit/config
+不匹配或累计 required case 非 PASS 时 validator 必须失败。

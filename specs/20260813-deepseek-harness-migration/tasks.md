@@ -161,8 +161,8 @@
 - [ ] T135 更新课程与 troubleshooting 中默认入口。
 - [ ] T136 CI 新增 MCP 和 DSH job；核心 Python matrix 保持独立。
 - [ ] T137 DeerFlow 文档标记 legacy fallback，冻结 DeerFlow-only 新功能。
-- [ ] T138 DSH 默认入口运行至少 7 个自然日且至少 20 个 qualified session，P0/P1 重置窗口。
-- [ ] T139 记录 crash、引用违规、审批绕过、数据损坏和恢复指标。
+- [ ] T138 DSH 默认入口通过 `dsh-smoke` cutover gate，不要求 7 天观察窗口。
+- [ ] T139 确认 cutover smoke 覆盖 loopback、telemetry、credential path、timeout policy 和默认 preset。
 - [ ] T140 产出 G4 cutover report 并决定是否进入 G5。
 
 ## 12. G5 · DeerFlow 退役

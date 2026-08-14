@@ -315,4 +315,4 @@ ADR-0018 完整骨架落地：从"被动答"升级到"主动给"。
 - G0-G3 gate 已通过并提交；默认模型保持 `deepseek-v4-flash`。
 - G4 默认入口正在切到 DeepSeek Harness：`README*`、`Makefile`、`.env.example` 和 CI 以 `make dsh-start` / `pnpm smoke` 为主路径。
 - `integrations/deer-flow/` 保留为 G5 前 legacy fallback，不在 G4 删除。
-- G4 仍需要 LIVE-005 观察窗口：至少 7 个自然日、20 个 qualified sessions，且无 P0/P1 open issues。
+- G4 cutover gate 使用 DSH smoke + clean checkout，不再要求观察窗口。

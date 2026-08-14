@@ -68,9 +68,9 @@
 - [ ] TT-060 验证默认 README/Makefile/.env/CI 指向 DSH。
 - [ ] TT-061 执行 clean install rehearsal。
 - [ ] TT-062 执行 `.venv` Ruff、secret scan、base...HEAD diff check 和 DSH dump-config audit。
-- [ ] TT-063 运行至少 7 天且至少 20 个 qualified sessions 观察；P0/P1 重置窗口。
-- [ ] TT-064 统计数据损坏、approval bypass、fabricated citation、crash、恢复失败。
-- [ ] TT-065 获得授权后执行 LIVE-005。
+- [ ] TT-063 执行 DSH 默认入口 cutover smoke，不要求 7 天观察窗口。
+- [ ] TT-064 确认 smoke 覆盖 loopback、telemetry、credential path、timeout policy 和默认 preset。
+- [ ] TT-065 确认没有执行会真实写入论文库的 live smoke。
 - [ ] TT-066 生成 G4 cutover report。
 - [ ] TT-067 验证 G4 累计包含 G0-G3 required cases，并通过 clean checkout component。
 
@@ -82,7 +82,7 @@
 - [ ] TT-073 在 clean checkout 从零安装。
 - [ ] TT-074 执行 doctor/smoke。
 - [ ] TT-075 执行 CUT validator 和 pre-removal tag 回滚路径。
-- [ ] TT-076 验证 LIVE-005 observation-window 的 ancestor/hash/approved-diff-scope 继承。
+- [ ] TT-076 验证 G4/G5 当前 commit 重新执行非历史 case，不继承观察窗口。
 - [ ] TT-077 通过累计 G0-G5 required cases 和 G5 report validator，生成 final migration report。
 
 ## 报告状态

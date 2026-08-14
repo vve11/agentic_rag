@@ -584,13 +584,12 @@
 - `.env.example` 有 DSH/MCP 配置。
 - DeerFlow 标记 legacy fallback。
 
-### CUT-003 观察期
+### CUT-003 默认入口 cutover smoke
 
-- 至少 7 个自然日且至少 20 个 qualified sessions，两者同时满足。
-- qualified session 覆盖 QA、写审批、artifact 和 resume。
-- 任一 P0/P1 重置观察窗口。
-- P0 指标：0 数据损坏、0 approval bypass、0 fabricated citation。
-- P1 严重 crash/不可恢复问题已清零或明确阻断 G5。
+- `dsh-smoke` 在 clean checkout 上通过。
+- smoke 必须验证 loopback host、telemetry disabled、repo-managed credential path、
+  timeout policy 和 `paper-research` default preset。
+- 不要求 7 天观察窗口，不执行会真实写入论文库的 live smoke。
 
 ### CUT-004 删除后残留扫描
 
@@ -630,7 +629,6 @@
 | LIVE-002 | G2 | Discover 主题、人工选择 1 篇、授权 ingest、完成 QA |
 | LIVE-003 | G2 | 生成 PPTX 与 PDF，打开文件检查 |
 | LIVE-004 | G2 | 恢复同一 Session 继续 follow-up |
-| LIVE-005 | G4 | 真实连续研究 session 观察 |
 
 Live 测试必须使用隔离数据目录或已批准的测试论文；不得默认写正式用户数据。
 

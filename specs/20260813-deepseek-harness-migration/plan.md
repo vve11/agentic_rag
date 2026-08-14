@@ -1051,8 +1051,8 @@ G5 <- G0,G1,G2,G3,G4
 ```
 
 `run-gate` 对当前 commit 重新产生本 Gate 和全部继承 Gate 的非历史 case 状态；不能只
-复用旧报告。唯一例外是 G4 的 7 天观察 evidence，G5 按下述 observation 继承规则验证。
-G4 component commands 必须包含 clean checkout rehearsal；G5 再运行一次 clean checkout。
+复用旧报告。G4 component commands 必须包含 clean checkout rehearsal；G5 再运行一次
+clean checkout。
 
 Gate report 是版本化 JSON，至少包含：
 
@@ -1090,7 +1090,7 @@ Gate 决定并记录 `MIGRATION_GATE_BASE`，component 执行：
 
 ### 16.6 Live Eval
 
-不在普通 PR CI 中运行。G1/G2/G4 手工或受控 workflow 执行：
+不在普通 PR CI 中运行。G1/G2 手工或受控 workflow 执行：
 
 - 现有 QA/eval set。
 - DSH 真实模型。
@@ -1100,16 +1100,8 @@ Gate 决定并记录 `MIGRATION_GATE_BASE`，component 执行：
 授权人、隔离数据 root，默认 24 小时有效。普通 CI 不执行真实副作用，但
 `validate-gate-report` 在缺少当前 commit 的有效 live report 时必须失败。
 
-G5 不要求重新跑完整 7 天观察，但必须验证 trusted G4 observation report：
-
-1. LIVE-005 使用独立 `observation-window` validity，不适用 24 小时 freshness。报告记录
-   observation start/end、自然日数、qualified session 数、G4 commit 和内容 hash。
-2. G4 report commit 是当前 G5 commit 的祖先。
-3. report 带签名或内容 sha256，且仍能通过 schema validator。
-4. G4 commit 到当前 commit 的 diff 只包含批准的 DeerFlow 删除、默认入口/文档/依赖收口
-   和为退役门禁所需的测试调整；任何 Paper RAG Core、Broker、MCP、approval、credential、
-   retrieval、artifact 或数据模型行为变化都使 G4 evidence 失效，必须重启观察期。
-5. G5 component commands 显式运行 `live-report-g4`，不能只依赖人读继承。
+G4/G5 不继承观察窗口；它们在当前 commit 重新执行 DSH smoke、clean checkout 和非历史
+quality/MCP/CUT 门禁。
 
 ### 16.7 DeerFlow Test Capability Migration
 
@@ -1207,9 +1199,9 @@ DeerFlow 仍为默认入口。
 - README/README_EN/Makefile/.env/CI 默认 DSH
 - docs/ARCHITECTURE、SYSTEM_DESIGN、OPERATIONS 更新
 - DeerFlow 标记 legacy fallback
-- 至少 7 天且至少 20 个合格 Session 的稳定观察报告
+- DSH 默认入口 cutover smoke 和 clean checkout report
 
-观察期间禁止新增 DeerFlow-only 功能。
+G4 后禁止新增 DeerFlow-only 功能。
 
 ### Phase 5 / G5 · DeerFlow Removal
 

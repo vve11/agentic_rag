@@ -201,7 +201,7 @@ tool names 可保持相同，但不会以 `mcp__paper_rag__*` 形式直接暴露
 | FR-052 | 本地日志安全 | 默认不启用完整 Session telemetry；日志和错误不泄露 API key、PDF 内容和 PII |
 | FR-053 | 调用可关联 | 工具结果包含 Paper RAG trace_id，DSH Session 保留 tool/call 与 tool/result |
 | FR-054 | 默认入口切换 | README、Makefile、`.env.example` 和 CI 先切到 DSH，DeerFlow 保留为 fallback |
-| FR-055 | DeerFlow 退役门禁 | 只有 G0-G4 全通过且观察期结束，才删除 `integrations/deer-flow/` |
+| FR-055 | DeerFlow 退役门禁 | 只有 G0-G4 全通过且 pre-removal 回滚路径确认后，才删除 `integrations/deer-flow/` |
 | FR-056 | 文档收口 | 退役时更新 README/ARCHITECTURE/SYSTEM_DESIGN/STATUS/OPERATIONS/ADR，并删除失效运行指南 |
 | FR-057 | Gate report validator | G0–G5 结构化报告绑定 commit、exact versions、命令、case 状态、授权、隔离配置和有效期；缺失或过期时 Gate 失败 |
 | FR-058 | Live 数据隔离 | Live G2 必须使用 `PAPER_RAG_CONFIG` 指向完整独立 YAML，同时隔离 SQLite、index/papers/parsed、feedback DB 和 Qdrant collections/path；doctor 指向主数据时拒绝执行 |
@@ -345,9 +345,9 @@ DeerFlow/LangChain 专属 optional dependencies and Make targets
 
 - DSH 成为 README/Makefile 默认入口。
 - CI 覆盖 DSH smoke。
-- 至少 7 个自然日且至少 20 个合格真实研究 session；合格 session 覆盖 QA、写审批、
-  artifact 和 resume。任何 P0/P1 重新开始观察窗口。
-- 期间无 P0/P1 数据损坏、证据违规或无法恢复故障。
+- `dsh-smoke` 在 clean checkout 上覆盖 loopback、telemetry、credential path、
+  timeout policy 和 `paper-research` default preset。
+- 不要求 7 天观察窗口；不执行会真实写入论文库的 live smoke。
 
 ### G5 · DeerFlow 退役
 

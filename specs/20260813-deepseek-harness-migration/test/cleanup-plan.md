@@ -186,7 +186,7 @@ G5 是最后的代码退役：
 
 1. 创建明确的 pre-removal commit/tag。
 2. 删除 DeerFlow。
-3. 观察期结束后不再保留即时双运行 fallback。
+3. G5 clean checkout 和 CUT validator 通过后不再保留即时双运行 fallback。
 4. 如需恢复，通过 Git revert/pre-removal tag 恢复代码，再运行旧依赖安装和 smoke。
 5. Paper RAG 主数据不需要反向迁移。
 

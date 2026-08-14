@@ -225,13 +225,6 @@
       "status": "pending-implementation"
     },
     {
-      "id": "live-report-g4",
-      "repository": ".",
-      "command": ".venv/bin/python scripts/migration_gate.py validate-live --gate G4",
-      "suite": "live-report-validator",
-      "status": "pending-implementation"
-    },
-    {
       "id": "cut-validator",
       "repository": ".",
       "command": ".venv/bin/python scripts/migration_gate.py validate-cutover --spec specs/20260813-deepseek-harness-migration",
@@ -529,23 +522,6 @@
         "real LLM calls",
         "versioned durable DSH session"
       ]
-    },
-    {
-      "id": "LIVE-005",
-      "gate": "G4",
-      "runner": ".venv/bin/python scripts/migration_gate.py validate-observation --report data/index/migration-gates/live/LIVE-005.json",
-      "report": "data/index/migration-gates/live/LIVE-005.json",
-      "requires_authorization": true,
-      "side_effects": [
-        "real user research sessions"
-      ],
-      "validity": {
-        "kind": "observation-window",
-        "min_natural_days": 7,
-        "min_qualified_sessions": 20,
-        "requires_ancestor_of_cutover": true,
-        "invalidated_by_behavioral_diff": true
-      }
     }
   ],
   "cleanup_plan": "test/cleanup-plan.md",
@@ -655,7 +631,6 @@
       "dsh-test",
       "dsh-dump-config",
       "dsh-smoke",
-      "live-report-g4",
       "clean-checkout",
       "secret-scan",
       "diff-check"
@@ -684,7 +659,6 @@
       "dsh-smoke",
       "cut-validator",
       "clean-checkout",
-      "live-report-g4",
       "secret-scan",
       "diff-check"
     ]

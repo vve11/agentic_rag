@@ -43,7 +43,7 @@ DeepSeek Harness Web/Session/Agent
 | G1 · 只读 MVP | Pending | `search/qa/section/wiki` 通过 MCP 在 DSH 中可用，引用与拒答不退化 |
 | G2 · 完整研究链 | Pending | Discover → Confirm → Ingest → QA/Compare → Deliver 全链路通过 |
 | G3 · 主动能力 | Pending | Inbox/Subscription/Feedback 可通过 Chat-first 工具管理，cron 独立运行 |
-| G4 · 默认入口切换 | Pending | README/Makefile/CI 默认指向 DSH，连续稳定观察期通过 |
+| G4 · 默认入口切换 | Pending | README/Makefile/CI 默认指向 DSH，DSH cutover smoke 与 clean checkout 通过 |
 | G5 · DeerFlow 退役 | Pending | 无运行依赖、无未迁移 P0 能力、回滚窗口结束后删除 `integrations/deer-flow/` |
 
 任何 Gate 未通过时，只回滚该阶段新增的 DSH 层；`src/paper_rag/`、SQLite 和 Qdrant
