@@ -23,6 +23,26 @@ const pythonFixtureArgs = [
   new URL("../fixtures/private_mcp_server.py", import.meta.url).pathname,
 ];
 const cleanup = [];
+const READONLY_MODEL_TOOL_NAMES = [
+  "paper_compare",
+  "paper_list",
+  "paper_qa",
+  "paper_search",
+  "paper_section",
+  "paper_status",
+  "wiki_lookup",
+];
+const FINAL_G1_CATALOG_NAMES = [
+  "skill",
+  "ask_user_question",
+  "paper_status",
+  "paper_list",
+  "paper_search",
+  "paper_qa",
+  "paper_section",
+  "paper_compare",
+  "wiki_lookup",
+];
 
 afterEach(async () => {
   while (cleanup.length > 0) {
@@ -77,6 +97,7 @@ function createTestBroker(options = {}) {
     childEnv: options.childEnv ?? {},
     activePresetId: options.activePresetId ?? "paper-research",
     approval: Object.hasOwn(options, "approval") ? options.approval : approval(),
+    includeWriteProbe: options.includeWriteProbe ?? false,
   });
 }
 
@@ -116,14 +137,13 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
   test("discovers raw MCP tools but exposes only broker-owned native names", async () => {
     const broker = await startBroker();
 
-    expect(broker.rawToolNames()).toContain("fixture_status");
+    expect(broker.rawToolNames()).toContain("paper_status");
     expect(broker.rawToolNames()).toContain("write_probe");
-    expect(broker.modelCatalog().map((tool) => tool.name).sort()).toEqual([
-      "paper_status",
-      "write_probe",
-    ]);
+    expect(broker.modelCatalog().map((tool) => tool.name).sort()).toEqual(
+      READONLY_MODEL_TOOL_NAMES,
+    );
     expect(broker.modelCatalog().some((tool) => tool.name.startsWith("mcp__"))).toBe(false);
-    expect(broker.modelCatalog().some((tool) => tool.name === "fixture_status")).toBe(false);
+    expect(broker.modelCatalog().some((tool) => tool.name === "write_probe")).toBe(false);
   });
 
   test("renders bounded model text from the canonical private MCP result", async () => {
@@ -236,7 +256,10 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
 
   test("resume without a new direct-user message denies writes before approval", async () => {
     const approvalCalls = [];
-    const broker = await startBroker({ approval: approval("allowed-once", approvalCalls) });
+    const broker = await startBroker({
+      approval: approval("allowed-once", approvalCalls),
+      includeWriteProbe: true,
+    });
     const exec = createBrokerExec({ agentId: "agent-resume", callId: "call-resume" });
 
     const read = await broker.execute(
@@ -262,6 +285,7 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
     const auditPath = await newAuditPath();
     const broker = await startBroker({
       childEnv: { PAPER_RAG_PRIVATE_AUDIT_PATH: auditPath },
+      includeWriteProbe: true,
     });
     const exec = createBrokerExec({
       agentId: "agent-boundary-wire",
@@ -487,7 +511,10 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
 
   test("write tools request one-shot approval with the real exec signal before MCP call", async () => {
     const approvalCalls = [];
-    const broker = await startBroker({ approval: approval("allowed-once", approvalCalls) });
+    const broker = await startBroker({
+      approval: approval("allowed-once", approvalCalls),
+      includeWriteProbe: true,
+    });
     const exec = createBrokerExec({
       agentId: "agent-write",
       sessionId: "session-write",
@@ -508,7 +535,7 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
   });
 
   test("write tools do not call private MCP when approval is rejected", async () => {
-    const broker = await startBroker({ approval: approval("rejected") });
+    const broker = await startBroker({ approval: approval("rejected"), includeWriteProbe: true });
     const exec = createBrokerExec({ agentId: "agent-reject", callId: "call-reject" });
     establishBoundary(broker, exec);
 
@@ -525,7 +552,10 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
   });
 
   test("write tools fail closed when approval is unavailable", async () => {
-    const broker = await startBroker({ approval: approval("unavailable") });
+    const broker = await startBroker({
+      approval: approval("unavailable"),
+      includeWriteProbe: true,
+    });
     const exec = createBrokerExec({ agentId: "agent-deny", callId: "call-deny" });
     establishBoundary(broker, exec);
 
@@ -535,7 +565,7 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
   });
 
   test("write tools fail closed when approval service is missing", async () => {
-    const broker = await startBroker({ approval: undefined });
+    const broker = await startBroker({ approval: undefined, includeWriteProbe: true });
     const exec = createBrokerExec({ agentId: "agent-missing", callId: "call-missing" });
     establishBoundary(broker, exec);
 
@@ -553,7 +583,10 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
 
   test("write tools propagate approval cancellation before private MCP call", async () => {
     const approvalCalls = [];
-    const broker = await startBroker({ approval: cancellableApproval(approvalCalls) });
+    const broker = await startBroker({
+      approval: cancellableApproval(approvalCalls),
+      includeWriteProbe: true,
+    });
     const controller = new AbortController();
     const exec = createBrokerExec({
       agentId: "agent-cancel",
@@ -577,7 +610,10 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
 
   test("disposed broker generation rejects before approval or private MCP", async () => {
     const approvalCalls = [];
-    const broker = await startBroker({ approval: approval("allowed-once", approvalCalls) });
+    const broker = await startBroker({
+      approval: approval("allowed-once", approvalCalls),
+      includeWriteProbe: true,
+    });
 
     await broker.close();
 
@@ -624,10 +660,7 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
     const catalog = broker.finalModelCatalog();
 
     expect(catalog.map((tool) => tool.name)).toEqual([
-      "skill",
-      "ask_user_question",
-      "paper_status",
-      "write_probe",
+      ...FINAL_G1_CATALOG_NAMES,
     ]);
     expect(() => broker.assertPreStepToolCatalog(catalog)).not.toThrow();
 

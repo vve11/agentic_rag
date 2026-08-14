@@ -72,6 +72,10 @@ deliver-pdf = [
 proactive = [
     "apscheduler>=3.10",
 ]
+# DeepSeek Harness private MCP adapter. Core imports must not require this extra.
+harness = [
+    "mcp==1.29.0",
+]
 # Optional local vision fallback for figure/table summaries.
 vision-local = [
     "accelerate>=0.30",

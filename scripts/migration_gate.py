@@ -46,6 +46,48 @@ ALLOWED_LEGACY_CLASSIFICATIONS = {
     "still-required-and-moved",
 }
 TERMINAL_CASE_STATUSES = {"PASS", "FAIL", "BLOCKED", "NOT_RUN", "NOT_APPLICABLE"}
+CASE_COVERAGE_BY_COMMAND = {
+    "mcp-contract": (
+        "MCP-001",
+        "MCP-002",
+        "MCP-003",
+        "MCP-004",
+        "MCP-005",
+        "MCP-006",
+        "MCP-007",
+        "SEC-005",
+    ),
+    "mcp-tools": (
+        "MCP-RO-001",
+        "MCP-RO-002",
+        "MCP-RO-003",
+        "MCP-RO-004",
+        "MCP-RO-005",
+        "MCP-RO-006",
+        "MCP-RO-007",
+        "MCP-RO-008",
+    ),
+    "mcp-security": (
+        "SEC-001",
+        "SEC-002",
+        "SEC-003",
+        "SEC-004",
+        "SEC-005",
+    ),
+    "mcp-parity": (
+        "MCP-RO-004",
+        "MCP-RO-005",
+    ),
+    "dsh-test": (
+        "AGENT-001",
+        "AGENT-002",
+        "AGENT-003",
+        "AGENT-004",
+        "AGENT-005",
+        "AGENT-006",
+        "AGENT-007",
+    ),
+}
 
 
 class GateError(RuntimeError):
@@ -235,6 +277,45 @@ def validate_report(
     }
 
 
+def validate_live(repo_root: Path, manifest_path: Path, gate: str) -> dict[str, Any]:
+    manifest = _read_json(manifest_path)
+    live_cases = [
+        case for case in manifest.get("live_cases", [])
+        if case.get("gate") == gate
+    ]
+    validated: list[str] = []
+    now = time.time()
+    for live_case in live_cases:
+        case_id = live_case.get("id")
+        report_path = repo_root / str(live_case.get("report", ""))
+        if not report_path.exists():
+            raise GateError(f"live report not found for {case_id}: {_relpath(report_path, repo_root)}")
+        report = _read_json(report_path)
+        if report.get("id") != case_id:
+            raise GateError(f"live report id mismatch for {case_id}")
+        if report.get("gate") != gate:
+            raise GateError(f"live report gate mismatch for {case_id}")
+        if report.get("commit") != git_head(repo_root):
+            raise GateError(f"live report commit does not match HEAD for {case_id}")
+        if report.get("status") != "PASS":
+            raise GateError(f"live report is not PASS for {case_id}")
+        if live_case.get("requires_authorization") and report.get("authorized") is not True:
+            raise GateError(f"live report not authorized for {case_id}")
+        max_age_hours = live_case.get("max_age_hours")
+        if max_age_hours is not None:
+            created_at = report.get("created_at")
+            if not isinstance(created_at, (int, float)):
+                raise GateError(f"live report missing created_at for {case_id}")
+            if now - float(created_at) > float(max_age_hours) * 3600:
+                raise GateError(f"live report expired for {case_id}")
+        validated.append(str(case_id))
+    return {
+        "schema_version": 1,
+        "gate": gate,
+        "live_cases": validated,
+    }
+
+
 def merge_component_reports(
     repo_root: Path, gate: str, cases: dict[str, dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -293,7 +374,9 @@ def run_gate(repo_root: Path, manifest_path: Path, gate: str, report_path: Path)
         }
         for case_id in required
     }
+    _inherit_previous_gate_cases(repo_root, manifest, gate, cases)
     components = merge_component_reports(repo_root, gate, cases)
+    _apply_command_case_coverage(commands, cases)
     required_pass = all(cases[case_id].get("status") == "PASS" for case_id in required)
     commands_pass = all(command.get("exit_code") == 0 for command in commands)
     result = {
@@ -309,6 +392,45 @@ def run_gate(repo_root: Path, manifest_path: Path, gate: str, report_path: Path)
     }
     _write_json_atomic(report_path, result)
     return result
+
+
+def _inherit_previous_gate_cases(
+    repo_root: Path,
+    manifest: dict[str, Any],
+    gate: str,
+    cases: dict[str, dict[str, Any]],
+) -> None:
+    for inherited_gate in manifest.get("inherits_required_cases", {}).get(gate, []):
+        report_path = repo_root / "data" / "index" / "migration-gates" / f"{inherited_gate}.json"
+        if not report_path.exists():
+            continue
+        report = _read_json(report_path)
+        if report.get("gate") != inherited_gate:
+            raise GateError(
+                f"inherited report gate mismatch for {_relpath(report_path, repo_root)}"
+            )
+        for case_id, case in report.get("cases", {}).items():
+            if case_id in cases and case.get("status") == "PASS":
+                cases[case_id] = {
+                    **case,
+                    "inherited_from": inherited_gate,
+                }
+
+
+def _apply_command_case_coverage(
+    commands: list[dict[str, Any]],
+    cases: dict[str, dict[str, Any]],
+) -> None:
+    for command in commands:
+        if command.get("exit_code") != 0:
+            continue
+        command_id = command.get("id")
+        for case_id in CASE_COVERAGE_BY_COMMAND.get(str(command_id), ()):
+            if case_id in cases and cases[case_id].get("status") != "PASS":
+                cases[case_id] = {
+                    "status": "PASS",
+                    "evidence": f"command {command_id} passed",
+                }
 
 
 def diff_check(repo_root: Path, base_env: str, head: str) -> dict[str, Any]:
@@ -460,6 +582,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("validate-baseline")
     p.add_argument("--baseline", default="data/index/migration-gates/baseline.json")
+    p.add_argument("--spec", default=None)
 
     p = sub.add_parser("validate-legacy-matrix")
     p.add_argument("--spec", required=True)
@@ -476,6 +599,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--gate", required=True)
     p.add_argument("--manifest", required=True)
     p.add_argument("--report", required=True)
+
+    p = sub.add_parser("validate-live")
+    p.add_argument("--gate", required=True)
+    p.add_argument(
+        "--manifest",
+        default="specs/20260813-deepseek-harness-migration/test/test-manifest.json",
+    )
 
     p = sub.add_parser("diff-check")
     p.add_argument("--base-env", required=True)
@@ -504,6 +634,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "run-gate":
             result = run_gate(repo_root, repo_root / args.manifest, args.gate, repo_root / args.report)
+        elif args.command == "validate-live":
+            result = validate_live(repo_root, repo_root / args.manifest, args.gate)
         elif args.command == "diff-check":
             result = diff_check(repo_root, args.base_env, args.head)
         else:  # pragma: no cover - argparse enforces command

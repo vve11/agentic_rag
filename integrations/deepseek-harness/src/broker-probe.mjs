@@ -15,6 +15,15 @@ const fixtureCommand = process.execPath;
 const fixtureArgs = [
   new URL("../fixtures/private-mcp-server.mjs", import.meta.url).pathname,
 ];
+const READONLY_MODEL_TOOL_NAMES = [
+  "paper_compare",
+  "paper_list",
+  "paper_qa",
+  "paper_search",
+  "paper_section",
+  "paper_status",
+  "wiki_lookup",
+];
 
 /** @param {string | (() => string)} [value] */
 function credentials(value = "probe-test-token") {
@@ -66,6 +75,7 @@ export async function runBrokerCompatibilityProbe(paths) {
       childEnv: options.childEnv ?? {},
       activePresetId: options.activePresetId ?? "paper-research",
       approval: Object.hasOwn(options, "approval") ? options.approval : approval(),
+      includeWriteProbe: options.includeWriteProbe ?? false,
     });
   }
 
@@ -87,10 +97,10 @@ export async function runBrokerCompatibilityProbe(paths) {
     const rawToolNames = broker.rawToolNames().sort();
     const modelCatalog = broker.modelCatalog();
     const modelToolNames = modelCatalog.map((tool) => tool.name).sort();
-    assert.deepEqual(modelToolNames, ["paper_status", "write_probe"]);
+    assert.deepEqual(modelToolNames, READONLY_MODEL_TOOL_NAMES);
     assert.equal(modelToolNames.some((name) => name.startsWith("mcp__")), false);
-    assert.equal(modelToolNames.includes("fixture_status"), false);
-    assert.equal(rawToolNames.includes("fixture_status"), true);
+    assert.equal(modelToolNames.includes("write_probe"), false);
+    assert.equal(rawToolNames.includes("paper_status"), true);
     assert.equal(rawToolNames.includes("write_probe"), true);
     const restrictCalls = [];
     broker.applyAgentCreatedRestriction({
@@ -194,6 +204,7 @@ export async function runBrokerCompatibilityProbe(paths) {
     const emptyBoundaryApprovalCalls = [];
     const emptyBoundaryBroker = await startBroker({
       approval: approval("allowed-once", emptyBoundaryApprovalCalls),
+      includeWriteProbe: true,
     });
     await assert.rejects(
       () =>
@@ -209,6 +220,7 @@ export async function runBrokerCompatibilityProbe(paths) {
     const approvalCalls = [];
     const approvedBroker = await startBroker({
       approval: approval("allowed-once", approvalCalls),
+      includeWriteProbe: true,
     });
     const approvedExec = createBrokerExec({ agentId: "agent-write", callId: "call-write" });
     const requestBoundaryId = approvedBroker.updateRequestBoundary(approvedExec.agent, [
@@ -229,7 +241,10 @@ export async function runBrokerCompatibilityProbe(paths) {
     assert.equal(approved.structuredContent.approved, true);
     assert.equal(JSON.stringify(approved).includes(requestBoundaryId), false);
 
-    const rejectedBroker = await startBroker({ approval: approval("rejected") });
+    const rejectedBroker = await startBroker({
+      approval: approval("rejected"),
+      includeWriteProbe: true,
+    });
     const rejectedExec = createBrokerExec({ agentId: "agent-reject", callId: "call-reject" });
     rejectedBroker.updateRequestBoundary(rejectedExec.agent, [
       { id: "user-rejected", source: { kind: "user" } },

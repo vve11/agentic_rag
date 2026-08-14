@@ -198,8 +198,8 @@ describe("G0 component report", () => {
       presetDiscovery: { id: "paper-research", broken: undefined },
       brokerProbe: {
         mcp_boundary: {
-          raw_tool_names: ["fixture_status", "write_probe"],
-          model_tool_names: ["paper_status", "write_probe"],
+          raw_tool_names: ["paper_status", "write_probe"],
+          model_tool_names: ["paper_status", "paper_list", "paper_search", "paper_qa", "paper_section", "paper_compare", "wiki_lookup"],
           bounded_projection_bytes: 11,
           hidden_metadata_wire: "tools/call.params._meta.paper_rag",
           result_private_metadata_stripped: true,
@@ -254,8 +254,8 @@ describe("G0 component report", () => {
       presetDiscovery: { id: "paper-research", broken: undefined },
       brokerProbe: {
         mcp_boundary: {
-          raw_tool_names: ["fixture_status", "write_probe"],
-          model_tool_names: ["paper_status", "write_probe"],
+          raw_tool_names: ["paper_status", "write_probe"],
+          model_tool_names: ["paper_status", "paper_list", "paper_search", "paper_qa", "paper_section", "paper_compare", "wiki_lookup"],
           hidden_metadata_wire: "tools/call.params._meta.paper_rag",
           python_receiver_verified: true,
           result_private_metadata_stripped: true,

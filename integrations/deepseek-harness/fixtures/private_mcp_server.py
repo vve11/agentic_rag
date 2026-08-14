@@ -7,8 +7,55 @@ from typing import Any
 
 STATUS_INPUT_SCHEMA = {
     "type": "object",
-    "properties": {"question": {"type": "string"}},
+    "properties": {},
+    "additionalProperties": False,
+}
+LIST_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"limit": {"type": "number"}},
+    "additionalProperties": False,
+}
+SEARCH_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string"},
+        "top_k": {"type": "number"},
+        "year_min": {"type": "number"},
+        "year_max": {"type": "number"},
+    },
+    "required": ["query"],
+    "additionalProperties": False,
+}
+QA_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "question": {"type": "string"},
+        "paper_ids": {"type": "array", "items": {"type": "string"}},
+        "resolved_question": {"type": "string"},
+        "top_k": {"type": "number"},
+    },
     "required": ["question"],
+    "additionalProperties": False,
+}
+SECTION_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"paper_id": {"type": "string"}, "section_name": {"type": "string"}},
+    "required": ["paper_id", "section_name"],
+    "additionalProperties": False,
+}
+COMPARE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "paper_ids": {"type": "array", "items": {"type": "string"}},
+        "dimensions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["paper_ids", "dimensions"],
+    "additionalProperties": False,
+}
+WIKI_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"concept": {"type": "string"}},
+    "required": ["concept"],
     "additionalProperties": False,
 }
 WRITE_INPUT_SCHEMA = {
@@ -60,9 +107,45 @@ def audit(tool_name: str, args: dict[str, Any], meta: dict[str, Any]) -> None:
 def tools() -> list[dict[str, Any]]:
     return [
         {
-            "name": "fixture_status",
+            "name": "paper_status",
             "description": "Private Python fixture status tool.",
             "inputSchema": STATUS_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
+            "name": "paper_list",
+            "description": "Private Python fixture list tool.",
+            "inputSchema": LIST_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
+            "name": "paper_search",
+            "description": "Private Python fixture search tool.",
+            "inputSchema": SEARCH_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
+            "name": "paper_qa",
+            "description": "Private Python fixture qa tool.",
+            "inputSchema": QA_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
+            "name": "paper_section",
+            "description": "Private Python fixture section tool.",
+            "inputSchema": SECTION_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
+            "name": "paper_compare",
+            "description": "Private Python fixture compare tool.",
+            "inputSchema": COMPARE_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
+            "name": "wiki_lookup",
+            "description": "Private Python fixture wiki tool.",
+            "inputSchema": WIKI_INPUT_SCHEMA,
             "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
         },
         {
@@ -80,12 +163,22 @@ def call_tool(params: dict[str, Any]) -> dict[str, Any]:
     meta = params.get("_meta") or {}
     audit(tool_name, args, meta)
 
-    if tool_name == "fixture_status":
+    if tool_name in {
+        "paper_status",
+        "paper_list",
+        "paper_search",
+        "paper_qa",
+        "paper_section",
+        "paper_compare",
+        "wiki_lookup",
+    }:
         structured = {
             "ok": True,
+            "tool": tool_name,
             "received_arguments": args,
             "received_meta": meta,
             "has_test_credential": bool(os.environ.get("PAPER_RAG_TEST_TOKEN")),
+            "citations": ["chunk:c1"] if tool_name == "paper_qa" else [],
         }
         return {
             "content": [{"type": "text", "text": json.dumps({"ok": True})}],

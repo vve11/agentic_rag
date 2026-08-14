@@ -9,6 +9,15 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 const BROKER_CALLER = "deepseek_harness";
 const APPROVAL_ALLOW_ONCE = "allowed-once";
 const REQUEST_BOUNDARY_NAMESPACE = "3ef5d38b-0fcb-5ec8-9f49-6fc0b9b7c4ec";
+const READONLY_TOOL_NAMES = Object.freeze([
+  "paper_status",
+  "paper_list",
+  "paper_search",
+  "paper_qa",
+  "paper_section",
+  "paper_compare",
+  "wiki_lookup",
+]);
 
 export const INHERITED_GLOBAL_ALLOW = Object.freeze([]);
 export const PRESET_LOCAL_MODEL_TOOLS = Object.freeze([
@@ -37,6 +46,65 @@ export const PRESET_LOCAL_MODEL_TOOLS = Object.freeze([
 
 function jsonContent(value) {
   return [{ type: "text", text: JSON.stringify(value) }];
+}
+
+function readonlyToolDescription(name) {
+  const descriptions = {
+    paper_status: "Inspect local Paper RAG corpus and dependency status.",
+    paper_list: "List papers already indexed in the local shared corpus.",
+    paper_search: "Search indexed paper chunks and return bounded paper matches.",
+    paper_qa: "Answer a self-contained question from indexed chunks with citations.",
+    paper_section: "Read a named section from one indexed paper.",
+    paper_compare: "Compare up to four papers across up to four dimensions.",
+    wiki_lookup: "Look up a Paper RAG wiki concept as background metadata.",
+  };
+  return descriptions[name] ?? name;
+}
+
+function readonlyToolParameters(name) {
+  const stringParam = (description) => ({ type: "string", description });
+  const stringArrayParam = (description) => ({
+    type: "array",
+    items: { type: "string" },
+    description,
+  });
+  const numberParam = (description) => ({
+    type: "number",
+    description,
+  });
+  const schemas = {
+    paper_status: {},
+    paper_list: {
+      limit: numberParam("Maximum papers to return."),
+    },
+    paper_search: {
+      query: { ...stringParam("Natural-language search query."), required: true },
+      top_k: numberParam("Maximum matches to return."),
+      year_min: numberParam("Optional minimum publication year."),
+      year_max: numberParam("Optional maximum publication year."),
+    },
+    paper_qa: {
+      question: {
+        ...stringParam("Self-contained research question for indexed papers."),
+        required: true,
+      },
+      paper_ids: stringArrayParam("Optional indexed paper id constraints."),
+      resolved_question: stringParam("Optional explicit self-contained resolution."),
+      top_k: numberParam("Maximum evidence chunks to retrieve."),
+    },
+    paper_section: {
+      paper_id: { ...stringParam("Indexed paper id."), required: true },
+      section_name: { ...stringParam("Section substring, such as limitations."), required: true },
+    },
+    paper_compare: {
+      paper_ids: { ...stringArrayParam("One to four indexed paper ids."), required: true },
+      dimensions: { ...stringArrayParam("One to four comparison dimensions."), required: true },
+    },
+    wiki_lookup: {
+      concept: { ...stringParam("Concept name or alias to look up."), required: true },
+    },
+  };
+  return schemas[name] ?? {};
 }
 
 /** @param {any} value */
@@ -262,6 +330,7 @@ export class PaperRagNativeBroker {
     activePresetId = "paper-research",
     requiredPresetId = "paper-research",
     approval,
+    includeWriteProbe = false,
   }) {
     this.command = command;
     this.args = args;
@@ -272,6 +341,7 @@ export class PaperRagNativeBroker {
     this.activePresetId = activePresetId;
     this.requiredPresetId = requiredPresetId;
     this.approval = approval;
+    this.includeWriteProbe = includeWriteProbe;
     this.#toolDefinitions = this.#createNativeTools();
   }
 
@@ -420,24 +490,22 @@ export class PaperRagNativeBroker {
   }
 
   #createNativeTools() {
-    const tools = [
+    const tools = READONLY_TOOL_NAMES.map((name) =>
       defineTool({
-        name: "paper_status",
-        description: "Inspect the local Paper RAG corpus status.",
-        parameters: {
-          question: {
-            type: "string",
-            required: true,
-            description: "Status question for the local corpus.",
-          },
-        },
+        name,
+        description: readonlyToolDescription(name),
+        parameters: readonlyToolParameters(name),
         output: {
           schema: { type: "json" },
           render: renderMcpResult,
         },
-        execute: (args, exec) => this.#callRawTool("fixture_status", args, exec),
+        execute: (args, exec) => this.#callRawTool(name, args, exec),
       }),
-      defineTool({
+    );
+
+    if (this.includeWriteProbe) {
+      tools.push(
+        defineTool({
         name: "write_probe",
         description: "Exercise the broker write approval path.",
         parameters: {
@@ -458,8 +526,9 @@ export class PaperRagNativeBroker {
             request_boundary_id: requestBoundaryId,
           });
         },
-      }),
-    ];
+        }),
+      );
+    }
 
     return new Map(tools.map((tool) => [tool.name, tool]));
   }

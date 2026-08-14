@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -95,6 +96,27 @@ def test_freeze_baseline_records_dataset_hashes_and_quality_commands(tmp_path: P
     assert json.loads(out.read_text(encoding="utf-8")) == result
 
 
+def test_validate_baseline_cli_accepts_manifest_spec_argument(tmp_path: Path, capsys):
+    baseline = {"fingerprints": []}
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+
+    code = migration_gate.main(
+        [
+            "--repo-root",
+            str(tmp_path),
+            "validate-baseline",
+            "--spec",
+            "specs/20260813-deepseek-harness-migration",
+            "--baseline",
+            str(baseline_path),
+        ]
+    )
+
+    assert code == 0
+    assert "fingerprints" in capsys.readouterr().out
+
+
 def test_validate_report_requires_all_g0_cases(tmp_path: Path):
     report = {
         "schema_version": 1,
@@ -183,6 +205,134 @@ def test_run_gate_executes_component_in_declared_repository(
     assert command["status"] == "PASS"
     assert command["cwd"] == "component"
     assert command["stdout"].strip() == "component"
+
+
+def test_run_gate_inherits_previous_gate_cases_and_marks_command_covered_cases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    report_root = tmp_path / "data/index/migration-gates"
+    report_root.mkdir(parents=True)
+    (report_root / "G0.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "gate": "G0",
+                "commit": "previous-head",
+                "dirty": False,
+                "cases": {"DSH-G0-001": {"status": "PASS", "evidence": "locked"}},
+                "commands": [],
+                "go_no_go": "go",
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = {
+        "owned_test_commands": [
+            {
+                "id": "mcp-contract",
+                "repository": ".",
+                "command": f"{sys.executable} -c \"print('contract ok')\"",
+            }
+        ],
+        "gate_components": {"G1": ["mcp-contract"]},
+        "required_cases": {
+            "G0": ["DSH-G0-001"],
+            "G1": ["MCP-001", "MCP-002", "MCP-003", "MCP-004", "MCP-005", "MCP-006", "MCP-007"],
+        },
+        "inherits_required_cases": {"G1": ["G0"]},
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    report_path = report_root / "G1.json"
+    monkeypatch.setattr(migration_gate, "git_dirty", lambda _repo_root: False)
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+
+    report = migration_gate.run_gate(tmp_path, manifest_path, "G1", report_path)
+
+    assert report["cases"]["DSH-G0-001"]["status"] == "PASS"
+    assert report["cases"]["MCP-001"]["status"] == "PASS"
+    assert report["cases"]["MCP-007"]["evidence"] == "command mcp-contract passed"
+    assert report["go_no_go"] == "go"
+
+
+def test_validate_live_requires_authorized_fresh_pass_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    report_path = tmp_path / "data/index/migration-gates/live/LIVE-001.json"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "LIVE-001",
+                "gate": "G1",
+                "commit": "test-head",
+                "status": "PASS",
+                "authorized": True,
+                "created_at": time.time(),
+                "side_effects": ["real LLM calls"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = {
+        "live_cases": [
+            {
+                "id": "LIVE-001",
+                "gate": "G1",
+                "report": "data/index/migration-gates/live/LIVE-001.json",
+                "max_age_hours": 24,
+                "requires_authorization": True,
+            }
+        ]
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+
+    result = migration_gate.validate_live(tmp_path, manifest_path, "G1")
+
+    assert result["gate"] == "G1"
+    assert result["live_cases"] == ["LIVE-001"]
+
+
+def test_validate_live_rejects_missing_or_unauthorized_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    manifest = {
+        "live_cases": [
+            {
+                "id": "LIVE-001",
+                "gate": "G1",
+                "report": "data/index/migration-gates/live/LIVE-001.json",
+                "max_age_hours": 24,
+                "requires_authorization": True,
+            }
+        ]
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(migration_gate.GateError, match="live report not found"):
+        migration_gate.validate_live(tmp_path, manifest_path, "G1")
+
+    report_path = tmp_path / "data/index/migration-gates/live/LIVE-001.json"
+    report_path.parent.mkdir(parents=True)
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+    report_path.write_text(
+        json.dumps(
+            {
+                "id": "LIVE-001",
+                "gate": "G1",
+                "commit": "test-head",
+                "status": "PASS",
+                "authorized": False,
+                "created_at": time.time(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(migration_gate.GateError, match="not authorized"):
+        migration_gate.validate_live(tmp_path, manifest_path, "G1")
 
 
 def test_quality_gate_make_targets_use_migration_python():

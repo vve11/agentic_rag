@@ -142,8 +142,8 @@ cp .env.example .env
 ```bash
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=sk-your-key-here
-CHAT_MODEL=deepseek-chat
-SMALL_MODEL=deepseek-chat
+CHAT_MODEL=deepseek-v4-flash
+SMALL_MODEL=deepseek-v4-flash
 PAPER_RAG_CONFIG=config/local.yaml
 ```
 
