@@ -140,7 +140,6 @@ class FeedbackRecordArgs(StrictModel):
     event_type: str
     payload: dict[str, Any] = Field(default_factory=dict)
     trace_id: str | None = None
-    conversation_id: str | None = None
 
 
 class DigestRunArgs(StrictModel):
@@ -641,7 +640,7 @@ def _feedback_record(payload: StrictModel, ctx: McpRequestContext) -> dict[str, 
         event_type=typed.event_type,
         payload=typed.payload,
         trace_id=typed.trace_id,
-        conversation_id=typed.conversation_id or ctx.conversation_id,
+        conversation_id=ctx.conversation_id,
     )
     return {"event_id": event_id}
 

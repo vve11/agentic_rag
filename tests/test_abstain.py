@@ -18,6 +18,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
@@ -190,3 +192,38 @@ def test_high_quality_signal_marks_high():
     res = abstain.decide(chunks, threshold_low=0.30, threshold_high=0.50)
     assert res["decision"] == abstain.DECISION_NO_EVIDENCE
     assert res["signal_quality"] == "high"
+
+
+def test_local_calibration_abstains_on_golden_no_answer_borderline():
+    """Keep the local QA gate stable for known no-answer border cases.
+
+    G3 eval exposed no-answer items whose dense evidence means sit just above
+    the old local low threshold while the lowest current positive neighbor is
+    still comfortably higher. Lock that margin into the local calibration.
+    """
+    raw = yaml.safe_load((ROOT / "config" / "local.yaml").read_text(encoding="utf-8"))
+    cfg = raw["rag"]["abstain"]
+    borderline_no_answer = [
+        _ch(score_field="score_dense", value=0.5029, chunk_id=f"n002-{i}")
+        for i in range(3)
+    ]
+    lowest_positive_neighbor = [
+        _ch(score_field="score_dense", value=0.5378, chunk_id=f"g016-{i}")
+        for i in range(3)
+    ]
+
+    no_answer = abstain.decide(
+        borderline_no_answer,
+        threshold_low=cfg["threshold_low"],
+        threshold_high=cfg["threshold_high"],
+        min_chunks=cfg["min_chunks"],
+    )
+    positive = abstain.decide(
+        lowest_positive_neighbor,
+        threshold_low=cfg["threshold_low"],
+        threshold_high=cfg["threshold_high"],
+        min_chunks=cfg["min_chunks"],
+    )
+
+    assert no_answer["decision"] == abstain.DECISION_NO_EVIDENCE
+    assert positive["decision"] != abstain.DECISION_NO_EVIDENCE

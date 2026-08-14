@@ -60,11 +60,11 @@ rag:
   qa_cache_ttl_hours: 24
   abstain:
     enabled: true
-    # Calibrated against tests/eval/qa_set.real.jsonl on 2026-06-20.
+    # Calibrated against tests/eval/qa_set.golden.jsonl on 2026-08-14.
     # Keeps positive paper recall intact while forcing obvious out-of-domain
     # prompts to return the no-evidence response instead of citing tangential
     # chunks.
-    threshold_low: 0.50
+    threshold_low: 0.51
     threshold_high: 0.58
     min_chunks: 3
     no_evidence_message: "未在已索引文献中找到与该问题相关的内容。请确认问题与已入库的论文主题相符，或考虑通过 paper_ingest_tool 扩充语料库。"
