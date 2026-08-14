@@ -328,6 +328,37 @@ def test_run_gate_marks_g2_research_artifact_and_session_cases_from_commands(
     assert report["go_no_go"] == "go"
 
 
+def test_run_gate_maps_g3_proactive_cases_from_python_core(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    manifest = {
+        "owned_test_commands": [
+            {
+                "id": "python-core",
+                "repository": ".",
+                "command": f"{sys.executable} -c \"print('core ok')\"",
+            }
+        ],
+        "gate_components": {"G3": ["python-core"]},
+        "required_cases": {
+            "G3": ["PRO-001", "PRO-002", "PRO-003", "PRO-004", "PRO-005"],
+        },
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(migration_gate, "git_dirty", lambda _repo_root: False)
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+
+    report = migration_gate.run_gate(tmp_path, manifest_path, "G3", tmp_path / "G3.json")
+
+    for case_id in manifest["required_cases"]["G3"]:
+        assert report["cases"][case_id] == {
+            "status": "PASS",
+            "evidence": "command python-core passed",
+        }
+    assert report["go_no_go"] == "go"
+
+
 def test_validate_live_requires_authorized_fresh_pass_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     report_path = tmp_path / "data/index/migration-gates/live/LIVE-001.json"
     report_path.parent.mkdir(parents=True)

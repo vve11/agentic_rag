@@ -139,6 +139,13 @@ CASE_COVERAGE_BY_COMMAND = {
         "SESSION-005",
         "SESSION-006",
     ),
+    "python-core": (
+        "PRO-001",
+        "PRO-002",
+        "PRO-003",
+        "PRO-004",
+        "PRO-005",
+    ),
 }
 
 

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -78,7 +79,7 @@ class PaperIngestArgs(StrictModel):
     force: bool = False
 
     @model_validator(mode="after")
-    def _exactly_one_source(self) -> "PaperIngestArgs":
+    def _exactly_one_source(self) -> PaperIngestArgs:
         sources = [self.arxiv_id, self.pdf_url, self.pdf_path]
         if sum(1 for value in sources if value) != 1:
             raise ValueError("provide exactly one of arxiv_id, pdf_url, or pdf_path")
@@ -104,6 +105,51 @@ class PaperDeliverArgs(StrictModel):
     paper_ids: list[str] = Field(..., min_length=1, max_length=5)
     title: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
+
+
+class SubscriptionListArgs(StrictModel):
+    kind: str | None = None
+    only_enabled: bool = True
+
+
+class SubscriptionAddArgs(StrictModel):
+    kind: str
+    value: str
+    strength: str = "normal"
+
+
+class SubscriptionToggleArgs(StrictModel):
+    subscription_id: int = Field(..., ge=1)
+    enabled: bool
+
+
+class SubscriptionDeleteArgs(StrictModel):
+    subscription_id: int = Field(..., ge=1)
+
+
+class InboxListArgs(StrictModel):
+    unread_only: bool = False
+    limit: int = Field(20, ge=1, le=100)
+
+
+class InboxItemArgs(StrictModel):
+    item_id: int = Field(..., ge=1)
+
+
+class FeedbackRecordArgs(StrictModel):
+    event_type: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    trace_id: str | None = None
+    conversation_id: str | None = None
+
+
+class DigestRunArgs(StrictModel):
+    days: int = Field(1, ge=1, le=30)
+
+
+class StaleScanArgs(StrictModel):
+    older_than_days: int = Field(30, ge=1, le=365)
+    max_cards: int = Field(3, ge=1, le=20)
 
 
 class PlaceholderArgs(StrictModel):
@@ -154,7 +200,8 @@ READONLY_TOOL_NAMES = (
     "paper_compare",
     "wiki_lookup",
 )
-RESEARCH_TOOL_NAMES = READONLY_TOOL_NAMES + (
+RESEARCH_TOOL_NAMES = (
+    *READONLY_TOOL_NAMES,
     "paper_discover",
     "discovery_run_get",
     "paper_ingest",
@@ -163,7 +210,8 @@ RESEARCH_TOOL_NAMES = READONLY_TOOL_NAMES + (
     "export_bibtex",
     "paper_deliver",
 )
-FULL_TOOL_NAMES = RESEARCH_TOOL_NAMES + (
+FULL_TOOL_NAMES = (
+    *RESEARCH_TOOL_NAMES,
     "subscription_list",
     "subscription_add",
     "subscription_toggle",
@@ -507,6 +555,119 @@ def _paper_deliver(payload: StrictModel, ctx: McpRequestContext) -> dict[str, An
     }
 
 
+def _subscription_list(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..proactive import subscriptions
+
+    typed = _cast(SubscriptionListArgs, payload)
+    rows = subscriptions.list_for_user(
+        ctx.actor_id,
+        kind=typed.kind,
+        only_enabled=typed.only_enabled,
+    )
+    return {"subscriptions": rows, "count": len(rows)}
+
+
+def _subscription_add(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..proactive import subscriptions
+
+    _require_write_boundary("subscription_add", ctx)
+    typed = _cast(SubscriptionAddArgs, payload)
+    subscription_id = subscriptions.add(
+        ctx.actor_id,
+        typed.kind,
+        typed.value,
+        strength=typed.strength,
+    )
+    return {"subscription_id": subscription_id}
+
+
+def _subscription_toggle(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..proactive import subscriptions
+
+    _require_write_boundary("subscription_toggle", ctx)
+    typed = _cast(SubscriptionToggleArgs, payload)
+    updated = subscriptions.toggle(
+        typed.subscription_id,
+        enabled=typed.enabled,
+        user_id=ctx.actor_id,
+    )
+    return {"updated": updated}
+
+
+def _subscription_delete(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..proactive import subscriptions
+
+    _require_write_boundary("subscription_delete", ctx)
+    typed = _cast(SubscriptionDeleteArgs, payload)
+    deleted = subscriptions.delete(typed.subscription_id, user_id=ctx.actor_id)
+    return {"deleted": deleted}
+
+
+def _inbox_list(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..proactive import inbox
+
+    typed = _cast(InboxListArgs, payload)
+    items = inbox.list_for_user(ctx.actor_id, unread_only=typed.unread_only, limit=typed.limit)
+    return {
+        "items": items,
+        "count": len(items),
+        "unread_count": inbox.unread_count(ctx.actor_id),
+    }
+
+
+def _inbox_mark_read(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..proactive import inbox
+
+    _require_write_boundary("inbox_mark_read", ctx)
+    typed = _cast(InboxItemArgs, payload)
+    return {"updated": inbox.mark_read(typed.item_id, user_id=ctx.actor_id)}
+
+
+def _inbox_dismiss(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..proactive import inbox
+
+    _require_write_boundary("inbox_dismiss", ctx)
+    typed = _cast(InboxItemArgs, payload)
+    return {"dismissed": inbox.dismiss(typed.item_id, user_id=ctx.actor_id)}
+
+
+def _feedback_record(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..feedback import record_event
+
+    _require_write_boundary("feedback_record", ctx)
+    typed = _cast(FeedbackRecordArgs, payload)
+    event_id = record_event(
+        user_id=ctx.actor_id,
+        event_type=typed.event_type,
+        payload=typed.payload,
+        trace_id=typed.trace_id,
+        conversation_id=typed.conversation_id or ctx.conversation_id,
+    )
+    return {"event_id": event_id}
+
+
+def _digest_run(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..proactive import digest
+
+    _require_write_boundary("digest_run", ctx)
+    typed = _cast(DigestRunArgs, payload)
+    item_id = digest.daily_digest_for_user(ctx.actor_id, days=typed.days)
+    return {"item_id": item_id, "written": bool(item_id)}
+
+
+def _stale_scan(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..proactive import stale
+
+    _require_write_boundary("stale_scan", ctx)
+    typed = _cast(StaleScanArgs, payload)
+    count = stale.stale_scan_for_user(
+        ctx.actor_id,
+        older_than_days=typed.older_than_days,
+        max_cards=typed.max_cards,
+    )
+    return {"count": count}
+
+
 def _require_write_boundary(tool_name: str, ctx: McpRequestContext) -> None:
     if not ctx.request_boundary_id:
         raise McpToolError(
@@ -640,6 +801,76 @@ _TOOLS: dict[str, ToolDefinition] = {
         PaperDeliverArgs,
         "artifact",
         _paper_deliver,
+    ),
+    "subscription_list": ToolDefinition(
+        "subscription_list",
+        "List the current actor's proactive subscriptions.",
+        SubscriptionListArgs,
+        "metadata",
+        _subscription_list,
+    ),
+    "subscription_add": ToolDefinition(
+        "subscription_add",
+        "Add or reactivate an approved proactive subscription for the current actor.",
+        SubscriptionAddArgs,
+        "metadata",
+        _subscription_add,
+    ),
+    "subscription_toggle": ToolDefinition(
+        "subscription_toggle",
+        "Enable or disable one of the current actor's proactive subscriptions.",
+        SubscriptionToggleArgs,
+        "metadata",
+        _subscription_toggle,
+    ),
+    "subscription_delete": ToolDefinition(
+        "subscription_delete",
+        "Delete one of the current actor's proactive subscriptions.",
+        SubscriptionDeleteArgs,
+        "metadata",
+        _subscription_delete,
+    ),
+    "inbox_list": ToolDefinition(
+        "inbox_list",
+        "List bounded inbox cards for the current actor.",
+        InboxListArgs,
+        "metadata",
+        _inbox_list,
+    ),
+    "inbox_mark_read": ToolDefinition(
+        "inbox_mark_read",
+        "Mark one visible current-actor inbox item as read.",
+        InboxItemArgs,
+        "metadata",
+        _inbox_mark_read,
+    ),
+    "inbox_dismiss": ToolDefinition(
+        "inbox_dismiss",
+        "Dismiss one visible current-actor inbox item.",
+        InboxItemArgs,
+        "metadata",
+        _inbox_dismiss,
+    ),
+    "feedback_record": ToolDefinition(
+        "feedback_record",
+        "Record a validated feedback event for the current actor without raw comments.",
+        FeedbackRecordArgs,
+        "metadata",
+        _feedback_record,
+    ),
+    "digest_run": ToolDefinition(
+        "digest_run",
+        "Run an approved manual proactive digest for the current actor.",
+        DigestRunArgs,
+        "metadata",
+        _digest_run,
+    ),
+    "stale_scan": ToolDefinition(
+        "stale_scan",
+        "Run an approved stale-paper scan for the current actor.",
+        StaleScanArgs,
+        "metadata",
+        _stale_scan,
     ),
 }
 
