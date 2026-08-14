@@ -22,9 +22,9 @@
 
 - [ ] T008 冻结当前 golden retrieval、QA/citation、claim、verify-p0 基线及 dataset/gate/result fingerprints。
 - [x] T009 对 Gateway 17、Gateway middleware 25、LangGraph middleware 23 个测试逐用例建立迁移矩阵。
-- [ ] T010 选择同一 exact DSH version 的全部直接 DSH 包，以及其 dependency graph 验证过的 exact compatible Cordis/vendor 版本。
+- [x] T010 选择同一 exact DSH version 的全部直接 DSH 包，以及其 dependency graph 验证过的 exact compatible Cordis/vendor 版本。
 - [ ] T011 将 `eval-golden*`、`eval-citation-audit`、`eval-claims*`、`eval-llm-recall` 和 `verify-p0` 从 `DEERFLOW_BACKEND_PY` 迁移为 `$(PY)`/migration-owned `.venv`，再冻结 baseline。
-- [ ] T012 在 `integrations/deepseek-harness/package.json` exact-pin 版本并生成 lockfile。
+- [x] T012 在 `integrations/deepseek-harness/package.json` exact-pin 版本并生成 lockfile。
 - [ ] T013 建立 repo-local versioned `DSH_HOME` 与独立 credential provider path，加入 `.gitignore`。
 - [ ] T014 建立最小 Web profile，默认 loopback、telemetry disabled，并断言 Host timeout policy active。
 - [ ] T015 建立 `paper-research` Preset 源和同步脚本，验证 UI 可选择该 Preset。

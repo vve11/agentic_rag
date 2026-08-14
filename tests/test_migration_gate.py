@@ -126,3 +126,28 @@ def test_quality_gate_make_targets_use_migration_python():
         body = migration_gate.extract_make_target_body(makefile, target)
         assert "DEERFLOW_BACKEND_PY" not in body
         assert "$(PY)" in body
+
+
+def test_dsh_package_uses_exact_compatible_versions():
+    result = migration_gate.validate_dsh_package(
+        ROOT / "integrations" / "deepseek-harness" / "package.json",
+        expected_dsh_version="0.1.0-rc.6",
+        expected_cordis_version="4.0.1",
+    )
+
+    assert result["dsh_version"] == "0.1.0-rc.6"
+    assert result["cordis_version"] == "4.0.1"
+    assert "@deepseek-ai/dsh-tool-call-timeout-policy" in result["dsh_packages"]
+    assert result["pinned"] is True
+
+
+def test_dsh_lockfile_resolves_single_cordis_and_dsh_version():
+    result = migration_gate.validate_dsh_lockfile(
+        ROOT / "integrations" / "deepseek-harness" / "pnpm-lock.yaml",
+        expected_dsh_version="0.1.0-rc.6",
+        expected_cordis_version="4.0.1",
+    )
+
+    assert result["cordis_versions"] == ["4.0.1"]
+    assert result["dsh_versions"] == ["0.1.0-rc.6"]
+    assert result["dsh_package_count"] >= 100

@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 LEGACY_TEST_FILES = (
     Path("tests/test_gateway_paper_rag.py"),
     Path("tests/test_middleware.py"),
@@ -297,6 +299,114 @@ def extract_make_target_body(makefile_text: str, target: str) -> str:
     return "\n".join(body)
 
 
+def validate_dsh_package(
+    package_json: Path,
+    *,
+    expected_dsh_version: str,
+    expected_cordis_version: str,
+) -> dict[str, Any]:
+    package = _read_json(package_json)
+    all_deps = {}
+    for key in ("dependencies", "devDependencies", "peerDependencies"):
+        value = package.get(key, {})
+        if isinstance(value, dict):
+            all_deps.update(value)
+
+    bad_ranges = {
+        name: version
+        for name, version in all_deps.items()
+        if isinstance(version, str)
+        and (version == "latest" or version.startswith(("^", "~", ">", "<", "*")))
+    }
+    if bad_ranges:
+        details = ", ".join(f"{name}={version}" for name, version in sorted(bad_ranges.items()))
+        raise GateError(f"non-exact dependency versions: {details}")
+
+    dsh_packages = {
+        name: version
+        for name, version in all_deps.items()
+        if name.startswith("@deepseek-ai/dsh")
+    }
+    if not dsh_packages:
+        raise GateError("no direct @deepseek-ai/dsh* dependencies found")
+
+    wrong_dsh = {
+        name: version
+        for name, version in dsh_packages.items()
+        if version != expected_dsh_version
+    }
+    if wrong_dsh:
+        details = ", ".join(f"{name}={version}" for name, version in sorted(wrong_dsh.items()))
+        raise GateError(f"DSH dependency version mismatch: {details}")
+
+    cordis_version = all_deps.get("@deepseek-ai/cordis")
+    if cordis_version != expected_cordis_version:
+        raise GateError(
+            f"@deepseek-ai/cordis must be {expected_cordis_version}, got {cordis_version}"
+        )
+
+    return {
+        "schema_version": 1,
+        "package_json": package_json.as_posix(),
+        "dsh_version": expected_dsh_version,
+        "cordis_version": expected_cordis_version,
+        "dsh_packages": sorted(dsh_packages),
+        "pinned": True,
+    }
+
+
+def validate_dsh_lockfile(
+    lockfile: Path,
+    *,
+    expected_dsh_version: str,
+    expected_cordis_version: str,
+) -> dict[str, Any]:
+    try:
+        lock = yaml.safe_load(lockfile.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise GateError(f"lockfile not found: {lockfile}") from exc
+    if not isinstance(lock, dict):
+        raise GateError(f"invalid lockfile: {lockfile}")
+
+    package_keys = lock.get("packages", {})
+    if not isinstance(package_keys, dict):
+        raise GateError("pnpm lockfile missing packages map")
+
+    dsh_versions: set[str] = set()
+    cordis_versions: set[str] = set()
+    dsh_package_count = 0
+    wrong_dsh: list[str] = []
+    for key in package_keys:
+        parsed = _parse_pnpm_package_key(str(key))
+        if parsed is None:
+            continue
+        name, version = parsed
+        if name == "@deepseek-ai/cordis":
+            cordis_versions.add(version)
+        if name.startswith("@deepseek-ai/dsh"):
+            dsh_package_count += 1
+            dsh_versions.add(version)
+            if version != expected_dsh_version:
+                wrong_dsh.append(f"{name}@{version}")
+
+    if cordis_versions != {expected_cordis_version}:
+        raise GateError(
+            f"expected one Cordis version {expected_cordis_version}, got {sorted(cordis_versions)}"
+        )
+    if wrong_dsh:
+        raise GateError(f"DSH lockfile version mismatch: {', '.join(sorted(wrong_dsh))}")
+    if not dsh_package_count:
+        raise GateError("no @deepseek-ai/dsh* packages found in lockfile")
+
+    return {
+        "schema_version": 1,
+        "lockfile": lockfile.as_posix(),
+        "cordis_versions": sorted(cordis_versions),
+        "dsh_versions": sorted(dsh_versions),
+        "dsh_package_count": dsh_package_count,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", default=None)
@@ -382,6 +492,19 @@ def _required_cases_for_gate(manifest: dict[str, Any], gate: str) -> list[str]:
         required.extend(manifest.get("required_cases", {}).get(inherited_gate, []))
     required.extend(manifest.get("required_cases", {}).get(gate, []))
     return list(dict.fromkeys(required))
+
+
+def _parse_pnpm_package_key(key: str) -> tuple[str, str] | None:
+    base = key.split("(", 1)[0]
+    if base.startswith("@"):
+        idx = base.rfind("@")
+        if idx <= 0:
+            return None
+        return base[:idx], base[idx + 1 :]
+    if "@" not in base:
+        return None
+    name, version = base.rsplit("@", 1)
+    return name, version
 
 
 def _fingerprint(repo_root: Path, rel: Path) -> dict[str, Any]:
