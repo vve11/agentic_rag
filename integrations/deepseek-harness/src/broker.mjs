@@ -173,6 +173,77 @@ function agentBoundaryKey(agent) {
   return agent?.id ?? agent?.session?.id;
 }
 
+export class PaperRagBrokerGenerationHost {
+  #brokerFactory;
+  #generations = new Map();
+  #shutdown = false;
+
+  constructor({ brokerFactory }) {
+    if (typeof brokerFactory !== "function") {
+      throw new Error("brokerFactory is required");
+    }
+    this.#brokerFactory = brokerFactory;
+  }
+
+  async acquire(generationId, agentId = "agent") {
+    if (this.#shutdown) {
+      throw new Error("broker generation host is shut down");
+    }
+
+    const key = String(generationId);
+    let entry = this.#generations.get(key);
+    if (entry === undefined) {
+      const broker = await this.#brokerFactory(key);
+      await broker.activate();
+      entry = { generationId: key, broker, refCount: 0, agents: new Set() };
+      this.#generations.set(key, entry);
+    }
+
+    entry.refCount += 1;
+    entry.agents.add(String(agentId));
+    let released = false;
+    return {
+      generationId: key,
+      broker: entry.broker,
+      release: async () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        entry.refCount = Math.max(0, entry.refCount - 1);
+        entry.agents.delete(String(agentId));
+      },
+    };
+  }
+
+  diagnostics() {
+    const generations = Array.from(this.#generations.values()).map((entry) => ({
+      generation_id: entry.generationId,
+      ref_count: entry.refCount,
+      agent_count: entry.agents.size,
+      private_mcp_pid: entry.broker.privateMcpPid(),
+    }));
+    return {
+      generation_count: generations.length,
+      retained_generation_count: generations.length,
+      live_private_mcp_pids: generations
+        .map((entry) => entry.private_mcp_pid)
+        .filter((pid) => typeof pid === "number"),
+      generations,
+    };
+  }
+
+  async shutdown() {
+    if (this.#shutdown && this.#generations.size === 0) {
+      return;
+    }
+    this.#shutdown = true;
+    const generations = Array.from(this.#generations.values());
+    await Promise.all(generations.map((entry) => entry.broker.close()));
+    this.#generations.clear();
+  }
+}
+
 export class PaperRagNativeBroker {
   #client;
   #rawTools = new Map();

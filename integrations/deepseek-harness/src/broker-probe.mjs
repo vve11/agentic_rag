@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  PaperRagBrokerGenerationHost,
   PaperRagNativeBroker,
   createBrokerExec,
   redactSecrets,
@@ -53,8 +54,8 @@ async function readAuditLines(path) {
 
 export async function runBrokerCompatibilityProbe(paths) {
   const cleanup = [];
-  async function startBroker(options = {}) {
-    const broker = new PaperRagNativeBroker({
+  function createProbeBroker(options = {}) {
+    return new PaperRagNativeBroker({
       command: options.command ?? fixtureCommand,
       args: options.args ?? fixtureArgs,
       cwd: paths.integrationRoot,
@@ -66,6 +67,10 @@ export async function runBrokerCompatibilityProbe(paths) {
       activePresetId: options.activePresetId ?? "paper-research",
       approval: Object.hasOwn(options, "approval") ? options.approval : approval(),
     });
+  }
+
+  async function startBroker(options = {}) {
+    const broker = createProbeBroker(options);
     cleanup.push(() => broker.close());
     await broker.activate();
     return broker;
@@ -311,6 +316,42 @@ export async function runBrokerCompatibilityProbe(paths) {
     assert.notEqual(boundaryA, boundaryB);
     assert.equal(lifecycleBroker.privateMcpPid(), restartedPid);
 
+    const generationHost = new PaperRagBrokerGenerationHost({
+      brokerFactory: () => createProbeBroker(),
+    });
+    cleanup.push(() => generationHost.shutdown());
+    const generationA = await generationHost.acquire("generation-1", "agent-a");
+    const generationB = await generationHost.acquire("generation-1", "agent-b");
+    const generationOnePid = generationA.broker.privateMcpPid();
+    assert.equal(typeof generationOnePid, "number");
+    assert.equal(generationB.broker, generationA.broker);
+    await generationA.release();
+    assert.equal(
+      generationHost.diagnostics().live_private_mcp_pids.includes(generationOnePid),
+      true,
+    );
+    const afterRelease = await generationB.broker.execute(
+      "paper_status",
+      { question: "after generation release" },
+      createBrokerExec({ agentId: "agent-b", callId: "call-generation-b" }),
+    );
+    assert.equal(afterRelease.structuredContent.ok, true);
+
+    const generationC = await generationHost.acquire("generation-2", "agent-c");
+    const generationTwoPid = generationC.broker.privateMcpPid();
+    assert.equal(typeof generationTwoPid, "number");
+    assert.notEqual(generationTwoPid, generationOnePid);
+    const generationDiagnostics = generationHost.diagnostics();
+    assert.equal(generationDiagnostics.generation_count, 2);
+    assert.equal(generationDiagnostics.retained_generation_count, 2);
+    assert.equal(generationDiagnostics.generations.length, 2);
+    await generationB.release();
+    await generationC.release();
+    assert.equal(generationHost.diagnostics().generation_count, 2);
+    await generationHost.shutdown();
+    assert.equal(generationHost.diagnostics().generation_count, 0);
+    assert.deepEqual(generationHost.diagnostics().live_private_mcp_pids, []);
+
     await assert.rejects(() => startBroker({ activePresetId: "root" }), /scope mismatch/);
 
     const dshSession = runDshSessionCompatibilityProof(paths);
@@ -356,6 +397,10 @@ export async function runBrokerCompatibilityProbe(paths) {
         child_usable_after_cancellation: true,
         multi_agent_boundaries_are_isolated: true,
         standing_generation_child_shared_by_agents: true,
+        dispose_agent_keeps_shared_child_alive: true,
+        preset_edit_creates_new_generation: true,
+        generation_count_is_diagnostic: true,
+        host_shutdown_closes_all_generations: true,
       },
       dsh_session: dshSession,
     };

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import {
   INHERITED_GLOBAL_ALLOW,
+  PaperRagBrokerGenerationHost,
   PaperRagNativeBroker,
   createBrokerExec,
   deriveRequestBoundaryId,
@@ -64,8 +65,8 @@ function cancellableApproval(calls = []) {
   };
 }
 
-async function startBroker(options = {}) {
-  const broker = new PaperRagNativeBroker({
+function createTestBroker(options = {}) {
+  return new PaperRagNativeBroker({
     command: options.command ?? fixtureCommand,
     args: options.args ?? fixtureArgs,
     cwd: paths.integrationRoot,
@@ -77,6 +78,10 @@ async function startBroker(options = {}) {
     activePresetId: options.activePresetId ?? "paper-research",
     approval: Object.hasOwn(options, "approval") ? options.approval : approval(),
   });
+}
+
+async function startBroker(options = {}) {
+  const broker = createTestBroker(options);
   cleanup.push(() => broker.close());
   await broker.activate();
   return broker;
@@ -366,6 +371,55 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
       broker.execute("paper_status", { question: "agent b" }, agentB),
     ).resolves.toMatchObject({ structuredContent: { ok: true } });
     expect(broker.privateMcpPid()).toBe(sharedPid);
+  });
+
+  test("standing generation host retains old children until bounded shutdown", async () => {
+    const host = new PaperRagBrokerGenerationHost({
+      brokerFactory: () => createTestBroker(),
+    });
+    cleanup.push(() => host.shutdown());
+
+    const agentA = await host.acquire("generation-1", "agent-a");
+    const agentB = await host.acquire("generation-1", "agent-b");
+    const firstPid = agentA.broker.privateMcpPid();
+    expect(firstPid).toBeTypeOf("number");
+    expect(agentB.broker).toBe(agentA.broker);
+    expect(agentB.broker.privateMcpPid()).toBe(firstPid);
+
+    await agentA.release();
+    expect(host.diagnostics()).toMatchObject({
+      generation_count: 1,
+      live_private_mcp_pids: [firstPid],
+    });
+    await expect(
+      agentB.broker.execute(
+        "paper_status",
+        { question: "agent b after a release" },
+        createBrokerExec({ agentId: "agent-b", callId: "call-b-after-release" }),
+      ),
+    ).resolves.toMatchObject({ structuredContent: { ok: true } });
+
+    const agentC = await host.acquire("generation-2", "agent-c");
+    const secondPid = agentC.broker.privateMcpPid();
+    expect(secondPid).toBeTypeOf("number");
+    expect(secondPid).not.toBe(firstPid);
+    expect(host.diagnostics()).toMatchObject({
+      generation_count: 2,
+      retained_generation_count: 2,
+    });
+
+    await agentB.release();
+    await agentC.release();
+    expect(host.diagnostics()).toMatchObject({
+      generation_count: 2,
+      retained_generation_count: 2,
+    });
+
+    await host.shutdown();
+    expect(host.diagnostics()).toMatchObject({
+      generation_count: 0,
+      live_private_mcp_pids: [],
+    });
   });
 
   test("passes credentials only as explicit child env and redacts secret-shaped evidence", async () => {

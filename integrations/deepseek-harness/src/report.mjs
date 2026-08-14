@@ -51,6 +51,16 @@ function hasCancellationCredentialProof(brokerProbe) {
   );
 }
 
+function hasHostLifecycleProof(brokerProbe) {
+  return (
+    brokerProbe?.lifecycle?.standing_generation_child_shared_by_agents === true &&
+    brokerProbe?.lifecycle?.dispose_agent_keeps_shared_child_alive === true &&
+    brokerProbe?.lifecycle?.preset_edit_creates_new_generation === true &&
+    brokerProbe?.lifecycle?.generation_count_is_diagnostic === true &&
+    brokerProbe?.lifecycle?.host_shutdown_closes_all_generations === true
+  );
+}
+
 export function buildG0CompatReport({
   commit,
   dirty,
@@ -123,11 +133,24 @@ export function buildG0CompatReport({
             ? "credential bridge and cancellation proof pass; DSH timeout/session convergence runner is still pending"
             : "cancel/timeout/credential bridge proof not implemented yet",
         ),
-    "DSH-G0-009": blocked(
-      brokerProbe?.lifecycle?.standing_generation_child_shared_by_agents
-        ? "standing Broker generation proof passes for shared child and isolated agent state; full Host lifecycle runner is still pending"
-        : "standing Broker generation proof not implemented yet",
-    ),
+    "DSH-G0-009": hasHostLifecycleProof(brokerProbe)
+      ? pass({
+          standing_generation_child_shared_by_agents:
+            brokerProbe.lifecycle.standing_generation_child_shared_by_agents,
+          dispose_agent_keeps_shared_child_alive:
+            brokerProbe.lifecycle.dispose_agent_keeps_shared_child_alive,
+          preset_edit_creates_new_generation:
+            brokerProbe.lifecycle.preset_edit_creates_new_generation,
+          generation_count_is_diagnostic:
+            brokerProbe.lifecycle.generation_count_is_diagnostic,
+          host_shutdown_closes_all_generations:
+            brokerProbe.lifecycle.host_shutdown_closes_all_generations,
+        })
+      : blocked(
+          brokerProbe?.lifecycle?.standing_generation_child_shared_by_agents
+            ? "standing Broker generation proof passes for shared child and isolated agent state; full Host lifecycle runner is still pending"
+            : "standing Broker generation proof not implemented yet",
+        ),
   };
 
   return {

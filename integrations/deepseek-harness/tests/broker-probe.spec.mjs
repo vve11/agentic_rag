@@ -32,5 +32,11 @@ describe("DeepSeek Harness G0 compatibility probe", () => {
       "turn/end",
       "session/end-seed",
     ]);
+    expect(probe.lifecycle).toMatchObject({
+      dispose_agent_keeps_shared_child_alive: true,
+      preset_edit_creates_new_generation: true,
+      generation_count_is_diagnostic: true,
+      host_shutdown_closes_all_generations: true,
+    });
   });
 });

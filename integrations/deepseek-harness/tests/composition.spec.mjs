@@ -274,6 +274,10 @@ describe("G0 component report", () => {
           cancellation_aborts_inflight_call: true,
           child_usable_after_cancellation: true,
           standing_generation_child_shared_by_agents: true,
+          dispose_agent_keeps_shared_child_alive: true,
+          preset_edit_creates_new_generation: true,
+          generation_count_is_diagnostic: true,
+          host_shutdown_closes_all_generations: true,
         },
         dsh_session: dshSession,
       },
@@ -298,8 +302,14 @@ describe("G0 component report", () => {
       },
     });
     expect(report.cases["DSH-G0-009"]).toMatchObject({
-      status: "BLOCKED",
-      reason: expect.stringContaining("Host lifecycle"),
+      status: "PASS",
+      evidence: {
+        standing_generation_child_shared_by_agents: true,
+        dispose_agent_keeps_shared_child_alive: true,
+        preset_edit_creates_new_generation: true,
+        generation_count_is_diagnostic: true,
+        host_shutdown_closes_all_generations: true,
+      },
     });
   });
 });
