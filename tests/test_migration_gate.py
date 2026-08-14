@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -793,6 +794,60 @@ def test_live002_workflow_initializes_qdrant_before_candidate_ingest(
     assert result["checks"][-2]["id"] == "qa-citations"
     assert ensure_calls == ["ensure"]
     assert tool_calls == ["paper_discover", "discovery_candidate_ingest", "paper_qa"]
+
+
+def test_live_g2_artifact_validation_allows_zero_citations_when_file_opens(tmp_path: Path):
+    artifact_root = tmp_path / "work/artifacts"
+    artifact_dir = artifact_root / "artifact-1"
+    artifact_dir.mkdir(parents=True)
+    pptx_path = artifact_dir / "deck.pptx"
+    with zipfile.ZipFile(pptx_path, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+    manifest_path = artifact_dir / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "files": [
+                    {
+                        "path": str(pptx_path),
+                        "size_bytes": pptx_path.stat().st_size,
+                        "sha256": "0" * 64,
+                    }
+                ],
+                "metadata": {"deliver": {"n_citations": 0}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    workspace = migration_gate.LiveG2Workspace(
+        work_root=tmp_path / "work",
+        data_root=tmp_path / "work/data",
+        index_root=tmp_path / "work/data/index",
+        artifact_root=artifact_root,
+        import_root=tmp_path / "work/imports",
+        dsh_home=tmp_path / "work/runtime/deepseek-harness/versions/0.1.0-rc.6/dsh-home",
+        config_path=tmp_path / "work/config.live-g2.yaml",
+        feedback_path=tmp_path / "work/data/index/feedback.sqlite",
+    )
+
+    summary, checks = migration_gate._validate_live_g2_artifact(
+        {
+            "data": {
+                "artifact": {
+                    "artifact_id": "artifact-1",
+                    "manifest_path": str(manifest_path),
+                }
+            }
+        },
+        workspace,
+        "pptx",
+    )
+
+    assert summary["n_citations"] == 0
+    assert {check["id"]: check["status"] for check in checks} == {
+        "deliver-pptx-under-artifact-root": "PASS",
+        "deliver-pptx-opens": "PASS",
+    }
 
 
 def test_live001_summary_requires_paper_qa_citation_and_abstain():

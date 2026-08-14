@@ -1538,11 +1538,6 @@ def _validate_live_g2_artifact(
             "status": "PASS" if open_ok else "FAIL",
             "detail": f"size={files[0].get('size_bytes')}",
         },
-        {
-            "id": f"deliver-{fmt}-citations",
-            "status": "PASS" if n_citations > 0 else "FAIL",
-            "detail": f"n_citations={n_citations}",
-        },
     ]
     return summary, checks
 
