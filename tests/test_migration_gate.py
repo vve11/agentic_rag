@@ -335,6 +335,93 @@ def test_validate_live_rejects_missing_or_unauthorized_report(
         migration_gate.validate_live(tmp_path, manifest_path, "G1")
 
 
+def test_run_live_requires_explicit_authorization_before_side_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    manifest = {
+        "live_cases": [
+            {
+                "id": "LIVE-001",
+                "gate": "G1",
+                "report": "data/index/migration-gates/live/LIVE-001.json",
+                "requires_authorization": True,
+                "side_effects": ["real LLM calls"],
+            }
+        ]
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(migration_gate, "git_dirty", lambda _repo_root: False)
+    called = {"runner": False}
+
+    def fake_runner(*args, **kwargs):
+        called["runner"] = True
+        return {"status": "PASS"}
+
+    with pytest.raises(migration_gate.GateError, match="requires explicit authorization"):
+        migration_gate.run_live(
+            tmp_path,
+            manifest_path,
+            "LIVE-001",
+            runner_registry={"LIVE-001": fake_runner},
+        )
+
+    assert called["runner"] is False
+    assert not (tmp_path / "data/index/migration-gates/live/LIVE-001.json").exists()
+
+
+def test_run_live_writes_authorized_current_commit_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    manifest = {
+        "live_cases": [
+            {
+                "id": "LIVE-001",
+                "gate": "G1",
+                "report": "data/index/migration-gates/live/LIVE-001.json",
+                "max_age_hours": 24,
+                "requires_authorization": True,
+                "side_effects": ["real LLM calls"],
+            }
+        ]
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(migration_gate, "git_dirty", lambda _repo_root: False)
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+
+    def fake_runner(repo_root, live_case, *, config_env, authorized_by):
+        return {
+            "status": "PASS",
+            "checks": [{"id": "fixed-paper-qa", "status": "PASS"}],
+            "metrics": {"cite_precision": 1.0, "abstain_ok": 1.0},
+            "data_root": "data/index",
+            "credential_refs": ["OPENAI_API_KEY"],
+            "model": "deepseek-v4-flash",
+        }
+
+    result = migration_gate.run_live(
+        tmp_path,
+        manifest_path,
+        "LIVE-001",
+        authorized_by="at",
+        config_env="PAPER_RAG_CONFIG",
+        runner_registry={"LIVE-001": fake_runner},
+    )
+
+    assert result["id"] == "LIVE-001"
+    assert result["gate"] == "G1"
+    assert result["status"] == "PASS"
+    assert result["authorized"] is True
+    assert result["authorized_by"] == "at"
+    assert result["commit"] == "test-head"
+    assert result["side_effects"] == ["real LLM calls"]
+    assert result["config_env"] == "PAPER_RAG_CONFIG"
+    assert result["checks"] == [{"id": "fixed-paper-qa", "status": "PASS"}]
+    assert json.loads((tmp_path / "data/index/migration-gates/live/LIVE-001.json").read_text()) == result
+    assert migration_gate.validate_live(tmp_path, manifest_path, "G1")["live_cases"] == ["LIVE-001"]
+
+
 def test_quality_gate_make_targets_use_migration_python():
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 

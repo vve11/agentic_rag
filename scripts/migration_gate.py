@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -46,6 +46,7 @@ ALLOWED_LEGACY_CLASSIFICATIONS = {
     "still-required-and-moved",
 }
 TERMINAL_CASE_STATUSES = {"PASS", "FAIL", "BLOCKED", "NOT_RUN", "NOT_APPLICABLE"}
+LIVE_REPORT_STATUSES = {"PASS", "FAIL", "BLOCKED"}
 CASE_COVERAGE_BY_COMMAND = {
     "mcp-contract": (
         "MCP-001",
@@ -92,6 +93,9 @@ CASE_COVERAGE_BY_COMMAND = {
 
 class GateError(RuntimeError):
     """Raised when migration evidence is missing or invalid."""
+
+
+LiveRunner = Callable[..., dict[str, Any]]
 
 
 def git_head(repo_root: Path) -> str:
@@ -314,6 +318,84 @@ def validate_live(repo_root: Path, manifest_path: Path, gate: str) -> dict[str, 
         "gate": gate,
         "live_cases": validated,
     }
+
+
+def run_live(
+    repo_root: Path,
+    manifest_path: Path,
+    case_id: str,
+    *,
+    authorized_by: str | None = None,
+    config_env: str | None = None,
+    runner_registry: dict[str, LiveRunner] | None = None,
+) -> dict[str, Any]:
+    if git_dirty(repo_root):
+        raise GateError("run-live requires clean checkout")
+    manifest = _read_json(manifest_path)
+    live_case = _live_case_for_id(manifest, case_id)
+    effective_authorized_by = (authorized_by or os.environ.get("PAPER_RAG_LIVE_AUTHORIZED_BY", "")).strip()
+    if live_case.get("requires_authorization") and not effective_authorized_by:
+        raise GateError(
+            f"live case {case_id} requires explicit authorization "
+            "(pass --authorized-by or set PAPER_RAG_LIVE_AUTHORIZED_BY)"
+        )
+
+    registry = runner_registry if runner_registry is not None else LIVE_CASE_RUNNERS
+    runner = registry.get(case_id)
+    if runner is None:
+        raise GateError(f"live runner not implemented for {case_id}")
+
+    payload = runner(
+        repo_root,
+        live_case,
+        config_env=config_env,
+        authorized_by=effective_authorized_by,
+    )
+    status = payload.get("status")
+    if status not in LIVE_REPORT_STATUSES:
+        raise GateError(f"live runner {case_id} returned invalid status: {status}")
+
+    report = {
+        **payload,
+        "schema_version": 1,
+        "id": case_id,
+        "gate": live_case.get("gate"),
+        "commit": git_head(repo_root),
+        "authorized": True,
+        "authorized_by": effective_authorized_by,
+        "authorization_source": "argument" if authorized_by else "environment",
+        "created_at": time.time(),
+        "side_effects": list(live_case.get("side_effects") or []),
+        "config_env": config_env,
+    }
+    report_path = repo_root / str(live_case.get("report", ""))
+    _write_json_atomic(report_path, report)
+    return report
+
+
+def _live_case_for_id(manifest: dict[str, Any], case_id: str) -> dict[str, Any]:
+    for live_case in manifest.get("live_cases", []):
+        if live_case.get("id") == case_id:
+            return live_case
+    raise GateError(f"unknown live case: {case_id}")
+
+
+def _live_runner_not_implemented(
+    repo_root: Path,
+    live_case: dict[str, Any],
+    *,
+    config_env: str | None,
+    authorized_by: str,
+) -> dict[str, Any]:
+    raise GateError(
+        f"live runner for {live_case.get('id')} is not implemented; "
+        "do not mark this live case PASS without a real DSH model run"
+    )
+
+
+LIVE_CASE_RUNNERS: dict[str, LiveRunner] = {
+    "LIVE-001": _live_runner_not_implemented,
+}
 
 
 def merge_component_reports(
@@ -600,6 +682,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--manifest", required=True)
     p.add_argument("--report", required=True)
 
+    p = sub.add_parser("run-live")
+    p.add_argument("--case", required=True)
+    p.add_argument(
+        "--manifest",
+        default="specs/20260813-deepseek-harness-migration/test/test-manifest.json",
+    )
+    p.add_argument("--authorized-by", default=None)
+    p.add_argument("--config-env", default=None)
+
     p = sub.add_parser("validate-live")
     p.add_argument("--gate", required=True)
     p.add_argument(
@@ -634,6 +725,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "run-gate":
             result = run_gate(repo_root, repo_root / args.manifest, args.gate, repo_root / args.report)
+        elif args.command == "run-live":
+            result = run_live(
+                repo_root,
+                repo_root / args.manifest,
+                args.case,
+                authorized_by=args.authorized_by,
+                config_env=args.config_env,
+            )
         elif args.command == "validate-live":
             result = validate_live(repo_root, repo_root / args.manifest, args.gate)
         elif args.command == "diff-check":
