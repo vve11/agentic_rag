@@ -1,7 +1,7 @@
 # ADR-0008 · DeerFlow 集成与自进化护栏
 
 - **日期**: 2026-05-13
-- **状态**: accepted
+- **状态**: accepted; pending supersede by ADR-0022 after G5
 
 ## DeerFlow 集成边界
 

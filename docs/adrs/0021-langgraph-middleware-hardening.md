@@ -1,7 +1,7 @@
 # ADR-0021 · DeerFlow LangGraph 中间件强化（cost / latency / recursion / PII）
 
 - **日期**: 2026-05-22
-- **状态**: accepted
+- **状态**: accepted; pending supersede by ADR-0022 after G5
 - **关联**: ADR-0020（gateway 中间件栈）/ deerflow agents/middlewares/
 
 ## Context
