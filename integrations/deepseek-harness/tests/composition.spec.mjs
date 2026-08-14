@@ -311,5 +311,6 @@ describe("G0 component report", () => {
         host_shutdown_closes_all_generations: true,
       },
     });
+    expect(report.go_no_go).toBe("go");
   });
 });

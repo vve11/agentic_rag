@@ -152,6 +152,9 @@ export function buildG0CompatReport({
             : "standing Broker generation proof not implemented yet",
         ),
   };
+  const goNoGo = Object.values(cases).every((caseResult) => caseResult.status === "PASS")
+    ? "go"
+    : "no-go";
 
   return {
     schema_version: 1,
@@ -170,7 +173,7 @@ export function buildG0CompatReport({
     broker_probe: brokerProbe,
     paths: deterministicEvidence,
     cases: Object.fromEntries(G0_CASES.map((caseId) => [caseId, cases[caseId]])),
-    go_no_go: "no-go",
+    go_no_go: goNoGo,
   };
 }
 
