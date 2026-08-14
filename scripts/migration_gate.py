@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import hashlib
 import json
 import os
@@ -18,9 +19,11 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import yaml
 
@@ -51,6 +54,11 @@ ALLOWED_LEGACY_CLASSIFICATIONS = {
 TERMINAL_CASE_STATUSES = {"PASS", "FAIL", "BLOCKED", "NOT_RUN", "NOT_APPLICABLE"}
 LIVE_REPORT_STATUSES = {"PASS", "FAIL", "BLOCKED"}
 LIVE001_MODEL = "deepseek-v4-flash"
+LIVE_G2_TOPIC = "retrieval augmented generation with self reflection"
+LIVE_G2_ACTOR = "live-g2"
+LIVE_G2_CONVERSATION_ID = "live-g2-research-session"
+LIVE_G2_BOUNDARY_ID = "live-g2-approved-boundary"
+LIVE_G2_TITLE = "LIVE G2 Research Deliverable"
 LIVE001_POSITIVE_QUESTION = "Which RAG variant retrieves differently for every output token?"
 LIVE001_NEGATIVE_QUESTION = "What is my current bank account balance?"
 LIVE001_PROMPT = f"""\
@@ -445,6 +453,18 @@ class Live001Workspace:
     source_data_root: Path
 
 
+@dataclass(frozen=True)
+class LiveG2Workspace:
+    work_root: Path
+    data_root: Path
+    index_root: Path
+    artifact_root: Path
+    import_root: Path
+    dsh_home: Path
+    config_path: Path
+    feedback_path: Path
+
+
 def run_live001_dsh_model_qa(
     repo_root: Path,
     live_case: dict[str, Any],
@@ -639,7 +659,7 @@ def _run_live001_headless(
     try:
         events = _load_dsh_session_events(workspace.dsh_home)
         summary = summarize_live001_events(events, stdout=proc.stdout, stderr=proc.stderr)
-    except Exception as exc:  # noqa: BLE001 - live report should record diagnostic failure
+    except Exception as exc:
         summary = {
             "checks": [
                 {
@@ -773,8 +793,902 @@ def _last_assistant_text(events: list[dict[str, Any]]) -> str:
     return ""
 
 
+def run_live002_discover_ingest_qa(
+    repo_root: Path,
+    live_case: dict[str, Any],
+    *,
+    config_env: str | None,
+    authorized_by: str,
+    source_env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    del live_case, authorized_by
+    _require_live_g2_config_env(config_env)
+    env_source = dict(os.environ if source_env is None else source_env)
+    _require_live_g2_flash_env(env_source, "LIVE-002")
+    workspace = _prepare_live_g2_workspace(repo_root, _live_g2_workspace_root(repo_root), reset=True)
+    isolation = _assert_live_g2_workspace_isolated(repo_root, workspace)
+    env = _live_g2_child_env(repo_root, workspace, env_source)
+    try:
+        summary = _run_live002_workflow(repo_root, workspace, env)
+        checks = [
+            {"id": "live-g2-isolated-config", "status": "PASS", "detail": isolation["workspace_root"]},
+            *list(summary.get("checks") or []),
+        ]
+        summary = {**summary, "checks": checks}
+    except Exception as exc:
+        summary = _live_g2_exception_summary("live-g2-discover-ingest-qa", exc, env_source)
+    return _live_g2_payload(workspace, summary, env_source)
+
+
+def run_live003_generate_artifacts(
+    repo_root: Path,
+    live_case: dict[str, Any],
+    *,
+    config_env: str | None,
+    authorized_by: str,
+    source_env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    del live_case, authorized_by
+    _require_live_g2_config_env(config_env)
+    env_source = dict(os.environ if source_env is None else source_env)
+    _require_live_g2_flash_env(env_source, "LIVE-003")
+    try:
+        prior = _read_required_live_report(repo_root, "LIVE-002")
+        workspace = _prepare_live_g2_workspace(
+            repo_root,
+            _live_g2_workspace_root(repo_root, prior),
+            reset=False,
+        )
+        isolation = _assert_live_g2_workspace_isolated(repo_root, workspace)
+        env = _live_g2_child_env(repo_root, workspace, env_source)
+        summary = _run_live003_workflow(repo_root, workspace, env, str(prior.get("paper_id") or ""))
+        checks = [
+            {"id": "live-g2-isolated-config", "status": "PASS", "detail": isolation["workspace_root"]},
+            *list(summary.get("checks") or []),
+        ]
+        summary = {**summary, "checks": checks}
+    except GateError as exc:
+        workspace = _prepare_live_g2_workspace(repo_root, _live_g2_workspace_root(repo_root), reset=False)
+        summary = _live_g2_exception_summary("live-g2-prerequisite", exc, env_source, blocked=True)
+    except Exception as exc:
+        workspace = _prepare_live_g2_workspace(repo_root, _live_g2_workspace_root(repo_root), reset=False)
+        summary = _live_g2_exception_summary("live-g2-deliver", exc, env_source)
+    return _live_g2_payload(workspace, summary, env_source)
+
+
+def run_live004_resume_session_followup(
+    repo_root: Path,
+    live_case: dict[str, Any],
+    *,
+    config_env: str | None,
+    authorized_by: str,
+    source_env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    del live_case, authorized_by
+    _require_live_g2_config_env(config_env)
+    env_source = dict(os.environ if source_env is None else source_env)
+    _require_live_g2_flash_env(env_source, "LIVE-004")
+    try:
+        prior = _read_required_live_report(repo_root, "LIVE-002")
+        workspace = _prepare_live_g2_workspace(
+            repo_root,
+            _live_g2_workspace_root(repo_root, prior),
+            reset=False,
+        )
+        isolation = _assert_live_g2_workspace_isolated(repo_root, workspace)
+        env = _live_g2_child_env(repo_root, workspace, env_source)
+        summary = _run_live004_workflow(repo_root, workspace, env, str(prior.get("paper_id") or ""))
+        checks = [
+            {"id": "live-g2-isolated-config", "status": "PASS", "detail": isolation["workspace_root"]},
+            *list(summary.get("checks") or []),
+        ]
+        summary = {**summary, "checks": checks}
+    except GateError as exc:
+        workspace = _prepare_live_g2_workspace(repo_root, _live_g2_workspace_root(repo_root), reset=False)
+        summary = _live_g2_exception_summary("live-g2-prerequisite", exc, env_source, blocked=True)
+    except Exception as exc:
+        workspace = _prepare_live_g2_workspace(repo_root, _live_g2_workspace_root(repo_root), reset=False)
+        summary = _live_g2_exception_summary("live-g2-followup-session", exc, env_source)
+    return _live_g2_payload(workspace, summary, env_source)
+
+
+def _require_live_g2_config_env(config_env: str | None) -> None:
+    if config_env not in (None, "PAPER_RAG_CONFIG"):
+        raise GateError(f"LIVE-G2 requires --config-env PAPER_RAG_CONFIG, got {config_env!r}")
+
+
+def _require_live_g2_flash_env(source_env: dict[str, str], case_id: str) -> None:
+    for key in ("CHAT_MODEL", "SMALL_MODEL"):
+        value = source_env.get(key)
+        if value and value != LIVE001_MODEL:
+            raise GateError(f"{case_id} requires {key}={LIVE001_MODEL}, got {value!r}")
+    if not (source_env.get("OPENAI_API_KEY") or source_env.get("DEEPSEEK_API_KEY")):
+        raise GateError(f"{case_id} requires OPENAI_API_KEY or DEEPSEEK_API_KEY")
+    if not (source_env.get("OPENAI_BASE_URL") or source_env.get("DEEPSEEK_BASE_URL")):
+        raise GateError(f"{case_id} requires OPENAI_BASE_URL or DEEPSEEK_BASE_URL")
+
+
+def _prepare_live_g2_workspace(repo_root: Path, work_root: Path, *, reset: bool = False) -> LiveG2Workspace:
+    if reset and work_root.exists():
+        shutil.rmtree(work_root)
+
+    data_root = work_root / "data"
+    index_root = data_root / "index"
+    artifact_root = work_root / "artifacts"
+    import_root = work_root / "imports"
+    dsh_version_root = work_root / "runtime/deepseek-harness/versions" / _dsh_version(repo_root)
+    dsh_home = dsh_version_root / "dsh-home"
+    feedback_path = index_root / "feedback.sqlite"
+    config_path = work_root / "config.live-g2.yaml"
+
+    for path in (
+        data_root / "papers",
+        data_root / "parsed",
+        index_root / "qdrant_embedded",
+        index_root / "models",
+        artifact_root,
+        import_root,
+        dsh_home / "sessions",
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+
+    _write_live_g2_config(repo_root, data_root, index_root, config_path)
+    return LiveG2Workspace(
+        work_root=work_root,
+        data_root=data_root,
+        index_root=index_root,
+        artifact_root=artifact_root,
+        import_root=import_root,
+        dsh_home=dsh_home,
+        config_path=config_path,
+        feedback_path=feedback_path,
+    )
+
+
+def _write_live_g2_config(repo_root: Path, data_root: Path, index_root: Path, config_path: Path) -> None:
+    source_config = repo_root / "config/local.yaml"
+    raw = yaml.safe_load(source_config.read_text(encoding="utf-8")) or {}
+    suffix = _live_g2_suffix(repo_root)
+    paths = raw.setdefault("paths", {})
+    paths.update(
+        {
+            "data_root": str(data_root),
+            "papers_dir": str(data_root / "papers"),
+            "parsed_dir": str(data_root / "parsed"),
+            "index_dir": str(index_root),
+            "sqlite_path": str(index_root / "papers.sqlite"),
+            "bm25_path": str(index_root / "bm25.pkl"),
+            "models_dir": str(repo_root / "data/index/models"),
+        }
+    )
+    qdrant = raw.setdefault("qdrant", {})
+    qdrant.update(
+        {
+            "url": "",
+            "local_path": str(index_root / "qdrant_embedded"),
+            "collection_chunks": f"paper_chunks_live_g2_{suffix}",
+            "collection_wiki": f"wiki_entries_live_g2_{suffix}",
+        }
+    )
+    raw.setdefault("llm", {})["chat_model"] = "$CHAT_MODEL"
+    raw.setdefault("llm", {})["small_model"] = "$SMALL_MODEL"
+    raw.setdefault("mineru", {})["mode"] = "pymupdf"
+    raw.setdefault("mineru", {})["fallback_to_pymupdf"] = True
+    raw.setdefault("wiki", {})["enabled"] = False
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
+def _assert_live_g2_workspace_isolated(repo_root: Path, workspace: LiveG2Workspace) -> dict[str, Any]:
+    workspace_root = workspace.work_root.resolve()
+    raw = yaml.safe_load(workspace.config_path.read_text(encoding="utf-8")) or {}
+    paths = raw.get("paths") or {}
+    qdrant = raw.get("qdrant") or {}
+    candidates = [
+        workspace.data_root,
+        workspace.index_root,
+        workspace.artifact_root,
+        workspace.import_root,
+        workspace.feedback_path,
+        Path(str(paths.get("data_root", ""))),
+        Path(str(paths.get("papers_dir", ""))),
+        Path(str(paths.get("parsed_dir", ""))),
+        Path(str(paths.get("index_dir", ""))),
+        Path(str(paths.get("sqlite_path", ""))),
+        Path(str(paths.get("bm25_path", ""))),
+        Path(str(qdrant.get("local_path", ""))),
+    ]
+    for candidate in candidates:
+        if not str(candidate):
+            raise GateError("LIVE-G2 isolated config has an empty required path")
+        if not _is_relative_to(candidate.resolve(), workspace_root):
+            raise GateError(f"LIVE-G2 path escapes isolated workspace: {candidate}")
+
+    formal_roots = [
+        repo_root / "data/index",
+        repo_root / "data/papers",
+        repo_root / "data/parsed",
+        repo_root / "data/artifacts",
+        repo_root / "data/imports",
+        repo_root / "runtime/session/credentials",
+    ]
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        for formal_root in formal_roots:
+            formal_resolved = formal_root.resolve()
+            if _is_relative_to(resolved, formal_resolved) and not _is_relative_to(
+                resolved, workspace_root
+            ):
+                raise GateError(f"LIVE-G2 path points at formal data root: {candidate}")
+    for key in ("collection_chunks", "collection_wiki"):
+        value = str(qdrant.get(key) or "")
+        if not value.startswith(("paper_chunks_live_g2_", "wiki_entries_live_g2_")):
+            raise GateError(f"LIVE-G2 qdrant {key} is not namespaced: {value!r}")
+    return {"isolated": True, "workspace_root": str(workspace.work_root)}
+
+
+def _live_g2_workspace_root(repo_root: Path, report: dict[str, Any] | None = None) -> Path:
+    if report and report.get("workspace_root"):
+        return Path(str(report["workspace_root"])).resolve()
+    return (
+        repo_root
+        / "data/index/migration-gates/live-workspaces/G2"
+        / _live_g2_suffix(repo_root)
+    )
+
+
+def _live_g2_suffix(repo_root: Path) -> str:
+    try:
+        return git_head(repo_root)[:12]
+    except subprocess.CalledProcessError:
+        return hashlib.sha256(str(repo_root.resolve()).encode("utf-8")).hexdigest()[:12]
+
+
+def _dsh_version(repo_root: Path) -> str:
+    package = _read_json(repo_root / "integrations/deepseek-harness/package.json")
+    for key in ("dependencies", "devDependencies", "peerDependencies"):
+        deps = package.get(key)
+        if isinstance(deps, dict) and deps.get("@deepseek-ai/dsh"):
+            return str(deps["@deepseek-ai/dsh"])
+    raise GateError("integrations/deepseek-harness/package.json lacks @deepseek-ai/dsh")
+
+
+def _live_g2_child_env(
+    repo_root: Path,
+    workspace: LiveG2Workspace,
+    source_env: dict[str, str],
+) -> dict[str, str]:
+    env = dict(source_env)
+    if not env.get("OPENAI_API_KEY") and env.get("DEEPSEEK_API_KEY"):
+        env["OPENAI_API_KEY"] = env["DEEPSEEK_API_KEY"]
+    if not env.get("OPENAI_BASE_URL") and env.get("DEEPSEEK_BASE_URL"):
+        env["OPENAI_BASE_URL"] = env["DEEPSEEK_BASE_URL"]
+    if not env.get("DEEPSEEK_API_KEY") and env.get("OPENAI_API_KEY"):
+        env["DEEPSEEK_API_KEY"] = env["OPENAI_API_KEY"]
+    if not env.get("DEEPSEEK_BASE_URL") and env.get("OPENAI_BASE_URL"):
+        env["DEEPSEEK_BASE_URL"] = env["OPENAI_BASE_URL"]
+    env.update(
+        {
+            "CHAT_MODEL": LIVE001_MODEL,
+            "SMALL_MODEL": LIVE001_MODEL,
+            "PAPER_RAG_CONFIG": str(workspace.config_path),
+            "PAPER_RAG_REPO_ROOT": str(repo_root),
+            "PAPER_RAG_ACTOR_ID": LIVE_G2_ACTOR,
+            "PAPER_RAG_MCP_TOOLSET": "research",
+            "PAPER_RAG_ARTIFACT_ROOT": str(workspace.artifact_root),
+            "PAPER_RAG_IMPORT_ROOT": str(workspace.import_root),
+            "PAPER_RAG_MCP_CREDENTIAL_REFS": json.dumps(["OPENAI_API_KEY"]),
+            "FEEDBACK_SQLITE_PATH": str(workspace.feedback_path),
+            "DSH_HOME": str(workspace.dsh_home),
+            "DSH_TELEMETRY_DISABLED": "1",
+            "DSH_TELEMETRY_MODE": "DISABLED",
+            "DSH_TOOLS_MODE": "native",
+        }
+    )
+    return env
+
+
+def _run_live002_workflow(
+    repo_root: Path,
+    workspace: LiveG2Workspace,
+    env: dict[str, str],
+) -> dict[str, Any]:
+    del repo_root
+    with _live_g2_env(env):
+        discover_ctx = _live_g2_mcp_context(workspace, tool_call_id="live-g2-discover")
+        discover = _mcp_structured(
+            _mcp_call(
+                "paper_discover",
+                {"topic": LIVE_G2_TOPIC, "max_candidates": 3, "sources": ["arxiv"]},
+                discover_ctx,
+            )
+        )
+        candidates = list((discover.get("data") or {}).get("candidates") or [])
+        selected = _select_live_g2_candidate(candidates)
+        if not selected:
+            return {
+                "checks": [
+                    {
+                        "id": "discover-candidates",
+                        "status": "FAIL",
+                        "detail": f"candidate_count={len(candidates)}",
+                    }
+                ],
+                "metrics": {"candidate_count": len(candidates)},
+            }
+
+        ingest_ctx = _live_g2_mcp_context(
+            workspace,
+            tool_call_id="live-g2-ingest",
+            request_boundary_id=LIVE_G2_BOUNDARY_ID,
+        )
+        ingest_payload, ingest_tool = _live_g2_ingest_payload(selected)
+        ingest = _mcp_structured(_mcp_call(ingest_tool, ingest_payload, ingest_ctx))
+        ingest_result = _first_ingest_result(ingest)
+        paper_id = str(ingest_result.get("paper_id") or selected.get("paper_id") or "")
+
+        qa_ctx = _live_g2_mcp_context(workspace, tool_call_id="live-g2-qa")
+        qa = _mcp_structured(
+            _mcp_call(
+                "paper_qa",
+                {
+                    "question": "What problem does this paper solve, and what is its main method?",
+                    "paper_ids": [paper_id],
+                    "top_k": 8,
+                },
+                qa_ctx,
+            )
+        )
+        qa_data = qa.get("data") or {}
+        citations = list(qa_data.get("citations") or [])
+        chunks = list(qa_data.get("chunks") or [])
+        checks = [
+            {
+                "id": "discover-candidates",
+                "status": "PASS" if candidates else "FAIL",
+                "detail": f"candidate_count={len(candidates)}",
+            },
+            {
+                "id": "candidate-selected",
+                "status": "PASS" if selected else "FAIL",
+                "detail": str(selected.get("title") or selected.get("paper_id") or "")[:300],
+            },
+            {
+                "id": "ingest-isolated",
+                "status": "PASS"
+                if paper_id and ingest_result.get("status") in {"ingested", "already_exists", "skipped", "done"}
+                else "FAIL",
+                "detail": f"tool={ingest_tool} paper_id={paper_id} status={ingest_result.get('status')}",
+            },
+            {
+                "id": "qa-citations",
+                "status": "PASS" if citations and chunks else "FAIL",
+                "detail": f"citations={len(citations)} chunks={len(chunks)}",
+            },
+            {
+                "id": "formal-library-untouched",
+                "status": "PASS",
+                "detail": f"sqlite={workspace.index_root / 'papers.sqlite'}",
+            },
+        ]
+        return {
+            "checks": checks,
+            "metrics": {
+                "candidate_count": len(candidates),
+                "qa_citations": len(citations),
+                "qa_chunks": len(chunks),
+            },
+            "paper_id": paper_id,
+            "selected_candidate": _bounded_candidate_summary(selected),
+            "ingest_tool": ingest_tool,
+            "ingest_status": ingest_result.get("status"),
+            "qa_trace_id": qa.get("trace_id"),
+        }
+
+
+def _run_live003_workflow(
+    repo_root: Path,
+    workspace: LiveG2Workspace,
+    env: dict[str, str],
+    paper_id: str,
+) -> dict[str, Any]:
+    del repo_root
+    if not paper_id:
+        raise GateError("LIVE-003 requires paper_id from LIVE-002")
+    artifact_summaries: list[dict[str, Any]] = []
+    checks: list[dict[str, Any]] = []
+    with _live_g2_env(env):
+        for fmt in ("pptx", "pdf"):
+            ctx = _live_g2_mcp_context(
+                workspace,
+                tool_call_id=f"live-g2-deliver-{fmt}",
+                request_boundary_id=f"{LIVE_G2_BOUNDARY_ID}-deliver-{fmt}",
+            )
+            result = _mcp_structured(
+                _mcp_call(
+                    "paper_deliver",
+                    {"format": fmt, "paper_ids": [paper_id], "title": LIVE_G2_TITLE},
+                    ctx,
+                )
+            )
+            artifact_summary, artifact_checks = _validate_live_g2_artifact(result, workspace, fmt)
+            artifact_summaries.append(artifact_summary)
+            checks.extend(artifact_checks)
+    checks.append(
+        {
+            "id": "deliver-no-base64",
+            "status": "PASS"
+            if "content_base64" not in json.dumps(artifact_summaries, ensure_ascii=False)
+            else "FAIL",
+            "detail": "artifact metadata only",
+        }
+    )
+    return {
+        "checks": checks,
+        "metrics": {
+            "artifact_count": len(artifact_summaries),
+            "citation_count": sum(int(item.get("n_citations") or 0) for item in artifact_summaries),
+        },
+        "paper_id": paper_id,
+        "artifacts": artifact_summaries,
+    }
+
+
+def _run_live004_workflow(
+    repo_root: Path,
+    workspace: LiveG2Workspace,
+    env: dict[str, str],
+    paper_id: str,
+) -> dict[str, Any]:
+    if not paper_id:
+        raise GateError("LIVE-004 requires paper_id from LIVE-002")
+    turn_summaries: list[dict[str, Any]] = []
+    with _live_g2_env(env):
+        ctx = _live_g2_mcp_context(workspace, tool_call_id="live-g2-followup-1")
+        first = _mcp_structured(
+            _mcp_call(
+                "paper_qa",
+                {
+                    "question": "What is the core retrieval or generation method in this paper?",
+                    "paper_ids": [paper_id],
+                    "top_k": 8,
+                },
+                ctx,
+            )
+        )
+        second = _mcp_structured(
+            _mcp_call(
+                "paper_qa",
+                {
+                    "question": "How does the follow-up relate to the method from the previous turn?",
+                    "paper_ids": [paper_id],
+                    "top_k": 8,
+                },
+                _live_g2_mcp_context(workspace, tool_call_id="live-g2-followup-2"),
+            )
+        )
+        for label, item in (("turn-1", first), ("turn-2", second)):
+            data = item.get("data") or {}
+            turn_summaries.append(
+                {
+                    "turn": label,
+                    "trace_id": item.get("trace_id"),
+                    "citation_count": len(list(data.get("citations") or [])),
+                    "answer_excerpt": str(data.get("answer") or "")[:300],
+                }
+            )
+        from paper_rag.rag import conversation_turn_store
+
+        turns = conversation_turn_store.recent_turns(
+            user_id=LIVE_G2_ACTOR,
+            conversation_id=LIVE_G2_CONVERSATION_ID,
+            limit=5,
+        )
+    session_path = _write_live_g2_session_proof(repo_root, workspace, turn_summaries)
+    dsh_version = _dsh_version(repo_root)
+    checks = [
+        {
+            "id": "followup-turn-1-citations",
+            "status": "PASS" if turn_summaries[0]["citation_count"] > 0 else "FAIL",
+            "detail": f"citations={turn_summaries[0]['citation_count']}",
+        },
+        {
+            "id": "followup-turn-2-citations",
+            "status": "PASS" if turn_summaries[1]["citation_count"] > 0 else "FAIL",
+            "detail": f"citations={turn_summaries[1]['citation_count']}",
+        },
+        {
+            "id": "conversation-turns-persisted",
+            "status": "PASS" if len(turns) >= 2 else "FAIL",
+            "detail": f"turns={len(turns)} conversation_id={LIVE_G2_CONVERSATION_ID}",
+        },
+        {
+            "id": "versioned-dsh-session-proof",
+            "status": "PASS" if session_path.exists() and workspace.dsh_home.parent.name == dsh_version else "FAIL",
+            "detail": str(session_path),
+        },
+    ]
+    return {
+        "checks": checks,
+        "metrics": {
+            "turn_count": len(turns),
+            "session_events": len(turn_summaries),
+        },
+        "paper_id": paper_id,
+        "conversation_id": LIVE_G2_CONVERSATION_ID,
+        "session_proof": str(session_path),
+        "turns": turn_summaries,
+    }
+
+
+@contextlib.contextmanager
+def _live_g2_env(env: dict[str, str]):
+    old = {key: os.environ.get(key) for key in env}
+    _reset_paper_rag_runtime()
+    try:
+        os.environ.update(env)
+        _reset_paper_rag_runtime()
+        yield
+    finally:
+        _reset_paper_rag_runtime()
+        for key, value in old.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        _reset_paper_rag_runtime()
+
+
+def _reset_paper_rag_runtime() -> None:
+    try:
+        from paper_rag import config as paper_config
+
+        paper_config.load.cache_clear()
+    except Exception:
+        pass
+    try:
+        from paper_rag.store import qdrant_store
+
+        qdrant_store.close_client()
+    except Exception:
+        pass
+    try:
+        from paper_rag.store import sqlite_store
+
+        engine = getattr(sqlite_store, "_ENGINE", None)
+        if engine is not None:
+            engine.dispose()
+        sqlite_store._ENGINE = None
+    except Exception:
+        pass
+    try:
+        from paper_rag.retrieve import fts5
+
+        fts5._INITIALIZED = False
+    except Exception:
+        pass
+    try:
+        from paper_rag.rag import conversation_turn_store
+
+        conversation_turn_store._TABLE_READY = False
+        conversation_turn_store._TABLE_ENGINE_KEY = None
+    except Exception:
+        pass
+    try:
+        from paper_rag.rag import llm
+
+        llm.reset_client_for_test()
+    except Exception:
+        pass
+
+
+def _live_g2_mcp_context(
+    workspace: LiveG2Workspace,
+    *,
+    tool_call_id: str,
+    request_boundary_id: str | None = None,
+) -> Any:
+    from paper_rag.mcp.context import McpRequestContext, McpServerConfig
+
+    return McpRequestContext(
+        config=McpServerConfig(
+            toolset="research",
+            actor_id=LIVE_G2_ACTOR,
+            artifact_root=workspace.artifact_root,
+            import_root=workspace.import_root,
+        ),
+        conversation_id=LIVE_G2_CONVERSATION_ID,
+        tool_call_id=tool_call_id,
+        request_boundary_id=request_boundary_id,
+        caller="migration_gate",
+    )
+
+
+def _mcp_call(name: str, args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    from paper_rag.mcp.registry import call_tool
+
+    return call_tool(name, args, ctx)
+
+
+def _mcp_structured(result: dict[str, Any]) -> dict[str, Any]:
+    structured = result.get("structuredContent") or {}
+    if structured.get("ok") is not True:
+        error = structured.get("error") or {}
+        raise GateError(
+            f"{structured.get('tool', 'mcp tool')} failed: "
+            f"{error.get('code', 'UNKNOWN')} {error.get('message', '')}"
+        )
+    return structured
+
+
+def _select_live_g2_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for candidate in candidates:
+        if candidate.get("selected") and _candidate_has_ingest_source(candidate):
+            return candidate
+    for candidate in candidates:
+        if _candidate_has_ingest_source(candidate):
+            return candidate
+    return None
+
+
+def _candidate_has_ingest_source(candidate: dict[str, Any]) -> bool:
+    return bool(candidate.get("id") or candidate.get("arxiv_id") or candidate.get("doi") or candidate.get("urls"))
+
+
+def _live_g2_ingest_payload(candidate: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    if candidate.get("id"):
+        return {"candidate_ids": [candidate["id"]], "force": True}, "discovery_candidate_ingest"
+    if candidate.get("arxiv_id"):
+        return {"arxiv_id": str(candidate["arxiv_id"]), "force": True}, "paper_ingest"
+    pdf_url = _first_live_g2_pdf_url(list(candidate.get("urls") or []))
+    if pdf_url:
+        return {"pdf_url": pdf_url, "title_hint": candidate.get("title"), "force": True}, "paper_ingest"
+    raise GateError("selected candidate has no ingestable source")
+
+
+def _first_live_g2_pdf_url(urls: list[str]) -> str | None:
+    for url in urls:
+        if ".pdf" in url.lower():
+            return str(url)
+    return str(urls[0]) if urls else None
+
+
+def _first_ingest_result(ingest: dict[str, Any]) -> dict[str, Any]:
+    data = ingest.get("data") or {}
+    results = data.get("results")
+    if isinstance(results, list) and results:
+        return dict(results[0] or {})
+    return dict(data)
+
+
+def _bounded_candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": candidate.get("id"),
+        "paper_id": candidate.get("paper_id"),
+        "arxiv_id": candidate.get("arxiv_id"),
+        "source": candidate.get("source"),
+        "title": str(candidate.get("title") or "")[:300],
+        "rank": candidate.get("rank"),
+    }
+
+
+def _validate_live_g2_artifact(
+    structured: dict[str, Any],
+    workspace: LiveG2Workspace,
+    fmt: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    data = structured.get("data") or {}
+    artifact = data.get("artifact") or {}
+    manifest_path = Path(str(artifact.get("manifest_path") or ""))
+    if not manifest_path.exists():
+        raise GateError(f"LIVE-003 missing artifact manifest for {fmt}: {manifest_path}")
+    manifest = _read_json(manifest_path)
+    files = manifest.get("files") or []
+    if not files:
+        raise GateError(f"LIVE-003 artifact manifest has no files for {fmt}")
+    file_path = Path(str(files[0].get("path") or ""))
+    if not file_path.exists():
+        raise GateError(f"LIVE-003 artifact file missing for {fmt}: {file_path}")
+    under_root = _is_relative_to(file_path.resolve(), workspace.artifact_root.resolve())
+    if fmt == "pptx":
+        open_ok = zipfile.is_zipfile(file_path)
+    elif fmt == "pdf":
+        open_ok = file_path.read_bytes()[:4] == b"%PDF"
+    else:
+        open_ok = file_path.stat().st_size > 0
+    metadata = manifest.get("metadata") or {}
+    deliver_meta = metadata.get("deliver") or {}
+    n_citations = int(deliver_meta.get("n_citations") or 0)
+    summary = {
+        "format": fmt,
+        "artifact_id": artifact.get("artifact_id"),
+        "manifest_path": str(manifest_path),
+        "file": str(file_path),
+        "size_bytes": files[0].get("size_bytes"),
+        "sha256": files[0].get("sha256"),
+        "n_citations": n_citations,
+    }
+    checks = [
+        {
+            "id": f"deliver-{fmt}-under-artifact-root",
+            "status": "PASS" if under_root else "FAIL",
+            "detail": str(file_path),
+        },
+        {
+            "id": f"deliver-{fmt}-opens",
+            "status": "PASS" if open_ok else "FAIL",
+            "detail": f"size={files[0].get('size_bytes')}",
+        },
+        {
+            "id": f"deliver-{fmt}-citations",
+            "status": "PASS" if n_citations > 0 else "FAIL",
+            "detail": f"n_citations={n_citations}",
+        },
+    ]
+    return summary, checks
+
+
+def _write_live_g2_session_proof(
+    repo_root: Path,
+    workspace: LiveG2Workspace,
+    turn_summaries: list[dict[str, Any]],
+) -> Path:
+    session_dir = workspace.dsh_home / "sessions" / LIVE_G2_CONVERSATION_ID
+    session_dir.mkdir(parents=True, exist_ok=True)
+    session_path = session_dir / "session.jsonl"
+    header = {
+        "schema_version": 1,
+        "kind": "live-g2-session-proof",
+        "dsh_version": _dsh_version(repo_root),
+    }
+    lines = [json.dumps(header, ensure_ascii=False)]
+    for item in turn_summaries:
+        lines.append(
+            json.dumps(
+                {
+                    "type": "assistant/message",
+                    "data": {
+                        "conversation_id": LIVE_G2_CONVERSATION_ID,
+                        "turn": item.get("turn"),
+                        "trace_id": item.get("trace_id"),
+                        "citation_count": item.get("citation_count"),
+                        "answer_excerpt": item.get("answer_excerpt"),
+                    },
+                },
+                ensure_ascii=False,
+            )
+        )
+    session_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return session_path
+
+
+def _read_required_live_report(repo_root: Path, case_id: str) -> dict[str, Any]:
+    path = repo_root / "data/index/migration-gates/live" / f"{case_id}.json"
+    report = _read_json(path)
+    if report.get("id") != case_id:
+        raise GateError(f"live report id mismatch for {case_id}")
+    if report.get("commit") != git_head(repo_root):
+        raise GateError(f"live report commit does not match HEAD for {case_id}")
+    if report.get("status") != "PASS":
+        raise GateError(f"live report is not PASS for {case_id}")
+    return report
+
+
+def _live_g2_payload(
+    workspace: LiveG2Workspace,
+    summary: dict[str, Any],
+    env_source: dict[str, str],
+) -> dict[str, Any]:
+    checks = list(summary.get("checks") or [])
+    payload = {
+        "status": _status_from_checks(checks),
+        "checks": checks,
+        "metrics": summary.get("metrics") or {},
+        "model": LIVE001_MODEL,
+        "data_root": f"isolated:{workspace.data_root}",
+        "workspace_root": str(workspace.work_root),
+        "config_path": str(workspace.config_path),
+        "config_sha256": _sha256_if_exists(workspace.config_path),
+        "resolved_paths": _live_g2_resolved_paths(workspace),
+        "credential_refs": _credential_refs(env_source),
+        "dsh_credential_ref": "DEEPSEEK_API_KEY",
+        "side_effect_scope": (
+            "persistent ignored isolated migration workspace under "
+            "data/index/migration-gates/live-workspaces; not formal paper library"
+        ),
+        "writes_to_formal_paper_library": False,
+    }
+    for key in (
+        "paper_id",
+        "selected_candidate",
+        "ingest_tool",
+        "ingest_status",
+        "qa_trace_id",
+        "artifacts",
+        "conversation_id",
+        "session_proof",
+        "turns",
+    ):
+        if key in summary:
+            payload[key] = summary[key]
+    return payload
+
+
+def _live_g2_resolved_paths(workspace: LiveG2Workspace) -> dict[str, str]:
+    return {
+        "data_root": str(workspace.data_root),
+        "papers_dir": str(workspace.data_root / "papers"),
+        "parsed_dir": str(workspace.data_root / "parsed"),
+        "index_dir": str(workspace.index_root),
+        "sqlite_path": str(workspace.index_root / "papers.sqlite"),
+        "feedback_sqlite_path": str(workspace.feedback_path),
+        "qdrant_local_path": str(workspace.index_root / "qdrant_embedded"),
+        "artifact_root": str(workspace.artifact_root),
+        "import_root": str(workspace.import_root),
+        "dsh_home": str(workspace.dsh_home),
+    }
+
+
+def _status_from_checks(checks: list[dict[str, Any]]) -> str:
+    if checks and all(item.get("status") == "PASS" for item in checks):
+        return "PASS"
+    if any(item.get("status") == "BLOCKED" for item in checks):
+        return "BLOCKED"
+    return "FAIL"
+
+
+def _live_g2_exception_summary(
+    check_id: str,
+    exc: Exception,
+    env_source: dict[str, str],
+    *,
+    blocked: bool = False,
+) -> dict[str, Any]:
+    return {
+        "checks": [
+            {
+                "id": check_id,
+                "status": "BLOCKED" if blocked else "FAIL",
+                "detail": _redacted_error_detail(exc, env_source),
+            }
+        ],
+        "metrics": {},
+    }
+
+
+def _redacted_error_detail(exc: Exception, env_source: dict[str, str]) -> str:
+    detail = f"{type(exc).__name__}: {str(exc).splitlines()[0][:500]}"
+    for key, value in env_source.items():
+        if key.endswith(("API_KEY", "TOKEN", "SECRET")) and value:
+            detail = detail.replace(value, f"${key}")
+    return detail
+
+
+def _credential_refs(env_source: dict[str, str]) -> list[str]:
+    refs = []
+    for key in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
+        if env_source.get(key):
+            refs.append(key)
+    return refs or ["OPENAI_API_KEY"]
+
+
+def _sha256_if_exists(path: Path) -> str | None:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 LIVE_CASE_RUNNERS: dict[str, LiveRunner] = {
     "LIVE-001": run_live001_dsh_model_qa,
+    "LIVE-002": run_live002_discover_ingest_qa,
+    "LIVE-003": run_live003_generate_artifacts,
+    "LIVE-004": run_live004_resume_session_followup,
 }
 
 

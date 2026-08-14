@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import migration_gate
 
@@ -590,6 +591,111 @@ llm: {}
 
     runner_dest = workspace.dsh_home / "profiles/headless/src/paper-rag-headless-runner.mjs"
     assert runner_dest.read_text(encoding="utf-8") == runner_source.read_text(encoding="utf-8")
+
+
+def test_prepare_live_g2_workspace_writes_isolated_config(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    (repo_root / "config").mkdir(parents=True)
+    (repo_root / "config/local.yaml").write_text(
+        """
+paths: {}
+embedding: {}
+qdrant: {}
+llm: {}
+mineru: {}
+wiki: {}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (repo_root / "integrations/deepseek-harness").mkdir(parents=True)
+    (repo_root / "integrations/deepseek-harness/package.json").write_text(
+        json.dumps({"dependencies": {"@deepseek-ai/dsh": "0.1.0-rc.6"}}),
+        encoding="utf-8",
+    )
+
+    workspace = migration_gate._prepare_live_g2_workspace(
+        repo_root, tmp_path / "work", reset=True
+    )
+    raw = yaml.safe_load(workspace.config_path.read_text(encoding="utf-8"))
+
+    assert Path(raw["paths"]["sqlite_path"]).is_relative_to(workspace.work_root)
+    assert Path(raw["paths"]["papers_dir"]).is_relative_to(workspace.work_root)
+    assert Path(raw["paths"]["parsed_dir"]).is_relative_to(workspace.work_root)
+    assert Path(raw["qdrant"]["local_path"]).is_relative_to(workspace.work_root)
+    assert raw["qdrant"]["collection_chunks"].startswith("paper_chunks_live_g2_")
+    assert workspace.feedback_path == workspace.index_root / "feedback.sqlite"
+    assert workspace.artifact_root.is_dir()
+    assert workspace.import_root.is_dir()
+    assert workspace.dsh_home.parent.name == "0.1.0-rc.6"
+    assert migration_gate._assert_live_g2_workspace_isolated(repo_root, workspace) == {
+        "isolated": True,
+        "workspace_root": str(workspace.work_root),
+    }
+
+
+def test_live_g2_runners_are_registered_and_use_flash_isolated_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_env = {
+        "OPENAI_API_KEY": "test-secret",
+        "OPENAI_BASE_URL": "https://api.deepseek.com",
+        "CHAT_MODEL": "deepseek-v4-flash",
+        "SMALL_MODEL": "deepseek-v4-flash",
+    }
+    workspace = migration_gate.LiveG2Workspace(
+        work_root=tmp_path / "work",
+        data_root=tmp_path / "work/data",
+        index_root=tmp_path / "work/data/index",
+        artifact_root=tmp_path / "work/artifacts",
+        import_root=tmp_path / "work/imports",
+        dsh_home=tmp_path / "work/runtime/deepseek-harness/versions/0.1.0-rc.6",
+        config_path=tmp_path / "work/config.live-g2.yaml",
+        feedback_path=tmp_path / "work/data/index/feedback.sqlite",
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        migration_gate,
+        "_prepare_live_g2_workspace",
+        lambda repo_root, work_root, *, reset=False: workspace,
+    )
+    monkeypatch.setattr(
+        migration_gate,
+        "_assert_live_g2_workspace_isolated",
+        lambda repo_root, prepared: {"isolated": True, "workspace_root": str(prepared.work_root)},
+    )
+
+    def fake_workflow(repo_root, prepared, env):
+        captured["workspace"] = prepared
+        captured["env"] = env
+        return {
+            "checks": [{"id": "fake-live-g2", "status": "PASS"}],
+            "metrics": {"tool_calls": 3},
+            "paper_id": "arxiv:2601.00001",
+        }
+
+    monkeypatch.setattr(migration_gate, "_run_live002_workflow", fake_workflow)
+
+    result = migration_gate.run_live002_discover_ingest_qa(
+        tmp_path,
+        {"id": "LIVE-002"},
+        config_env="PAPER_RAG_CONFIG",
+        authorized_by="at",
+        source_env=source_env,
+    )
+
+    assert {"LIVE-002", "LIVE-003", "LIVE-004"} <= set(migration_gate.LIVE_CASE_RUNNERS)
+    assert result["status"] == "PASS"
+    assert result["model"] == "deepseek-v4-flash"
+    assert result["paper_id"] == "arxiv:2601.00001"
+    assert result["data_root"] == f"isolated:{workspace.data_root}"
+    assert result["writes_to_formal_paper_library"] is False
+    assert captured["env"]["PAPER_RAG_CONFIG"] == str(workspace.config_path)
+    assert captured["env"]["FEEDBACK_SQLITE_PATH"] == str(workspace.feedback_path)
+    assert captured["env"]["PAPER_RAG_ARTIFACT_ROOT"] == str(workspace.artifact_root)
+    assert captured["env"]["PAPER_RAG_IMPORT_ROOT"] == str(workspace.import_root)
+    assert captured["env"]["CHAT_MODEL"] == "deepseek-v4-flash"
+    assert "test-secret" not in json.dumps(result)
 
 
 def test_live001_summary_requires_paper_qa_citation_and_abstain():
