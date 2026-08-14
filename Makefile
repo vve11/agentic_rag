@@ -157,7 +157,7 @@ eval-golden:
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
 	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
-	    $(DEERFLOW_BACKEND_PY) tests/eval/run_eval.py \
+	    $(PY) tests/eval/run_eval.py \
 	        --file tests/eval/qa_set.golden.jsonl \
 	        --retrieval-only \
 	        --top-k $${EVAL_TOP_K:-10} \
@@ -168,7 +168,7 @@ eval-golden-qa:
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
 	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
-	    $(DEERFLOW_BACKEND_PY) tests/eval/run_eval.py \
+	    $(PY) tests/eval/run_eval.py \
 	        --file tests/eval/qa_set.golden.jsonl \
 	        --no-judge \
 	        --top-k $${EVAL_TOP_K:-10} \
@@ -179,7 +179,7 @@ eval-report:
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
 	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
-	    $(DEERFLOW_BACKEND_PY) tests/eval/run_eval.py \
+	    $(PY) tests/eval/run_eval.py \
 	        --file tests/eval/qa_set.golden.jsonl \
 	        --retrieval-only \
 	        --top-k $${EVAL_TOP_K:-10} \
@@ -191,7 +191,7 @@ eval-citation-audit:
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
 	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
-	    $(DEERFLOW_BACKEND_PY) tests/eval/run_eval.py \
+	    $(PY) tests/eval/run_eval.py \
 	        --file tests/eval/qa_set.golden.jsonl \
 	        --no-judge \
 	        --top-k $${EVAL_TOP_K:-10} \
@@ -202,7 +202,7 @@ eval-ablation:
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
 	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
-	    $(DEERFLOW_BACKEND_PY) tests/eval/run_ablation.py \
+	    $(PY) tests/eval/run_ablation.py \
 	        --file tests/eval/qa_set.golden.jsonl \
 	        --top-k $${EVAL_TOP_K:-10} \
 	        --out $${EVAL_ABLATION_OUT:-data/index/eval_runs/ablation_latest.json}
@@ -212,7 +212,7 @@ eval-claims:
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
 	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
-	    $(DEERFLOW_BACKEND_PY) tests/eval/run_claim_eval.py \
+	    $(PY) tests/eval/run_claim_eval.py \
 	        --file tests/eval/qa_set.claims.jsonl \
 	        --top-k $${EVAL_TOP_K:-10} \
 	        --gate tests/eval/gates.claims.json
@@ -222,7 +222,7 @@ eval-claims-report:
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
 	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
-	    $(DEERFLOW_BACKEND_PY) tests/eval/run_claim_eval.py \
+	    $(PY) tests/eval/run_claim_eval.py \
 	        --file tests/eval/qa_set.claims.jsonl \
 	        --top-k $${EVAL_TOP_K:-10} \
 	        --gate tests/eval/gates.claims.json \
@@ -233,7 +233,7 @@ eval-claims-judge:
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
 	    PAPER_RAG_FORCE_LOCAL_REWRITE=1 \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
-	    $(DEERFLOW_BACKEND_PY) tests/eval/run_claim_eval.py \
+	    $(PY) tests/eval/run_claim_eval.py \
 	        --file tests/eval/qa_set.claims.jsonl \
 	        --top-k $${EVAL_TOP_K:-10} \
 	        --judge \
@@ -243,18 +243,18 @@ eval-llm-recall:
 	set -a; [ ! -f .env ] || . ./.env; set +a; \
 	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
 	    PYTHONPATH=$(CURDIR)/src:$(CURDIR)/tests \
-	    $(DEERFLOW_BACKEND_PY) tests/eval/run_llm_recall.py \
+	    $(PY) tests/eval/run_llm_recall.py \
 	        --file tests/eval/qa_set.claims.jsonl \
 	        --top-k $${EVAL_TOP_K:-10} \
 	        --out $${EVAL_LLM_RECALL_OUT:-data/index/eval_runs/llm_recall_latest.json} \
 	        --report-md $${EVAL_LLM_RECALL_REPORT_MD:-docs/RAG_LLM_RECALL_REPORT.md}
 
 verify-p0:
-	$(DEERFLOW_BACKEND_PY) -m ruff check src/paper_rag/rag/abstain.py src/paper_rag/rag/query_rewrite.py src/paper_rag/rag/evidence_select.py tests/test_abstain.py tests/test_m5_fixes.py tests/test_eval_metrics.py tests/test_eval_harness.py tests/test_evidence_selection.py tests/test_claim_eval.py tests/test_llm_recall_eval.py tests/eval/run_eval.py tests/eval/run_claim_eval.py tests/eval/run_llm_recall.py tests/eval/claim_metrics.py scripts/secret_scan.py
-	$(DEERFLOW_BACKEND_PY) -m pytest tests/test_abstain.py tests/test_m5_fixes.py tests/test_eval_metrics.py tests/test_eval_harness.py tests/test_evidence_selection.py tests/test_claim_eval.py tests/test_llm_recall_eval.py tests/test_chaos.py::test_qa_agentic_uses_selected_evidence_for_prompt_and_trace tests/test_finalization.py::test_stream_answer_uses_selected_evidence_for_done_payload
-	PYTHONPATH=src $(DEERFLOW_BACKEND_PY) scripts/_run_smoke.py
-	$(DEERFLOW_BACKEND_PY) scripts/secret_scan.py
-	$(MAKE) eval-golden
+	$(PY) -m ruff check src/paper_rag/rag/abstain.py src/paper_rag/rag/query_rewrite.py src/paper_rag/rag/evidence_select.py tests/test_abstain.py tests/test_m5_fixes.py tests/test_eval_metrics.py tests/test_eval_harness.py tests/test_evidence_selection.py tests/test_claim_eval.py tests/test_llm_recall_eval.py tests/eval/run_eval.py tests/eval/run_claim_eval.py tests/eval/run_llm_recall.py tests/eval/claim_metrics.py scripts/secret_scan.py
+	$(PY) -m pytest tests/test_abstain.py tests/test_m5_fixes.py tests/test_eval_metrics.py tests/test_eval_harness.py tests/test_evidence_selection.py tests/test_claim_eval.py tests/test_llm_recall_eval.py tests/test_chaos.py::test_qa_agentic_uses_selected_evidence_for_prompt_and_trace tests/test_finalization.py::test_stream_answer_uses_selected_evidence_for_done_payload
+	PYTHONPATH=src $(PY) scripts/_run_smoke.py
+	$(PY) scripts/secret_scan.py
+	$(MAKE) eval-golden PY=$(PY)
 
 calibrate-abstain:
 	$(PY) scripts/calibrate_abstain.py --mode offline \
