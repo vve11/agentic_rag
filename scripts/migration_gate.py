@@ -276,7 +276,14 @@ def run_gate(repo_root: Path, manifest_path: Path, gate: str, report_path: Path)
         command = command_by_id.get(command_id)
         if command is None:
             raise GateError(f"gate {gate} references unknown command: {command_id}")
-        commands.append({"id": command_id, "command": command["command"], **_run_shell_component(repo_root, command["command"])})
+        cwd = _resolve_command_cwd(repo_root, command.get("repository", "."))
+        commands.append(
+            {
+                "id": command_id,
+                "command": command["command"],
+                **_run_shell_component(repo_root, command["command"], cwd=cwd),
+            }
+        )
 
     required = _required_cases_for_gate(manifest, gate)
     cases = {
@@ -552,11 +559,23 @@ def _fingerprint(repo_root: Path, rel: Path) -> dict[str, Any]:
     }
 
 
-def _run_shell_component(repo_root: Path, command: str) -> dict[str, Any]:
+def _resolve_command_cwd(repo_root: Path, repository: str) -> Path:
+    candidate = (repo_root / repository).resolve()
+    try:
+        candidate.relative_to(repo_root.resolve())
+    except ValueError as exc:
+        raise GateError(f"command repository escapes repo root: {repository}") from exc
+    if not candidate.is_dir():
+        raise GateError(f"command repository not found: {repository}")
+    return candidate
+
+
+def _run_shell_component(repo_root: Path, command: str, *, cwd: Path | None = None) -> dict[str, Any]:
+    cwd = cwd or repo_root
     started = time.time()
     proc = subprocess.run(
         command,
-        cwd=repo_root,
+        cwd=cwd,
         shell=True,
         text=True,
         capture_output=True,
@@ -567,6 +586,7 @@ def _run_shell_component(repo_root: Path, command: str) -> dict[str, Any]:
         "exit_code": proc.returncode,
         "started_at": started,
         "finished_at": time.time(),
+        "cwd": _relpath(cwd, repo_root),
         "stdout": proc.stdout[-4000:],
         "stderr": proc.stderr[-4000:],
     }

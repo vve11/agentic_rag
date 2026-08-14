@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -144,6 +145,43 @@ def test_merge_component_reports_updates_required_cases(tmp_path: Path):
     assert cases["DSH-G0-001"] == {"status": "PASS", "evidence": "ok"}
     assert cases["DSH-G0-002"] == {"status": "BLOCKED", "reason": "pending"}
     assert "IGNORED-001" not in cases
+
+
+def test_run_gate_executes_component_in_declared_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo = tmp_path
+    component_root = repo / "component"
+    component_root.mkdir()
+    (component_root / "marker.txt").write_text("ok", encoding="utf-8")
+    manifest = {
+        "owned_test_commands": [
+            {
+                "id": "cwd-check",
+                "repository": "component",
+                "command": (
+                    f"{sys.executable} -c "
+                    "\"from pathlib import Path; "
+                    "print(Path.cwd().name); "
+                    "assert Path('marker.txt').read_text() == 'ok'\""
+                ),
+            }
+        ],
+        "gate_components": {"G0": ["cwd-check"]},
+        "required_cases": {"G0": []},
+    }
+    manifest_path = repo / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    report_path = repo / "G0.json"
+    monkeypatch.setattr(migration_gate, "git_dirty", lambda _repo_root: False)
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+
+    report = migration_gate.run_gate(repo, manifest_path, "G0", report_path)
+
+    command = report["commands"][0]
+    assert command["status"] == "PASS"
+    assert command["cwd"] == "component"
+    assert command["stdout"].strip() == "component"
 
 
 def test_quality_gate_make_targets_use_migration_python():
