@@ -13,9 +13,12 @@ import ast
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -47,6 +50,22 @@ ALLOWED_LEGACY_CLASSIFICATIONS = {
 }
 TERMINAL_CASE_STATUSES = {"PASS", "FAIL", "BLOCKED", "NOT_RUN", "NOT_APPLICABLE"}
 LIVE_REPORT_STATUSES = {"PASS", "FAIL", "BLOCKED"}
+LIVE001_MODEL = "deepseek-v4-flash"
+LIVE001_POSITIVE_QUESTION = "Which RAG variant retrieves differently for every output token?"
+LIVE001_NEGATIVE_QUESTION = "What is my current bank account balance?"
+LIVE001_PROMPT = f"""\
+You are running Paper RAG migration LIVE-001.
+Use only Paper RAG native tools. Do not use web search, shell, filesystem, or general knowledge.
+
+Run exactly these checks:
+1. Call paper_qa for this fixed indexed-paper question, with paper_ids ["arxiv:2005.11401"]:
+   {LIVE001_POSITIVE_QUESTION}
+2. Call paper_qa for this no-evidence question with no paper_ids:
+   {LIVE001_NEGATIVE_QUESTION}
+
+Return a concise final summary that states whether the first answer has at least one chunk citation
+and whether the second answer abstained because the indexed paper corpus has no evidence.
+"""
 CASE_COVERAGE_BY_COMMAND = {
     "mcp-contract": (
         "MCP-001",
@@ -393,8 +412,338 @@ def _live_runner_not_implemented(
     )
 
 
+@dataclass(frozen=True)
+class Live001Workspace:
+    work_root: Path
+    dsh_home: Path
+    data_root: Path
+    config_path: Path
+    source_data_root: Path
+
+
+def run_live001_dsh_model_qa(
+    repo_root: Path,
+    live_case: dict[str, Any],
+    *,
+    config_env: str | None,
+    authorized_by: str,
+    source_env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    del live_case, config_env, authorized_by
+    env_source = dict(os.environ if source_env is None else source_env)
+    _require_live001_flash_env(env_source)
+    with tempfile.TemporaryDirectory(prefix="paper-rag-live001-") as tmp:
+        workspace = _prepare_live001_workspace(repo_root, Path(tmp))
+        env = _live001_child_env(repo_root, workspace, env_source)
+        summary = _run_live001_headless(repo_root, workspace, env)
+        checks = list(summary.get("checks") or [])
+        status = "PASS" if checks and all(item.get("status") == "PASS" for item in checks) else "FAIL"
+        return {
+            "status": status,
+            "checks": checks,
+            "metrics": summary.get("metrics") or {},
+            "model": LIVE001_MODEL,
+            "dsh_model": summary.get("dsh_model"),
+            "data_root": f"isolated:{workspace.data_root}",
+            "source_data_root": _relpath(workspace.source_data_root, repo_root),
+            "credential_refs": ["OPENAI_API_KEY"],
+            "dsh_credential_ref": "DEEPSEEK_API_KEY",
+            "dsh_credential_source_ref": (
+                "DEEPSEEK_API_KEY" if env_source.get("DEEPSEEK_API_KEY") else "OPENAI_API_KEY"
+            ),
+            "side_effect_scope": "temporary isolated data copy and temporary DSH_HOME; cleaned after run",
+            "writes_to_formal_paper_library": False,
+            "assistant_excerpt": summary.get("assistant_excerpt", ""),
+        }
+
+
+def _require_live001_flash_env(source_env: dict[str, str]) -> None:
+    for key in ("CHAT_MODEL", "SMALL_MODEL"):
+        if source_env.get(key) != LIVE001_MODEL:
+            raise GateError(f"LIVE-001 requires {key}={LIVE001_MODEL}, got {source_env.get(key)!r}")
+    if not (source_env.get("OPENAI_API_KEY") or source_env.get("DEEPSEEK_API_KEY")):
+        raise GateError("LIVE-001 requires OPENAI_API_KEY or DEEPSEEK_API_KEY")
+
+
+def _prepare_live001_workspace(repo_root: Path, work_root: Path) -> Live001Workspace:
+    source_index = repo_root / "data/index"
+    source_sqlite = source_index / "papers.sqlite"
+    source_qdrant = source_index / "qdrant_embedded"
+    if not source_sqlite.exists():
+        raise GateError(f"LIVE-001 source SQLite not found: {_relpath(source_sqlite, repo_root)}")
+    if not source_qdrant.exists():
+        raise GateError(f"LIVE-001 source Qdrant path not found: {_relpath(source_qdrant, repo_root)}")
+
+    data_root = work_root / "data"
+    index_root = data_root / "index"
+    dsh_home = work_root / "dsh-home"
+    index_root.mkdir(parents=True, exist_ok=True)
+    (data_root / "papers").mkdir(parents=True, exist_ok=True)
+    (data_root / "parsed").mkdir(parents=True, exist_ok=True)
+    (work_root / "artifacts").mkdir(parents=True, exist_ok=True)
+    (work_root / "imports").mkdir(parents=True, exist_ok=True)
+    (work_root / "credentials").mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(source_sqlite, index_root / "papers.sqlite")
+    source_bm25 = source_index / "bm25.pkl"
+    if source_bm25.exists():
+        shutil.copy2(source_bm25, index_root / "bm25.pkl")
+    shutil.copytree(
+        source_qdrant,
+        index_root / "qdrant_embedded",
+        ignore=shutil.ignore_patterns(".lock"),
+        dirs_exist_ok=True,
+    )
+
+    preset_source = repo_root / "integrations/deepseek-harness/presets/paper-research"
+    preset_dest = dsh_home / ".agent-presets/paper-research"
+    if not preset_source.exists():
+        raise GateError(f"LIVE-001 preset source not found: {_relpath(preset_source, repo_root)}")
+    shutil.copytree(preset_source, preset_dest, dirs_exist_ok=True)
+
+    config_path = work_root / "config.live001.yaml"
+    _write_live001_config(repo_root, data_root, index_root, config_path)
+    return Live001Workspace(
+        work_root=work_root,
+        dsh_home=dsh_home,
+        data_root=data_root,
+        config_path=config_path,
+        source_data_root=source_index,
+    )
+
+
+def _write_live001_config(repo_root: Path, data_root: Path, index_root: Path, config_path: Path) -> None:
+    source_config = repo_root / "config/local.yaml"
+    raw = yaml.safe_load(source_config.read_text(encoding="utf-8"))
+    paths = raw.setdefault("paths", {})
+    paths.update(
+        {
+            "data_root": str(data_root),
+            "papers_dir": str(data_root / "papers"),
+            "parsed_dir": str(data_root / "parsed"),
+            "index_dir": str(index_root),
+            "sqlite_path": str(index_root / "papers.sqlite"),
+            "bm25_path": str(index_root / "bm25.pkl"),
+            "models_dir": str(repo_root / "data/index/models"),
+        }
+    )
+    qdrant = raw.setdefault("qdrant", {})
+    qdrant.update(
+        {
+            "url": "",
+            "local_path": str(index_root / "qdrant_embedded"),
+            "collection_chunks": "paper_chunks",
+            "collection_wiki": "wiki_entries",
+        }
+    )
+    raw.setdefault("llm", {})["chat_model"] = "$CHAT_MODEL"
+    raw.setdefault("llm", {})["small_model"] = "$SMALL_MODEL"
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
+def _live001_child_env(
+    repo_root: Path,
+    workspace: Live001Workspace,
+    source_env: dict[str, str],
+) -> dict[str, str]:
+    env = dict(source_env)
+    if not env.get("DEEPSEEK_API_KEY") and env.get("OPENAI_API_KEY"):
+        env["DEEPSEEK_API_KEY"] = env["OPENAI_API_KEY"]
+    if not env.get("DEEPSEEK_BASE_URL") and env.get("OPENAI_BASE_URL"):
+        env["DEEPSEEK_BASE_URL"] = env["OPENAI_BASE_URL"]
+    env.update(
+        {
+            "CHAT_MODEL": LIVE001_MODEL,
+            "SMALL_MODEL": LIVE001_MODEL,
+            "DSH_HOME": str(workspace.dsh_home),
+            "DSH_TELEMETRY_DISABLED": "1",
+            "DSH_TELEMETRY_MODE": "DISABLED",
+            "DSH_PERMISSION_MODE": "read-only",
+            "DSH_TOOLS_MODE": "native",
+            "PAPER_RAG_CONFIG": str(workspace.config_path),
+            "PAPER_RAG_REPO_ROOT": str(repo_root),
+            "PAPER_RAG_ARTIFACT_ROOT": str(workspace.work_root / "artifacts"),
+            "PAPER_RAG_IMPORT_ROOT": str(workspace.work_root / "imports"),
+            "PAPER_RAG_MCP_TOOLSET": "readonly",
+            "PAPER_RAG_DSH_CREDENTIALS_PATH": str(
+                workspace.work_root / "credentials/.credentials.yaml"
+            ),
+            "PAPER_RAG_DSH_SKILL_ROOT": str(repo_root / ".dsh/skills"),
+            "PAPER_RAG_DSH_PRESET_ID": "paper-research",
+            "PAPER_RAG_MCP_CREDENTIAL_REFS": json.dumps(["OPENAI_API_KEY"]),
+        }
+    )
+    return env
+
+
+def _run_live001_headless(
+    repo_root: Path,
+    workspace: Live001Workspace,
+    env: dict[str, str],
+) -> dict[str, Any]:
+    integration_root = repo_root / "integrations/deepseek-harness"
+    dsh_bin = integration_root / "node_modules/.bin/dsh"
+    patch_path = integration_root / "live-headless.patch.yml"
+    if not dsh_bin.exists():
+        raise GateError(f"LIVE-001 DSH binary not found: {_relpath(dsh_bin, repo_root)}")
+    if not patch_path.exists():
+        raise GateError(f"LIVE-001 headless patch not found: {_relpath(patch_path, repo_root)}")
+
+    proc = subprocess.run(
+        [
+            str(dsh_bin),
+            "--profile",
+            "headless",
+            "--patch",
+            str(patch_path),
+            LIVE001_PROMPT,
+        ],
+        cwd=integration_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=int(env.get("PAPER_RAG_LIVE_TIMEOUT_SEC", "900")),
+        check=False,
+    )
+    try:
+        events = _load_dsh_session_events(workspace.dsh_home)
+        summary = summarize_live001_events(events, stdout=proc.stdout, stderr=proc.stderr)
+    except Exception as exc:  # noqa: BLE001 - live report should record diagnostic failure
+        summary = {
+            "checks": [
+                {
+                    "id": "session-events-readable",
+                    "status": "FAIL",
+                    "detail": str(exc).splitlines()[0][:500],
+                }
+            ],
+            "metrics": {},
+            "dsh_model": None,
+            "assistant_excerpt": (proc.stdout or proc.stderr)[-500:],
+        }
+    summary["checks"] = [
+        {
+            "id": "dsh-headless-exit",
+            "status": "PASS" if proc.returncode == 0 else "FAIL",
+            "detail": f"exit={proc.returncode}",
+        },
+        *list(summary.get("checks") or []),
+    ]
+    return summary
+
+
+def _load_dsh_session_events(dsh_home: Path) -> list[dict[str, Any]]:
+    session_paths = sorted(
+        (dsh_home / "sessions").rglob("session.jsonl"),
+        key=lambda path: path.stat().st_mtime,
+    )
+    if not session_paths:
+        raise GateError(f"no plaintext DSH session log found under {dsh_home / 'sessions'}")
+    events: list[dict[str, Any]] = []
+    for line in session_paths[-1].read_text(encoding="utf-8").splitlines()[1:]:
+        if line.strip():
+            events.append(json.loads(line))
+    return events
+
+
+def summarize_live001_events(events: list[dict[str, Any]], *, stdout: str, stderr: str) -> dict[str, Any]:
+    tool_calls = [event for event in events if event.get("type") == "tool/call"]
+    tool_names = [str((event.get("data") or {}).get("name", "")) for event in tool_calls]
+    paper_qa_calls = [event for event in tool_calls if (event.get("data") or {}).get("name") == "paper_qa"]
+    text = "\n".join(_event_text(event) for event in events)
+    dsh_model = _live001_dsh_model(events)
+    citation_ok = _has_nonempty_citation(text)
+    abstain_ok = "abstain=no_evidence" in text.lower()
+    readonly_names = {
+        "paper_status",
+        "paper_list",
+        "paper_search",
+        "paper_qa",
+        "paper_section",
+        "paper_compare",
+        "wiki_lookup",
+    }
+    disallowed = sorted({name for name in tool_names if name not in readonly_names})
+    checks = [
+        {
+            "id": "dsh-model-flash",
+            "status": "PASS" if dsh_model == LIVE001_MODEL else "FAIL",
+            "detail": f"model={dsh_model}",
+        },
+        {
+            "id": "readonly-tool-surface",
+            "status": "PASS" if tool_calls and not disallowed else "FAIL",
+            "detail": f"tool_calls={tool_names} disallowed={disallowed}",
+        },
+        {
+            "id": "paper-qa-called",
+            "status": "PASS" if len(paper_qa_calls) >= 2 else "FAIL",
+            "detail": f"paper_qa_calls={len(paper_qa_calls)}",
+        },
+        {
+            "id": "fixed-paper-citation",
+            "status": "PASS" if citation_ok else "FAIL",
+            "detail": LIVE001_POSITIVE_QUESTION,
+        },
+        {
+            "id": "no-evidence-abstain",
+            "status": "PASS" if abstain_ok else "FAIL",
+            "detail": LIVE001_NEGATIVE_QUESTION,
+        },
+    ]
+    return {
+        "checks": checks,
+        "metrics": {
+            "tool_calls": len(tool_calls),
+            "paper_qa_calls": len(paper_qa_calls),
+            "citation_checks_passed": 1 if citation_ok else 0,
+            "abstain_checks_passed": 1 if abstain_ok else 0,
+        },
+        "dsh_model": dsh_model,
+        "assistant_excerpt": _last_assistant_text(events) or stdout[-500:] or stderr[-500:],
+    }
+
+
+def _event_text(value: Any) -> str:
+    if isinstance(value, dict):
+        if value.get("type") == "text" and isinstance(value.get("text"), str):
+            return value["text"]
+        return "\n".join(_event_text(item) for item in value.values())
+    if isinstance(value, list):
+        return "\n".join(_event_text(item) for item in value)
+    return ""
+
+
+def _has_nonempty_citation(text: str) -> bool:
+    for token in text.split():
+        if token.startswith("citations="):
+            return bool(token.removeprefix("citations=").strip().strip(","))
+    return False
+
+
+def _live001_dsh_model(events: list[dict[str, Any]]) -> str | None:
+    for event in events:
+        if event.get("type") == "request/header":
+            config = (event.get("data") or {}).get("config") or {}
+            if config.get("model"):
+                return str(config["model"])
+    for event in reversed(events):
+        if event.get("type") == "assistant/message":
+            source = (((event.get("data") or {}).get("message") or {}).get("source") or {})
+            if source.get("model"):
+                return str(source["model"])
+    return None
+
+
+def _last_assistant_text(events: list[dict[str, Any]]) -> str:
+    for event in reversed(events):
+        if event.get("type") == "assistant/message":
+            return _event_text((event.get("data") or {}).get("message") or "")[:500]
+    return ""
+
+
 LIVE_CASE_RUNNERS: dict[str, LiveRunner] = {
-    "LIVE-001": _live_runner_not_implemented,
+    "LIVE-001": run_live001_dsh_model_qa,
 }
 
 

@@ -422,6 +422,172 @@ def test_run_live_writes_authorized_current_commit_report(
     assert migration_gate.validate_live(tmp_path, manifest_path, "G1")["live_cases"] == ["LIVE-001"]
 
 
+def test_live001_runner_uses_isolated_workspace_and_flash_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_env = {
+        "OPENAI_API_KEY": "test-secret",
+        "OPENAI_BASE_URL": "https://api.deepseek.com",
+        "CHAT_MODEL": "deepseek-v4-flash",
+        "SMALL_MODEL": "deepseek-v4-flash",
+    }
+    workspace = migration_gate.Live001Workspace(
+        work_root=tmp_path / "work",
+        dsh_home=tmp_path / "work/dsh-home",
+        data_root=tmp_path / "work/data",
+        config_path=tmp_path / "work/config.yaml",
+        source_data_root=tmp_path / "data/index",
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        migration_gate,
+        "_prepare_live001_workspace",
+        lambda repo_root, work_root: workspace,
+    )
+
+    def fake_headless(repo_root, prepared, env):
+        captured["repo_root"] = repo_root
+        captured["workspace"] = prepared
+        captured["env"] = env
+        return {
+            "checks": [
+                {"id": "dsh-headless-exit", "status": "PASS"},
+                {"id": "fixed-paper-citation", "status": "PASS"},
+                {"id": "no-evidence-abstain", "status": "PASS"},
+            ],
+            "metrics": {
+                "tool_calls": 2,
+                "paper_qa_calls": 2,
+                "citation_checks_passed": 1,
+                "abstain_checks_passed": 1,
+            },
+            "dsh_model": "deepseek-v4-flash",
+            "assistant_excerpt": "ok",
+        }
+
+    monkeypatch.setattr(migration_gate, "_run_live001_headless", fake_headless)
+
+    result = migration_gate.run_live001_dsh_model_qa(
+        tmp_path,
+        {"id": "LIVE-001"},
+        config_env=None,
+        authorized_by="at",
+        source_env=source_env,
+    )
+
+    assert result["status"] == "PASS"
+    assert result["model"] == "deepseek-v4-flash"
+    assert result["dsh_model"] == "deepseek-v4-flash"
+    assert result["data_root"].startswith("isolated:")
+    assert result["source_data_root"] == "data/index"
+    assert result["credential_refs"] == ["OPENAI_API_KEY"]
+    assert "test-secret" not in json.dumps(result)
+    assert captured["env"]["CHAT_MODEL"] == "deepseek-v4-flash"
+    assert captured["env"]["SMALL_MODEL"] == "deepseek-v4-flash"
+    assert captured["env"]["DEEPSEEK_API_KEY"] == "test-secret"
+    assert captured["env"]["PAPER_RAG_CONFIG"] == str(workspace.config_path)
+    assert captured["env"]["DSH_HOME"] == str(workspace.dsh_home)
+    assert captured["env"]["PAPER_RAG_MCP_TOOLSET"] == "readonly"
+
+
+def test_live001_summary_requires_paper_qa_citation_and_abstain():
+    events = [
+        {
+            "type": "request/header",
+            "data": {"config": {"provider": "deepseek-official", "model": "deepseek-v4-flash"}},
+        },
+        {
+            "type": "tool/call",
+            "data": {
+                "name": "paper_qa",
+                "arguments": json.dumps(
+                    {"question": migration_gate.LIVE001_POSITIVE_QUESTION}
+                ),
+            },
+        },
+        {
+            "type": "tool/result",
+            "data": {
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool-result",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "ok=true tool=paper_qa citations=563088608864d1932716",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            },
+        },
+        {
+            "type": "tool/call",
+            "data": {
+                "name": "paper_qa",
+                "arguments": json.dumps(
+                    {"question": migration_gate.LIVE001_NEGATIVE_QUESTION}
+                ),
+            },
+        },
+        {
+            "type": "tool/result",
+            "data": {
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool-result",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "ok=true tool=paper_qa abstain=no_evidence citations=",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            },
+        },
+        {
+            "type": "assistant/message",
+            "data": {
+                "message": {
+                    "content": [{"type": "text", "text": "LIVE-001 complete"}],
+                    "source": {"provider": "deepseek-official", "model": "deepseek-v4-flash"},
+                }
+            },
+        },
+    ]
+
+    summary = migration_gate.summarize_live001_events(events, stdout="", stderr="")
+
+    assert summary["dsh_model"] == "deepseek-v4-flash"
+    assert summary["metrics"] == {
+        "tool_calls": 2,
+        "paper_qa_calls": 2,
+        "citation_checks_passed": 1,
+        "abstain_checks_passed": 1,
+    }
+    assert all(check["status"] == "PASS" for check in summary["checks"])
+
+    broken = [
+        event
+        for event in events
+        if event.get("type") != "tool/result"
+        or "abstain=no_evidence" not in json.dumps(event)
+    ]
+    broken_summary = migration_gate.summarize_live001_events(broken, stdout="", stderr="")
+
+    assert broken_summary["metrics"]["abstain_checks_passed"] == 0
+    assert any(
+        check["id"] == "no-evidence-abstain" and check["status"] == "FAIL"
+        for check in broken_summary["checks"]
+    )
+
+
 def test_quality_gate_make_targets_use_migration_python():
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
