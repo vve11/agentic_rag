@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -695,7 +696,19 @@ def test_live_g2_runners_are_registered_and_use_flash_isolated_env(
     assert captured["env"]["PAPER_RAG_ARTIFACT_ROOT"] == str(workspace.artifact_root)
     assert captured["env"]["PAPER_RAG_IMPORT_ROOT"] == str(workspace.import_root)
     assert captured["env"]["CHAT_MODEL"] == "deepseek-v4-flash"
+    assert captured["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path / "src")
     assert "test-secret" not in json.dumps(result)
+
+
+def test_live_g2_env_adds_repo_src_to_import_path(tmp_path: Path):
+    (tmp_path / "src").mkdir()
+    env = {"PAPER_RAG_REPO_ROOT": str(tmp_path)}
+    before = list(sys.path)
+
+    with migration_gate._live_g2_env(env):
+        assert sys.path[0] == str(tmp_path / "src")
+
+    assert sys.path == before
 
 
 def test_live001_summary_requires_paper_qa_citation_and_abstain():

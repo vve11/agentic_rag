@@ -1059,6 +1059,11 @@ def _live_g2_child_env(
     source_env: dict[str, str],
 ) -> dict[str, str]:
     env = dict(source_env)
+    repo_src = str(repo_root / "src")
+    existing_pythonpath = env.get("PYTHONPATH") or os.environ.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        repo_src if not existing_pythonpath else repo_src + os.pathsep + existing_pythonpath
+    )
     if not env.get("OPENAI_API_KEY") and env.get("DEEPSEEK_API_KEY"):
         env["OPENAI_API_KEY"] = env["DEEPSEEK_API_KEY"]
     if not env.get("OPENAI_BASE_URL") and env.get("DEEPSEEK_BASE_URL"):
@@ -1324,6 +1329,12 @@ def _run_live004_workflow(
 @contextlib.contextmanager
 def _live_g2_env(env: dict[str, str]):
     old = {key: os.environ.get(key) for key in env}
+    old_sys_path = list(sys.path)
+    repo_root = env.get("PAPER_RAG_REPO_ROOT")
+    if repo_root:
+        repo_src = str(Path(repo_root) / "src")
+        if repo_src not in sys.path:
+            sys.path.insert(0, repo_src)
     _reset_paper_rag_runtime()
     try:
         os.environ.update(env)
@@ -1336,6 +1347,7 @@ def _live_g2_env(env: dict[str, str]):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+        sys.path[:] = old_sys_path
         _reset_paper_rag_runtime()
 
 
