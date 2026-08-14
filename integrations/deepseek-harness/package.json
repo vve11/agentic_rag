@@ -6,6 +6,9 @@
   "packageManager": "pnpm@11.19.0",
   "description": "Paper RAG DeepSeek Harness compatibility spike integration.",
   "scripts": {
+    "bootstrap": "node scripts/bootstrap.mjs",
+    "sync-preset": "node scripts/sync-preset.mjs",
+    "start": "node scripts/start.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "dsh:dump-config": "node scripts/doctor.mjs --dump-config",
@@ -15,6 +18,7 @@
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-agent-presets": "0.1.0-rc.6",
     "@deepseek-ai/dsh-command-compact": "0.1.0-rc.6",
     "@deepseek-ai/dsh-compaction-basic": "0.1.0-rc.6",
     "@deepseek-ai/dsh-mcp-client": "0.1.0-rc.6",
