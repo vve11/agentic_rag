@@ -14,8 +14,7 @@ describe("Paper RAG live headless runner", () => {
     expect(patch).toContain("id: headless-runner");
     expect(patch).toContain("disabled: true");
     expect(patch).toContain("id: paper-rag-headless-runner");
-    expect(patch).toContain("PAPER_RAG_REPO_ROOT");
-    expect(patch).toContain("/integrations/deepseek-harness/src/paper-rag-headless-runner.mjs");
+    expect(patch).toContain("name: ./src/paper-rag-headless-runner.mjs");
     expect(patch).toContain("preset: paper-research");
   });
 

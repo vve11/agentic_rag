@@ -501,6 +501,13 @@ def _prepare_live001_workspace(repo_root: Path, work_root: Path) -> Live001Works
         raise GateError(f"LIVE-001 preset source not found: {_relpath(preset_source, repo_root)}")
     shutil.copytree(preset_source, preset_dest, dirs_exist_ok=True)
 
+    runner_source = repo_root / "integrations/deepseek-harness/src/paper-rag-headless-runner.mjs"
+    runner_dest = dsh_home / "profiles/headless/src/paper-rag-headless-runner.mjs"
+    if not runner_source.exists():
+        raise GateError(f"LIVE-001 headless runner source not found: {_relpath(runner_source, repo_root)}")
+    runner_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(runner_source, runner_dest)
+
     config_path = work_root / "config.live001.yaml"
     _write_live001_config(repo_root, data_root, index_root, config_path)
     return Live001Workspace(

@@ -43,7 +43,7 @@
 
 - insert:
     - id: paper-rag-headless-runner
-      name: !!js process.env.PAPER_RAG_REPO_ROOT + '/integrations/deepseek-harness/src/paper-rag-headless-runner.mjs'
+      name: ./src/paper-rag-headless-runner.mjs
       inject: [headlessStartup]
       config:
         task: !!js ctx.headlessStartup.task

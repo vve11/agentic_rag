@@ -491,6 +491,37 @@ def test_live001_runner_uses_isolated_workspace_and_flash_models(
     assert captured["env"]["PAPER_RAG_MCP_TOOLSET"] == "readonly"
 
 
+def test_prepare_live001_workspace_copies_headless_runner_into_profile(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    (repo_root / "data/index/qdrant_embedded").mkdir(parents=True)
+    (repo_root / "data/index/papers.sqlite").write_text("sqlite", encoding="utf-8")
+    (repo_root / "data/index/qdrant_embedded/collection").write_text("qdrant", encoding="utf-8")
+    (repo_root / "config").mkdir()
+    (repo_root / "config/local.yaml").write_text(
+        """
+paths: {}
+qdrant: {}
+llm: {}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    preset_source = repo_root / "integrations/deepseek-harness/presets/paper-research"
+    preset_source.mkdir(parents=True)
+    (preset_source / "preset.yml").write_text("name: Paper Research\n", encoding="utf-8")
+    (preset_source / "agent.cordis.yml").write_text(
+        "- id: tool-skill\n  name: '@deepseek-ai/dsh-tool-skill'\n",
+        encoding="utf-8",
+    )
+    runner_source = repo_root / "integrations/deepseek-harness/src/paper-rag-headless-runner.mjs"
+    runner_source.parent.mkdir(parents=True)
+    runner_source.write_text("export const name = 'paper-rag-headless-runner';\n", encoding="utf-8")
+
+    workspace = migration_gate._prepare_live001_workspace(repo_root, tmp_path / "work")
+
+    runner_dest = workspace.dsh_home / "profiles/headless/src/paper-rag-headless-runner.mjs"
+    assert runner_dest.read_text(encoding="utf-8") == runner_source.read_text(encoding="utf-8")
+
+
 def test_live001_summary_requires_paper_qa_citation_and_abstain():
     events = [
         {
