@@ -8,6 +8,7 @@ import {
   createBrokerExec,
   redactSecrets,
 } from "./broker.mjs";
+import { runDshSessionCompatibilityProof } from "./session-proof.mjs";
 
 const fixtureCommand = process.execPath;
 const fixtureArgs = [
@@ -312,6 +313,8 @@ export async function runBrokerCompatibilityProbe(paths) {
 
     await assert.rejects(() => startBroker({ activePresetId: "root" }), /scope mismatch/);
 
+    const dshSession = runDshSessionCompatibilityProof(paths);
+
     return {
       passed: true,
       mcp_boundary: {
@@ -354,6 +357,7 @@ export async function runBrokerCompatibilityProbe(paths) {
         multi_agent_boundaries_are_isolated: true,
         standing_generation_child_shared_by_agents: true,
       },
+      dsh_session: dshSession,
     };
   } finally {
     while (cleanup.length > 0) {

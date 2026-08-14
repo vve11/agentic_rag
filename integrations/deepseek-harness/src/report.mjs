@@ -21,6 +21,36 @@ function blocked(reason) {
   return { status: "BLOCKED", reason };
 }
 
+function hasApprovalSessionProof(brokerProbe) {
+  return (
+    brokerProbe?.approval_bridge?.allowed_once_calls_private_mcp === true &&
+    brokerProbe?.approval_bridge?.rejected_skips_private_mcp === true &&
+    brokerProbe?.dsh_session?.approval_decision_recorded === true
+  );
+}
+
+function hasSessionResumeProof(brokerProbe) {
+  const session = brokerProbe?.dsh_session;
+  return (
+    session?.session_root_versioned === true &&
+    session?.restored_history_order_matches === true &&
+    session?.restored_derived_messages_match === true &&
+    session?.can_continue_new_turn === true &&
+    session?.no_duplicate_historical_tool_calls === true
+  );
+}
+
+function hasCancellationCredentialProof(brokerProbe) {
+  return (
+    brokerProbe?.credential_bridge?.explicit_child_env === true &&
+    brokerProbe?.credential_bridge?.parent_env_not_inherited_without_ref === true &&
+    brokerProbe?.credential_bridge?.redaction === true &&
+    brokerProbe?.lifecycle?.cancellation_aborts_inflight_call === true &&
+    brokerProbe?.lifecycle?.child_usable_after_cancellation === true &&
+    brokerProbe?.dsh_session?.secret_not_in_session === true
+  );
+}
+
 export function buildG0CompatReport({
   commit,
   dirty,
@@ -49,22 +79,50 @@ export function buildG0CompatReport({
     "DSH-G0-004": brokerProbe?.mcp_boundary
       ? pass(brokerProbe.mcp_boundary)
       : blocked("Native Broker + private stdio MCP fixture not implemented yet"),
-    "DSH-G0-005": blocked(
-      brokerProbe?.approval_bridge
-        ? "Broker approval executor proof passes; DSH Session approval-decision recording runner is still pending"
-        : "write-tool approval proof not implemented yet",
-    ),
-    "DSH-G0-006": blocked("same-version DSH session resume proof not implemented yet"),
-    "DSH-G0-007": blocked(
-      brokerProbe?.lifecycle?.restart_restores_private_mcp
-        ? "MCP crash/reconnect and cancellation proof pass; same-version Session resume runner is still pending"
-        : "MCP crash/reconnect proof not implemented yet",
-    ),
-    "DSH-G0-008": blocked(
-      brokerProbe?.credential_bridge
-        ? "credential bridge and cancellation proof pass; DSH timeout/session convergence runner is still pending"
-        : "cancel/timeout/credential bridge proof not implemented yet",
-    ),
+    "DSH-G0-005": hasApprovalSessionProof(brokerProbe)
+      ? pass(brokerProbe.dsh_session)
+      : blocked(
+          brokerProbe?.approval_bridge
+            ? "Broker approval executor proof passes; DSH Session approval-decision recording runner is still pending"
+            : "write-tool approval proof not implemented yet",
+        ),
+    "DSH-G0-006": hasSessionResumeProof(brokerProbe)
+      ? pass(brokerProbe.dsh_session)
+      : blocked("same-version DSH session resume proof not implemented yet"),
+    "DSH-G0-007":
+      brokerProbe?.lifecycle?.restart_restores_private_mcp === true &&
+      hasSessionResumeProof(brokerProbe)
+        ? pass({
+            restart_restores_private_mcp: true,
+            cancellation_aborts_inflight_call:
+              brokerProbe.lifecycle.cancellation_aborts_inflight_call === true,
+            restored_history_order_matches:
+              brokerProbe.dsh_session.restored_history_order_matches,
+            no_duplicate_historical_tool_calls:
+              brokerProbe.dsh_session.no_duplicate_historical_tool_calls,
+          })
+        : blocked(
+            brokerProbe?.lifecycle?.restart_restores_private_mcp
+              ? "MCP crash/reconnect and cancellation proof pass; same-version Session resume runner is still pending"
+              : "MCP crash/reconnect proof not implemented yet",
+          ),
+    "DSH-G0-008": hasCancellationCredentialProof(brokerProbe)
+      ? pass({
+          explicit_child_env: brokerProbe.credential_bridge.explicit_child_env,
+          parent_env_not_inherited_without_ref:
+            brokerProbe.credential_bridge.parent_env_not_inherited_without_ref,
+          redaction: brokerProbe.credential_bridge.redaction,
+          cancellation_aborts_inflight_call:
+            brokerProbe.lifecycle.cancellation_aborts_inflight_call,
+          child_usable_after_cancellation:
+            brokerProbe.lifecycle.child_usable_after_cancellation,
+          secret_not_in_session: brokerProbe.dsh_session.secret_not_in_session,
+        })
+      : blocked(
+          brokerProbe?.credential_bridge
+            ? "credential bridge and cancellation proof pass; DSH timeout/session convergence runner is still pending"
+            : "cancel/timeout/credential bridge proof not implemented yet",
+        ),
     "DSH-G0-009": blocked(
       brokerProbe?.lifecycle?.standing_generation_child_shared_by_agents
         ? "standing Broker generation proof passes for shared child and isolated agent state; full Host lifecycle runner is still pending"

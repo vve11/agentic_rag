@@ -33,9 +33,9 @@
 - [x] T018 写工具 executor 按真实对象签名直接调用一次性 Approval 并传 `exec.signal`；验证 missing/mis-scope/HMR 全部 fail closed。
 - [x] T019 拆分 `INHERITED_GLOBAL_ALLOW` 与 `FINAL_MODEL_CATALOG`，验证 agent-created restrict 与 pre-step schema invariant。
 - [x] T020 实现 direct-human request boundary state，覆盖多消息批次、synthetic-only、user steering、resume。
-- [ ] T021 验证 MCP child crash/reconnect、same-version Session resume、versioned root、standing generation 多 Agent 生命周期和 cancellation。
+- [ ] T021 验证 MCP child crash/reconnect、same-version Session resume、versioned root、standing generation 多 Agent 生命周期和 cancellation。（MCP crash/reconnect、cancellation、same-version detached Session resume/versioned root、多 Agent boundary/shared child 已通过；完整 Host lifecycle runner 仍待补。）
 - [x] T022 实现统一 `run-gate` orchestrator、`dsh-g0-compat` 与结构化 report validator。
-- [ ] T024 固定 hidden wire 为 `tools/call.params._meta.paper_rag`，验证 TS 发送/Python 接收且不落 Session。
+- [x] T024 固定 hidden wire 为 `tools/call.params._meta.paper_rag`，验证 TS 发送/Python 接收且不落 Session。
 - [x] T025 将 Host timeout policy active 纳入 profile、doctor、dump-config 和 G0 fail-closed。
 - [ ] T023 只有 001..009 全 PASS、baseline/matrix/report validator 全通过才进入 G1。
 

@@ -231,4 +231,75 @@ describe("G0 component report", () => {
       reason: expect.stringContaining("timeout"),
     });
   });
+
+  test("marks Session-dependent G0 cases pass when DSH Session proof exists", () => {
+    const paths = pathsFor({ integrationRoot });
+    const dshSession = {
+      session_format_version: 0,
+      session_root_versioned: true,
+      restored_history_order_matches: true,
+      restored_derived_messages_match: true,
+      tool_call_arguments_are_model_only: true,
+      hidden_metadata_not_in_session: true,
+      secret_not_in_session: true,
+      approval_decision_recorded: true,
+      can_continue_new_turn: true,
+      no_duplicate_historical_tool_calls: true,
+    };
+    const report = buildG0CompatReport({
+      commit: "abc123",
+      dirty: false,
+      paths,
+      configAudit: { passed: true, checks: [] },
+      presetDiscovery: { id: "paper-research", broken: undefined },
+      brokerProbe: {
+        mcp_boundary: {
+          raw_tool_names: ["fixture_status", "write_probe"],
+          model_tool_names: ["paper_status", "write_probe"],
+          hidden_metadata_wire: "tools/call.params._meta.paper_rag",
+          python_receiver_verified: true,
+          result_private_metadata_stripped: true,
+        },
+        approval_bridge: {
+          allowed_once_calls_private_mcp: true,
+          rejected_skips_private_mcp: true,
+        },
+        credential_bridge: {
+          explicit_child_env: true,
+          parent_env_not_inherited_without_ref: true,
+          redaction: true,
+        },
+        lifecycle: {
+          restart_restores_private_mcp: true,
+          cancellation_aborts_inflight_call: true,
+          child_usable_after_cancellation: true,
+          standing_generation_child_shared_by_agents: true,
+        },
+        dsh_session: dshSession,
+      },
+    });
+
+    expect(report.cases["DSH-G0-005"]).toEqual({ status: "PASS", evidence: dshSession });
+    expect(report.cases["DSH-G0-006"]).toEqual({ status: "PASS", evidence: dshSession });
+    expect(report.cases["DSH-G0-007"]).toMatchObject({
+      status: "PASS",
+      evidence: {
+        restart_restores_private_mcp: true,
+        restored_history_order_matches: true,
+        no_duplicate_historical_tool_calls: true,
+      },
+    });
+    expect(report.cases["DSH-G0-008"]).toMatchObject({
+      status: "PASS",
+      evidence: {
+        explicit_child_env: true,
+        cancellation_aborts_inflight_call: true,
+        secret_not_in_session: true,
+      },
+    });
+    expect(report.cases["DSH-G0-009"]).toMatchObject({
+      status: "BLOCKED",
+      reason: expect.stringContaining("Host lifecycle"),
+    });
+  });
 });
