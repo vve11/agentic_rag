@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .context import McpRequestContext, McpServerConfig
 from .errors import McpToolError, map_exception, validation_error
@@ -56,6 +58,52 @@ class PaperCompareArgs(StrictModel):
 
 class WikiLookupArgs(StrictModel):
     concept: str
+
+
+class PaperDiscoverArgs(StrictModel):
+    topic: str
+    max_candidates: int = Field(10, ge=1, le=20)
+    sources: list[str] | None = None
+
+
+class DiscoveryRunGetArgs(StrictModel):
+    run_id: int = Field(..., ge=1)
+
+
+class PaperIngestArgs(StrictModel):
+    arxiv_id: str | None = None
+    pdf_url: str | None = None
+    pdf_path: str | None = None
+    title_hint: str | None = None
+    force: bool = False
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> "PaperIngestArgs":
+        sources = [self.arxiv_id, self.pdf_url, self.pdf_path]
+        if sum(1 for value in sources if value) != 1:
+            raise ValueError("provide exactly one of arxiv_id, pdf_url, or pdf_path")
+        return self
+
+
+class DiscoveryCandidateIngestArgs(StrictModel):
+    candidate_ids: list[int] = Field(..., min_length=1, max_length=5)
+    force: bool = False
+
+
+class WikiGenerateArgs(StrictModel):
+    paper_id: str
+    force: bool = False
+
+
+class ExportBibtexArgs(StrictModel):
+    paper_ids: list[str] = Field(..., min_length=1, max_length=100)
+
+
+class PaperDeliverArgs(StrictModel):
+    format: str
+    paper_ids: list[str] = Field(..., min_length=1, max_length=5)
+    title: str | None = None
+    options: dict[str, Any] = Field(default_factory=dict)
 
 
 class PlaceholderArgs(StrictModel):
@@ -340,6 +388,154 @@ def _wiki_lookup(payload: StrictModel, _ctx: McpRequestContext) -> dict[str, Any
     return wiki_lookup_module.wiki_lookup(WikiLookupInput(**typed.model_dump()))
 
 
+def _paper_discover(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..discovery import runner
+
+    typed = _cast(PaperDiscoverArgs, payload)
+    raw = runner.run_discovery(
+        typed.topic,
+        user_id=ctx.actor_id,
+        source_names=typed.sources,
+        max_candidates=typed.max_candidates,
+    )
+    candidates = []
+    for candidate in raw.get("candidates") or []:
+        candidates.append(
+            {
+                **candidate,
+                "evidence_role": "discovery_only_not_answer_evidence",
+            }
+        )
+    return {
+        "run": raw.get("run") or {},
+        "trace": raw.get("trace") or {},
+        "candidates": candidates,
+        "count": len(candidates),
+    }
+
+
+def _discovery_run_get(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..discovery import store
+
+    typed = _cast(DiscoveryRunGetArgs, payload)
+    raw = store.get_run(typed.run_id, user_id=ctx.actor_id)
+    return {
+        **raw,
+        "candidates": [
+            {
+                **candidate,
+                "evidence_role": "discovery_only_not_answer_evidence",
+            }
+            for candidate in raw.get("candidates") or []
+        ],
+    }
+
+
+def _paper_ingest(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..tools import paper_index
+
+    _require_write_boundary("paper_ingest", ctx)
+    typed = _cast(PaperIngestArgs, payload)
+    body = typed.model_dump()
+    if typed.pdf_path:
+        body["pdf_path"] = _resolve_import_pdf_path(typed.pdf_path, ctx)
+    body["user_id"] = ctx.actor_id
+    return paper_index.ingest(paper_index.PaperIngestInput(**body))
+
+
+def _discovery_candidate_ingest(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..discovery import runner
+
+    _require_write_boundary("discovery_candidate_ingest", ctx)
+    typed = _cast(DiscoveryCandidateIngestArgs, payload)
+    results = [
+        runner.ingest_candidate(candidate_id, user_id=ctx.actor_id, force=typed.force)
+        for candidate_id in typed.candidate_ids
+    ]
+    return {"results": results, "count": len(results)}
+
+
+def _wiki_generate(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from ..wiki import triggers
+
+    _require_write_boundary("wiki_generate", ctx)
+    typed = _cast(WikiGenerateArgs, payload)
+    return triggers.on_paper_indexed(typed.paper_id, force=typed.force)
+
+
+def _export_bibtex(payload: StrictModel, _ctx: McpRequestContext) -> dict[str, Any]:
+    from ..tools import bibtex_export
+
+    typed = _cast(ExportBibtexArgs, payload)
+    return bibtex_export.export_bibtex(bibtex_export.BibtexExportInput(**typed.model_dump()))
+
+
+def _paper_deliver(payload: StrictModel, ctx: McpRequestContext) -> dict[str, Any]:
+    from .artifacts import write_artifact
+
+    _require_write_boundary("paper_deliver", ctx)
+    typed = _cast(PaperDeliverArgs, payload)
+    if ctx.config.artifact_root is None:
+        raise McpToolError("UNAVAILABLE", "PAPER_RAG_ARTIFACT_ROOT is required for paper_deliver")
+    deliver_dispatch = importlib.import_module("paper_rag.deliver.dispatch")
+    result = deliver_dispatch.dispatch(
+        typed.format,
+        typed.paper_ids,
+        title=typed.title,
+        options=typed.options,
+        user_id=ctx.actor_id,
+    )
+    artifact = write_artifact(
+        ctx.config.artifact_root,
+        tool="paper_deliver",
+        filename=result.filename,
+        content_bytes=result.content_bytes,
+        content_type=result.content_type,
+        metadata={
+            "format": result.format,
+            "paper_ids": typed.paper_ids,
+            "title": typed.title,
+            "request_boundary_id": ctx.request_boundary_id,
+            "deliver": result.metadata,
+        },
+    )
+    return {
+        "artifact": artifact,
+        "format": result.format,
+        "content_type": result.content_type,
+        "paper_count": len(typed.paper_ids),
+    }
+
+
+def _require_write_boundary(tool_name: str, ctx: McpRequestContext) -> None:
+    if not ctx.request_boundary_id:
+        raise McpToolError(
+            "UNAVAILABLE",
+            "DIRECT_USER_AUTHORITY_REQUIRED",
+            details={"tool": tool_name},
+        )
+
+
+def _resolve_import_pdf_path(pdf_path: str, ctx: McpRequestContext) -> str:
+    if ctx.config.import_root is None:
+        raise McpToolError("UNAVAILABLE", "PAPER_RAG_IMPORT_ROOT is required for pdf_path ingest")
+    root = ctx.config.import_root.resolve()
+    candidate = Path(pdf_path)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    try:
+        resolved = candidate.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"pdf_path not found: {pdf_path}") from exc
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("pdf_path must stay under PAPER_RAG_IMPORT_ROOT") from exc
+    if resolved.suffix.lower() != ".pdf":
+        raise ValueError("pdf_path must point to a PDF")
+    return str(resolved)
+
+
 def _cast(model: type[StrictModel], payload: StrictModel) -> Any:
     if isinstance(payload, model):
         return payload
@@ -395,6 +591,55 @@ _TOOLS: dict[str, ToolDefinition] = {
         WikiLookupArgs,
         "metadata",
         _wiki_lookup,
+    ),
+    "paper_discover": ToolDefinition(
+        "paper_discover",
+        "Discover candidate papers for a topic; candidates are not final answer evidence.",
+        PaperDiscoverArgs,
+        "discovery_only",
+        _paper_discover,
+    ),
+    "discovery_run_get": ToolDefinition(
+        "discovery_run_get",
+        "Fetch a prior discovery run and its candidate-only results.",
+        DiscoveryRunGetArgs,
+        "discovery_only",
+        _discovery_run_get,
+    ),
+    "paper_ingest": ToolDefinition(
+        "paper_ingest",
+        "Ingest one approved paper source into an isolated Paper RAG corpus.",
+        PaperIngestArgs,
+        "metadata",
+        _paper_ingest,
+    ),
+    "discovery_candidate_ingest": ToolDefinition(
+        "discovery_candidate_ingest",
+        "Ingest up to five approved discovery candidates.",
+        DiscoveryCandidateIngestArgs,
+        "metadata",
+        _discovery_candidate_ingest,
+    ),
+    "wiki_generate": ToolDefinition(
+        "wiki_generate",
+        "Generate or refresh wiki entries for one indexed paper.",
+        WikiGenerateArgs,
+        "metadata",
+        _wiki_generate,
+    ),
+    "export_bibtex": ToolDefinition(
+        "export_bibtex",
+        "Export BibTeX for indexed papers without embedding binary content.",
+        ExportBibtexArgs,
+        "artifact",
+        _export_bibtex,
+    ),
+    "paper_deliver": ToolDefinition(
+        "paper_deliver",
+        "Generate an approved deliverable artifact under the configured artifact root.",
+        PaperDeliverArgs,
+        "artifact",
+        _paper_deliver,
     ),
 }
 

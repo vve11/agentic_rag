@@ -101,6 +101,21 @@ CASE_COVERAGE_BY_COMMAND = {
     "mcp-operations": (
         "MCP-008",
     ),
+    "mcp-artifacts": (
+        "WRITE-001",
+        "WRITE-002",
+        "WRITE-003",
+        "WRITE-004",
+        "WRITE-005",
+        "WRITE-006",
+        "WRITE-007",
+        "ART-001",
+        "ART-002",
+        "ART-003",
+        "ART-004",
+        "ART-005",
+        "ART-006",
+    ),
     "dsh-test": (
         "AGENT-001",
         "AGENT-002",
@@ -109,6 +124,12 @@ CASE_COVERAGE_BY_COMMAND = {
         "AGENT-005",
         "AGENT-006",
         "AGENT-007",
+        "SESSION-001",
+        "SESSION-002",
+        "SESSION-003",
+        "SESSION-004",
+        "SESSION-005",
+        "SESSION-006",
     ),
 }
 

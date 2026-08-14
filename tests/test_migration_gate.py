@@ -270,6 +270,61 @@ def test_run_gate_inherits_previous_gate_cases_and_marks_command_covered_cases(
     assert report["go_no_go"] == "go"
 
 
+def test_run_gate_marks_g2_research_artifact_and_session_cases_from_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    manifest = {
+        "owned_test_commands": [
+            {
+                "id": "mcp-artifacts",
+                "repository": ".",
+                "command": f"{sys.executable} -c \"print('artifacts ok')\"",
+            },
+            {
+                "id": "dsh-test",
+                "repository": ".",
+                "command": f"{sys.executable} -c \"print('session ok')\"",
+            },
+        ],
+        "gate_components": {"G2": ["mcp-artifacts", "dsh-test"]},
+        "required_cases": {
+            "G2": [
+                "WRITE-001",
+                "WRITE-002",
+                "WRITE-003",
+                "WRITE-004",
+                "WRITE-005",
+                "WRITE-006",
+                "WRITE-007",
+                "ART-001",
+                "ART-002",
+                "ART-003",
+                "ART-004",
+                "ART-005",
+                "ART-006",
+                "SESSION-001",
+                "SESSION-002",
+                "SESSION-003",
+                "SESSION-004",
+                "SESSION-005",
+                "SESSION-006",
+            ],
+        },
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(migration_gate, "git_dirty", lambda _repo_root: False)
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+
+    report = migration_gate.run_gate(tmp_path, manifest_path, "G2", tmp_path / "G2.json")
+
+    for case_id in manifest["required_cases"]["G2"]:
+        assert report["cases"][case_id]["status"] == "PASS"
+    assert report["cases"]["WRITE-001"]["evidence"] == "command mcp-artifacts passed"
+    assert report["cases"]["SESSION-006"]["evidence"] == "command dsh-test passed"
+    assert report["go_no_go"] == "go"
+
+
 def test_validate_live_requires_authorized_fresh_pass_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     report_path = tmp_path / "data/index/migration-gates/live/LIVE-001.json"
     report_path.parent.mkdir(parents=True)
