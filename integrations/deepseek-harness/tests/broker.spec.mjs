@@ -15,6 +15,7 @@ import {
   registerPaperRagNativeTools,
   toolSchemaHash,
 } from "../src/broker.mjs";
+import { DEFAULT_MCP_ARGS } from "../src/paper-rag-native-broker-plugin.mjs";
 import { pathsFor } from "../src/paths.mjs";
 
 const paths = pathsFor();
@@ -200,6 +201,10 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
     expect(env.PAPER_RAG_MCP_TOOLSET).toBe("readonly");
     expect(env.PAPER_RAG_ARTIFACT_ROOT).toBe("/repo/data/artifacts");
     expect(env.PAPER_RAG_IMPORT_ROOT).toBe("/repo/data/imports");
+  });
+
+  test("defaults the private Python child to the package MCP stdio entrypoint", () => {
+    expect(DEFAULT_MCP_ARGS).toEqual(["-m", "paper_rag.mcp"]);
   });
 
   test("renders bounded model text from the canonical private MCP result", async () => {

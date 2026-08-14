@@ -8,7 +8,7 @@ import {
 } from "./broker.mjs";
 
 const DEFAULT_CREDENTIAL_REFS = Object.freeze(["OPENAI_API_KEY"]);
-const DEFAULT_MCP_ARGS = Object.freeze(["-m", "paper_rag.mcp.server"]);
+export const DEFAULT_MCP_ARGS = Object.freeze(["-m", "paper_rag.mcp"]);
 
 export const name = "paper-rag-native-broker";
 export const inject = ["tools"];
