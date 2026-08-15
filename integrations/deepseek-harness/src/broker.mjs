@@ -541,7 +541,7 @@ export class PaperRagNativeBroker {
         output: {
           schema: { type: "json" },
           render: (args, value) => renderPaperRagResultForModel(args, value, name),
-          presentationMeta: (_args, value) => value?.structuredContent,
+          presentationMeta: (_args, value) => structuredContentMeta(value),
         },
         presentResult: (args, result) => presentPaperRagResult(args, result, name),
         execute: async (args, exec) => {
@@ -672,4 +672,11 @@ export class PaperRagNativeBroker {
     }
     return safeResult;
   }
+}
+
+function structuredContentMeta(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return /** @type {any} */ (value).structuredContent;
 }

@@ -127,9 +127,17 @@ describe("Paper RAG portable cards", () => {
 
     const content = renderPaperRagResultForModel({}, value);
     const view = presentPaperRagResult({}, { content, isError: false, meta: value.structuredContent });
+    const modelText = textContent(content[0]);
 
-    expect(content[0].text).toContain("Corpus Status");
-    expect(content[0].text).toContain("deepseek-v4-flash");
+    expect(modelText).toContain("Corpus Status");
+    expect(modelText).toContain("deepseek-v4-flash");
     expect(view).toMatchObject({ card: "generic", title: "Corpus Status" });
   });
 });
+
+function textContent(block) {
+  if (block?.type !== "text") {
+    throw new Error(`expected text content block, got ${block?.type}`);
+  }
+  return block.text;
+}

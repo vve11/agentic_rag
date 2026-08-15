@@ -2,6 +2,9 @@ const MAX_CARD_TEXT = 1800;
 const MAX_FIELD_TEXT = 280;
 const MAX_ITEMS = 5;
 
+/** @typedef {import("@deepseek-ai/dsh-llm").ContentBlock} ContentBlock */
+/** @typedef {import("@deepseek-ai/dsh-tools").ToolResultView} ToolResultView */
+
 const CARD_BY_TOOL = Object.freeze({
   paper_status: "corpus_status",
   paper_list: "corpus_status",
@@ -81,13 +84,15 @@ export function renderPortableCardMarkdown(card) {
   return bounded(lines.join("\n"), MAX_CARD_TEXT);
 }
 
+/** @returns {ContentBlock[]} */
 export function renderPaperRagResultForModel(args, value, fallbackToolName = "paper_rag") {
   const structured = value?.structuredContent ?? value ?? {};
   const toolName = structured.tool ?? fallbackToolName;
   const card = createPortableCard(toolName, args, structured);
-  return [{ type: "text", text: renderPortableCardMarkdown(card) }];
+  return [textBlock(renderPortableCardMarkdown(card))];
 }
 
+/** @returns {ToolResultView | undefined} */
 export function presentPaperRagResult(args, result, fallbackToolName = "paper_rag") {
   const structured = result?.meta;
   if (structured === undefined || structured === null || typeof structured !== "object") {
@@ -95,11 +100,16 @@ export function presentPaperRagResult(args, result, fallbackToolName = "paper_ra
   }
   const toolName = structured.tool ?? fallbackToolName;
   const card = createPortableCard(toolName, args, structured);
-  return {
+  return /** @type {ToolResultView} */ ({
     card: "generic",
     title: card.title,
-    content: [{ type: "text", text: renderPortableCardMarkdown(card) }],
-  };
+    content: [textBlock(renderPortableCardMarkdown(card))],
+  });
+}
+
+/** @returns {ContentBlock} */
+function textBlock(text) {
+  return /** @type {ContentBlock} */ ({ type: "text", text });
 }
 
 function titleFor(type) {
