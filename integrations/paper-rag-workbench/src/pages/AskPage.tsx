@@ -7,6 +7,7 @@ import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
 import { DshHandoffDialog } from "../components/DshHandoffDialog";
 import { EmptyState } from "../components/EmptyState";
 import { PaperDetailPanel } from "../components/PaperDetailPanel";
+import { useI18n } from "../i18n";
 import type {
   ChunkDetailData,
   DshHandoffData,
@@ -18,6 +19,7 @@ import type {
 } from "../types";
 
 export function AskPage({ client }: { client: WorkbenchClient }) {
+  const { t } = useI18n();
   const [question, setQuestion] = useState("");
   const [paperIdsText, setPaperIdsText] = useState("");
   const [topK, setTopK] = useState(8);
@@ -83,7 +85,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
           envelope.error?.message ||
             (streamReason instanceof Error
               ? streamReason.message
-              : "Question answering is unavailable."),
+              : t("ask.unavailable")),
         );
         return;
       }
@@ -122,7 +124,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
     const text = `基于已入库论文回答：${question.trim()}。请给出 Paper RAG 证据引用。`;
     try {
       await navigator.clipboard?.writeText(text);
-      setCopyState("Copied");
+      setCopyState(t("ask.copied"));
     } catch {
       setCopyState(text);
     }
@@ -134,13 +136,13 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
     <>
       <header className="page-header">
         <div>
-          <h2>Ask</h2>
-          <p>Ask grounded questions and inspect the evidence used for each answer.</p>
+          <h2>{t("ask.title")}</h2>
+          <p>{t("ask.subtitle")}</p>
         </div>
       </header>
       <form className="panel form-grid" onSubmit={ask}>
         <label>
-          <span>Question</span>
+          <span>{t("ask.question")}</span>
           <textarea
             rows={3}
             value={question}
@@ -148,7 +150,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
           />
         </label>
         <label>
-          <span>Paper IDs</span>
+          <span>{t("ask.paperIds")}</span>
           <input
             value={paperIdsText}
             onChange={(event) => setPaperIdsText(event.target.value)}
@@ -156,7 +158,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
           />
         </label>
         <label>
-          <span>Top K</span>
+          <span>{t("ask.topK")}</span>
           <input
             min={1}
             max={20}
@@ -166,10 +168,10 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
           />
         </label>
         <button type="submit" disabled={!question.trim() || loading}>
-          {loading ? "Asking..." : "Ask"}
+          {loading ? t("ask.loading") : t("ask.submit")}
         </button>
       </form>
-      {error ? <EmptyState title="Answer unavailable" detail={error} /> : null}
+      {error ? <EmptyState title={t("ask.unavailable")} detail={error} /> : null}
       {data ? (
         <>
           {streamState ? (
@@ -178,10 +180,10 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
           {hasAnswerData ? (
             <div className="toolbar-row">
               <button type="button" onClick={copyPrompt}>
-                Copy prompt for DSH
+                {t("ask.copyPrompt")}
               </button>
               <button type="button" onClick={sendToDsh}>
-                Send to DSH
+                {t("ask.sendToDsh")}
               </button>
               {copyState ? <span className="muted">{copyState}</span> : null}
             </div>

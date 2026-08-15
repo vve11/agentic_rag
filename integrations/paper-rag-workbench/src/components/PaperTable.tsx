@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n";
 import type { PaperSummary } from "../types";
 
 export function PaperTable({
@@ -13,10 +14,11 @@ export function PaperTable({
   onSection: (paper: PaperSummary) => void;
   onInspect?: (paper: PaperSummary) => void;
 }) {
+  const { t } = useI18n();
   if (papers.length === 0) {
     return (
       <div className="table-empty" role="status">
-        No indexed papers match this filter.
+        {t("paperTable.empty")}
       </div>
     );
   }
@@ -26,11 +28,11 @@ export function PaperTable({
       <table className="data-table">
         <thead>
           <tr>
-            <th>Title</th>
-            <th>Paper ID</th>
-            <th>arXiv</th>
-            <th>Chunks</th>
-            <th>Actions</th>
+            <th>{t("paperTable.title")}</th>
+            <th>{t("paperTable.paperId")}</th>
+            <th>{t("paperTable.arxiv")}</th>
+            <th>{t("paperTable.chunks")}</th>
+            <th>{t("paperTable.actions")}</th>
           </tr>
         </thead>
         <tbody>
@@ -43,26 +45,34 @@ export function PaperTable({
               <td>{paper.arxiv_id || ""}</td>
               <td>{paper.chunk_count ?? 0}</td>
               <td className="row-actions">
-                <button type="button" aria-label={`Ask ${paper.title}`} onClick={() => onAsk(paper)}>
-                  Ask
-                </button>
-                <button type="button" aria-label={`Search ${paper.title}`} onClick={() => onSearch(paper)}>
-                  Search
+                <button
+                  type="button"
+                  aria-label={t("paperTable.askAria", { title: paper.title })}
+                  onClick={() => onAsk(paper)}
+                >
+                  {t("paperTable.ask")}
                 </button>
                 <button
                   type="button"
-                  aria-label={`Open section ${paper.title}`}
+                  aria-label={t("paperTable.searchAria", { title: paper.title })}
+                  onClick={() => onSearch(paper)}
+                >
+                  {t("paperTable.search")}
+                </button>
+                <button
+                  type="button"
+                  aria-label={t("paperTable.sectionAria", { title: paper.title })}
                   onClick={() => onSection(paper)}
                 >
-                  Section
+                  {t("paperTable.section")}
                 </button>
                 {onInspect ? (
                   <button
                     type="button"
-                    aria-label={`Inspect paper ${paper.title}`}
+                    aria-label={t("paperTable.inspectAria", { title: paper.title })}
                     onClick={() => onInspect(paper)}
                   >
-                    Inspect
+                    {t("paperTable.inspect")}
                   </button>
                 ) : null}
               </td>

@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ApprovalDialog } from "../components/ApprovalDialog";
 import { AgentTimeline } from "../components/AgentTimeline";
@@ -26,10 +26,12 @@ import {
 } from "../api/fixtures";
 import type { PaperSummary } from "../types";
 
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
 describe("Shell", () => {
   test("renders Chinese navigation by default", () => {
-    window.localStorage.clear();
-
     renderWithI18n(
       <Shell active="overview" onNavigate={vi.fn()}>
         <p>body</p>
@@ -43,7 +45,6 @@ describe("Shell", () => {
   });
 
   test("language toggle switches navigation to English", async () => {
-    window.localStorage.clear();
     const user = userEvent.setup();
 
     renderWithI18n(
@@ -77,7 +78,7 @@ describe("PaperTable", () => {
     const onSearch = vi.fn();
     const onSection = vi.fn();
 
-    render(
+    renderWithI18n(
       <PaperTable
         papers={[paper]}
         onAsk={onAsk}
@@ -89,9 +90,9 @@ describe("PaperTable", () => {
     expect(screen.getByText("Self-RAG")).toBeInTheDocument();
     expect(screen.getByText("arxiv:2310.11511")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /ask self-rag/i }));
-    await user.click(screen.getByRole("button", { name: /search self-rag/i }));
-    await user.click(screen.getByRole("button", { name: /open section self-rag/i }));
+    await user.click(screen.getByRole("button", { name: /提问 self-rag/i }));
+    await user.click(screen.getByRole("button", { name: /检索 self-rag/i }));
+    await user.click(screen.getByRole("button", { name: /打开章节 self-rag/i }));
 
     expect(onAsk).toHaveBeenCalledWith(paper);
     expect(onSearch).toHaveBeenCalledWith(paper);
@@ -101,7 +102,7 @@ describe("PaperTable", () => {
 
 describe("Evidence components", () => {
   test("EvidenceChunkCard shows safe chunk metadata", () => {
-    render(
+    renderWithI18n(
       <EvidenceChunkCard
         chunk={{
           chunk_id: "c1",
@@ -115,7 +116,7 @@ describe("Evidence components", () => {
 
     expect(screen.getByText("Paper")).toBeInTheDocument();
     expect(screen.getByText("p1")).toBeInTheDocument();
-    expect(screen.getByText("Page 3")).toBeInTheDocument();
+    expect(screen.getByText("第 3 页")).toBeInTheDocument();
     expect(screen.getByText("chunk:c1")).toBeInTheDocument();
   });
 
@@ -123,7 +124,7 @@ describe("Evidence components", () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
 
-    render(<CitationChips citations={["c1", "c2"]} onSelect={onSelect} />);
+    renderWithI18n(<CitationChips citations={["c1", "c2"]} onSelect={onSelect} />);
 
     await user.click(screen.getByRole("button", { name: "c2" }));
 
@@ -131,7 +132,7 @@ describe("Evidence components", () => {
   });
 
   test("AnswerPanel shows citation chips and evidence", () => {
-    render(
+    renderWithI18n(
       <AnswerPanel
         answer="Self-RAG critiques generations."
         citations={["c1"]}
@@ -148,7 +149,7 @@ describe("Evidence components", () => {
 
 describe("Discovery approval components", () => {
   test("CandidateTable labels candidates as non-evidence", () => {
-    render(
+    renderWithI18n(
       <CandidateTable
         candidates={[
           {
@@ -165,11 +166,11 @@ describe("Discovery approval components", () => {
     );
 
     expect(screen.getByText("Candidate Paper")).toBeInTheDocument();
-    expect(screen.getByText(/not answer evidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/不是回答证据/)).toBeInTheDocument();
   });
 
   test("ApprovalDialog names side effects before approval", () => {
-    render(
+    renderWithI18n(
       <ApprovalDialog
         open
         candidateIds={[11]}
@@ -178,24 +179,24 @@ describe("Discovery approval components", () => {
       />,
     );
 
-    expect(screen.getByText(/candidate ids: 11/i)).toBeInTheDocument();
-    expect(screen.getByText(/write indexed paper and chunks/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /approve ingest/i })).toBeInTheDocument();
+    expect(screen.getByText(/候选 ID：11/)).toBeInTheDocument();
+    expect(screen.getByText(/写入索引论文和分块/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /批准入库/ })).toBeInTheDocument();
   });
 });
 
 describe("Health diagnostics components", () => {
   test("health summary distinguishes degraded services", () => {
-    render(<HealthSummary data={indexHealthFixture} />);
+    renderWithI18n(<HealthSummary data={indexHealthFixture} />);
 
-    expect(screen.getByRole("heading", { name: /index health/i })).toBeInTheDocument();
-    expect(screen.getByText(/degraded/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /索引健康/ })).toBeInTheDocument();
+    expect(screen.getAllByText(/降级/).length).toBeGreaterThan(0);
     expect(screen.getByText(/sparse fallback/i)).toBeInTheDocument();
     expect(screen.getByText("deepseek-v4-flash")).toBeInTheDocument();
   });
 
   test("quality issue table shows duplicate and parser samples", () => {
-    render(<QualityIssueTable samples={indexHealthFixture.corpus_quality.samples} />);
+    renderWithI18n(<QualityIssueTable samples={indexHealthFixture.corpus_quality.samples} />);
 
     expect(screen.getByText(/duplicate_chunk/i)).toBeInTheDocument();
     expect(screen.getByText(/parser_artifact/i)).toBeInTheDocument();
@@ -205,7 +206,7 @@ describe("Health diagnostics components", () => {
 
 describe("Paper and chunk drilldown components", () => {
   test("paper detail panel lists sections and chunks", () => {
-    render(<PaperDetailPanel detail={paperDetailFixture} onInspectChunk={() => {}} />);
+    renderWithI18n(<PaperDetailPanel detail={paperDetailFixture} onInspectChunk={() => {}} />);
 
     expect(screen.getByRole("heading", { name: /Self-RAG/i })).toBeInTheDocument();
     expect(screen.getByText("Abstract")).toBeInTheDocument();
@@ -214,15 +215,15 @@ describe("Paper and chunk drilldown components", () => {
   });
 
   test("chunk detail panel shows full text and neighbors", () => {
-    render(<ChunkDetailPanel detail={chunkDetailFixture} onOpenPaper={() => {}} />);
+    renderWithI18n(<ChunkDetailPanel detail={chunkDetailFixture} onOpenPaper={() => {}} />);
 
     expect(screen.getByText(/critiques its own generations/i)).toBeInTheDocument();
     expect(screen.getByText(/html_comment/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open paper detail/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /打开论文详情/ })).toBeInTheDocument();
   });
 
   test("score breakdown renders known score fields", () => {
-    render(
+    renderWithI18n(
       <ScoreBreakdown
         chunk={{
           ...chunkDetailFixture.chunk,
@@ -241,11 +242,11 @@ describe("Paper and chunk drilldown components", () => {
 
 describe("DSH handoff components", () => {
   test("dsh handoff dialog shows prompt and open link", () => {
-    render(<DshHandoffDialog data={dshHandoffFixture} onClose={() => {}} />);
+    renderWithI18n(<DshHandoffDialog data={dshHandoffFixture} onClose={() => {}} />);
 
-    expect(screen.getByRole("dialog", { name: /send to dsh/i })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: /发送到 DSH/ })).toBeInTheDocument();
     expect(screen.getByText(/基于 Paper RAG Workbench/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open dsh/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /打开 DSH/ })).toHaveAttribute(
       "href",
       "http://127.0.0.1:3080",
     );
@@ -254,9 +255,9 @@ describe("DSH handoff components", () => {
 
 describe("Streaming timeline components", () => {
   test("agent timeline renders stage progress", () => {
-    render(<AgentTimeline stages={qaStreamFixture.stages} running={false} />);
+    renderWithI18n(<AgentTimeline stages={qaStreamFixture.stages} running={false} />);
 
-    expect(screen.getByRole("heading", { name: /agent timeline/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /执行轨迹/ })).toBeInTheDocument();
     expect(screen.getByText(/Understanding question/i)).toBeInTheDocument();
     expect(screen.getByText(/Retrieved 2 chunks/i)).toBeInTheDocument();
   });

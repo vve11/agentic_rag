@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n";
 import type { ChunkDetailData } from "../types";
 import { ScoreBreakdown } from "./ScoreBreakdown";
 
@@ -8,25 +9,26 @@ export function ChunkDetailPanel({
   detail: ChunkDetailData;
   onOpenPaper: (paperId: string) => void;
 }) {
+  const { t } = useI18n();
   const warnings = detail.chunk.warnings || [];
   return (
-    <aside className="chunk-detail panel" aria-label="Chunk detail">
+    <aside className="chunk-detail panel" aria-label={t("chunkDetail.aria")}>
       <header>
         <div>
           <h3>{detail.paper.title || detail.chunk.paper_id}</h3>
           <code>chunk:{detail.chunk.chunk_id}</code>
         </div>
         <button type="button" onClick={() => onOpenPaper(detail.chunk.paper_id)}>
-          Open paper detail
+          {t("chunkDetail.openPaper")}
         </button>
       </header>
       <dl className="metadata-grid">
-        <dt>Paper</dt>
+        <dt>{t("chunkDetail.paper")}</dt>
         <dd>{detail.chunk.paper_id}</dd>
-        <dt>Section</dt>
-        <dd>{detail.chunk.section || "unknown"}</dd>
-        <dt>Page</dt>
-        <dd>{detail.chunk.page || "unknown"}</dd>
+        <dt>{t("chunkDetail.section")}</dt>
+        <dd>{detail.chunk.section || t("chunkDetail.unknown")}</dd>
+        <dt>{t("chunkDetail.page")}</dt>
+        <dd>{detail.chunk.page || t("chunkDetail.unknown")}</dd>
       </dl>
       <ScoreBreakdown chunk={detail.chunk} />
       {warnings.length ? (
@@ -39,7 +41,7 @@ export function ChunkDetailPanel({
       <p className="chunk-full-text">{detail.chunk.text || detail.chunk.snippet}</p>
       {detail.neighbors.length ? (
         <section>
-          <h4>Nearby chunks</h4>
+          <h4>{t("chunkDetail.nearby")}</h4>
           {detail.neighbors.map((neighbor) => (
             <article key={neighbor.chunk_id}>
               <code>chunk:{neighbor.chunk_id}</code>

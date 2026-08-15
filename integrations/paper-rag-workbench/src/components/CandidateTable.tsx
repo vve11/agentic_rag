@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n";
 import type { Candidate } from "../types";
 
 export function CandidateTable({
@@ -9,10 +10,11 @@ export function CandidateTable({
   selectedIds: number[];
   onToggle: (id: number) => void;
 }) {
+  const { t } = useI18n();
   if (candidates.length === 0) {
     return (
       <div className="table-empty" role="status">
-        No discovery candidates returned.
+        {t("candidate.empty")}
       </div>
     );
   }
@@ -22,11 +24,11 @@ export function CandidateTable({
       <table className="data-table">
         <thead>
           <tr>
-            <th>Select</th>
-            <th>Candidate</th>
-            <th>Source</th>
-            <th>Rank</th>
-            <th>Evidence</th>
+            <th>{t("candidate.select")}</th>
+            <th>{t("candidate.candidate")}</th>
+            <th>{t("candidate.source")}</th>
+            <th>{t("candidate.rank")}</th>
+            <th>{t("candidate.evidence")}</th>
           </tr>
         </thead>
         <tbody>
@@ -34,7 +36,7 @@ export function CandidateTable({
             <tr key={candidate.id} className={selectedIds.includes(candidate.id) ? "selected-row" : ""}>
               <td>
                 <input
-                  aria-label={`Select candidate ${candidate.id}`}
+                  aria-label={t("candidate.selectAria", { id: candidate.id })}
                   checked={selectedIds.includes(candidate.id)}
                   type="checkbox"
                   onChange={() => onToggle(candidate.id)}
@@ -47,7 +49,7 @@ export function CandidateTable({
               </td>
               <td>{candidate.source ?? ""}</td>
               <td>{candidate.rank ?? ""}</td>
-              <td>Candidate-only; not answer evidence</td>
+              <td>{t("candidate.notEvidence")}</td>
             </tr>
           ))}
         </tbody>

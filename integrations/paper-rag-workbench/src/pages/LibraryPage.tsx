@@ -5,6 +5,7 @@ import { DshHandoffDialog } from "../components/DshHandoffDialog";
 import { EmptyState } from "../components/EmptyState";
 import { PaperDetailPanel } from "../components/PaperDetailPanel";
 import { PaperTable } from "../components/PaperTable";
+import { useI18n } from "../i18n";
 import type {
   ChunkDetailData,
   DshHandoffData,
@@ -15,6 +16,7 @@ import type {
 } from "../types";
 
 export function LibraryPage({ client }: { client: WorkbenchClient }) {
+  const { t } = useI18n();
   const [papers, setPapers] = useState<PaperSummary[] | null>(null);
   const [filter, setFilter] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -34,20 +36,20 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
       .then((envelope) => {
         if (!active) return;
         if (!envelope.ok || !envelope.data) {
-          setError(envelope.error?.message ?? "Library is unavailable.");
+          setError(envelope.error?.message ?? t("library.unavailable"));
           return;
         }
         setPapers(envelope.data.papers);
       })
       .catch((reason: unknown) => {
         if (!active) return;
-        setError(reason instanceof Error ? reason.message : "Library is unavailable.");
+        setError(reason instanceof Error ? reason.message : t("library.unavailable"));
       });
 
     return () => {
       active = false;
     };
-  }, [client]);
+  }, [client, t]);
 
   const filteredPapers = useMemo(() => {
     const normalized = filter.trim().toLowerCase();
@@ -72,7 +74,7 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
     });
 
     if (!envelope.ok || !envelope.data) {
-      setMessage(envelope.error?.message ?? "Section is unavailable.");
+      setMessage(envelope.error?.message ?? t("library.sectionUnavailable"));
       setSectionLoading(false);
       return;
     }
@@ -104,46 +106,46 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
   };
 
   if (error) {
-    return <EmptyState title="Library unavailable" detail={error} />;
+    return <EmptyState title={t("library.unavailable")} detail={error} />;
   }
 
   if (!papers) {
-    return <p className="loading">Loading library...</p>;
+    return <p className="loading">{t("library.loading")}</p>;
   }
 
   return (
     <>
       <header className="page-header">
         <div>
-          <h2>Library</h2>
-          <p>Inspect indexed papers and open source sections without writing to the corpus.</p>
+          <h2>{t("library.title")}</h2>
+          <p>{t("library.subtitle")}</p>
         </div>
         <label className="filter-field">
-          <span>Filter papers</span>
+          <span>{t("library.filter")}</span>
           <input value={filter} onChange={(event) => setFilter(event.target.value)} />
         </label>
       </header>
       <PaperTable
         papers={filteredPapers}
-        onAsk={(paper) => setMessage(`Ask is ready for ${paper.title}.`)}
-        onSearch={(paper) => setMessage(`Search is ready for ${paper.title}.`)}
+        onAsk={(paper) => setMessage(t("library.askReady", { title: paper.title }))}
+        onSearch={(paper) => setMessage(t("library.searchReady", { title: paper.title }))}
         onSection={openSection}
         onInspect={openPaperDetail}
       />
       {message ? <p className="inline-message">{message}</p> : null}
       {sectionPaper ? (
-        <aside className="section-drawer" aria-label="Paper section">
+        <aside className="section-drawer" aria-label={t("library.paperSectionAria")}>
           <div>
             <span>{sectionPaper.paper_id}</span>
-            <h3>Introduction</h3>
+            <h3>{t("library.introduction")}</h3>
           </div>
           {sectionLoading ? (
-            <p className="loading">Loading section...</p>
+            <p className="loading">{t("library.loadingSection")}</p>
           ) : (
             <div className="section-chunks">
               {sectionChunks.map((chunk) => (
                 <article key={chunk.chunk_id}>
-                  <span>{chunk.page ? `p${chunk.page}` : "source"}</span>
+                  <span>{chunk.page ? `p${chunk.page}` : t("chunk.source")}</span>
                   <p>{chunk.snippet ?? chunk.text}</p>
                 </article>
               ))}
@@ -155,7 +157,7 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
         <>
           <div className="toolbar-row">
             <button type="button" onClick={sendPaperToDsh}>
-              Send to DSH
+              {t("library.sendToDsh")}
             </button>
           </div>
           <PaperDetailPanel detail={paperDetail} onInspectChunk={inspectChunk} />

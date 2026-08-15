@@ -5,6 +5,7 @@ import { DshHandoffDialog } from "../components/DshHandoffDialog";
 import { EmptyState } from "../components/EmptyState";
 import { EvidenceChunkCard } from "../components/EvidenceChunkCard";
 import { PaperDetailPanel } from "../components/PaperDetailPanel";
+import { useI18n } from "../i18n";
 import type {
   ChunkDetailData,
   DshHandoffData,
@@ -14,6 +15,7 @@ import type {
 } from "../types";
 
 export function SearchPage({ client }: { client: WorkbenchClient }) {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(8);
   const [data, setData] = useState<SearchData | null>(null);
@@ -38,12 +40,12 @@ export function SearchPage({ client }: { client: WorkbenchClient }) {
     try {
       const envelope = await client.search({ query: trimmedQuery, top_k: topK });
       if (!envelope.ok || !envelope.data) {
-        setError(envelope.error?.message ?? "Evidence search is unavailable.");
+        setError(envelope.error?.message ?? t("search.unavailable"));
         return;
       }
       setData(envelope.data);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Evidence search is unavailable.");
+      setError(reason instanceof Error ? reason.message : t("search.unavailable"));
     } finally {
       setLoading(false);
     }
@@ -73,17 +75,17 @@ export function SearchPage({ client }: { client: WorkbenchClient }) {
     <>
       <header className="page-header">
         <div>
-          <h2>Search</h2>
-          <p>Retrieve source chunks before asking the model to synthesize.</p>
+          <h2>{t("search.title")}</h2>
+          <p>{t("search.subtitle")}</p>
         </div>
       </header>
       <form className="panel form-grid" onSubmit={search}>
         <label>
-          <span>Search evidence</span>
+          <span>{t("search.evidence")}</span>
           <input value={query} onChange={(event) => setQuery(event.target.value)} />
         </label>
         <label>
-          <span>Top K</span>
+          <span>{t("search.topK")}</span>
           <input
             min={1}
             max={20}
@@ -93,18 +95,18 @@ export function SearchPage({ client }: { client: WorkbenchClient }) {
           />
         </label>
         <button type="submit" disabled={!query.trim() || loading}>
-          {loading ? "Searching..." : "Search"}
+          {loading ? t("search.loading") : t("search.submit")}
         </button>
       </form>
-      {error ? <EmptyState title="Search unavailable" detail={error} /> : null}
+      {error ? <EmptyState title={t("search.unavailable")} detail={error} /> : null}
       {data ? (
         <>
           <div className="toolbar-row">
             <button type="button" onClick={sendSearchToDsh}>
-              Send to DSH
+              {t("search.sendToDsh")}
             </button>
           </div>
-          <section className="evidence-list" aria-label="Search results">
+          <section className="evidence-list" aria-label={t("search.resultsAria")}>
             {data.results.map((chunk) => (
               <EvidenceChunkCard key={chunk.chunk_id} chunk={chunk} onInspect={inspectChunk} />
             ))}

@@ -6,9 +6,11 @@ import {
 } from "../components/ApprovalDialog";
 import { CandidateTable } from "../components/CandidateTable";
 import { EmptyState } from "../components/EmptyState";
+import { useI18n } from "../i18n";
 import type { Candidate, IngestData, WorkbenchClient } from "../types";
 
 export function DiscoverPage({ client }: { client: WorkbenchClient }) {
+  const { t } = useI18n();
   const [topic, setTopic] = useState("");
   const [sourcesText, setSourcesText] = useState("arxiv");
   const [maxCandidates, setMaxCandidates] = useState(5);
@@ -43,13 +45,13 @@ export function DiscoverPage({ client }: { client: WorkbenchClient }) {
       });
 
       if (!envelope.ok || !envelope.data) {
-        setError(envelope.error?.message ?? "Discovery is unavailable.");
+        setError(envelope.error?.message ?? t("discover.unavailable"));
         return;
       }
 
       setCandidates(envelope.data.candidates);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Discovery is unavailable.");
+      setError(reason instanceof Error ? reason.message : t("discover.unavailable"));
     } finally {
       setLoading(false);
     }
@@ -79,14 +81,14 @@ export function DiscoverPage({ client }: { client: WorkbenchClient }) {
       });
 
       if (!envelope.ok || !envelope.data) {
-        setError(envelope.error?.message ?? "Candidate ingest is unavailable.");
+        setError(envelope.error?.message ?? t("discover.unavailable"));
         return;
       }
 
       setIngestData(envelope.data);
       setApprovalOpen(false);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Candidate ingest is unavailable.");
+      setError(reason instanceof Error ? reason.message : t("discover.unavailable"));
     } finally {
       setIngesting(false);
     }
@@ -96,21 +98,21 @@ export function DiscoverPage({ client }: { client: WorkbenchClient }) {
     <>
       <header className="page-header">
         <div>
-          <h2>Discover</h2>
-          <p>Find candidate papers, then explicitly approve any ingest side effects.</p>
+          <h2>{t("discover.title")}</h2>
+          <p>{t("discover.subtitle")}</p>
         </div>
       </header>
       <form className="panel form-grid" onSubmit={discover}>
         <label>
-          <span>Topic</span>
+          <span>{t("discover.topic")}</span>
           <input value={topic} onChange={(event) => setTopic(event.target.value)} />
         </label>
         <label>
-          <span>Sources</span>
+          <span>{t("discover.sources")}</span>
           <input value={sourcesText} onChange={(event) => setSourcesText(event.target.value)} />
         </label>
         <label>
-          <span>Max candidates</span>
+          <span>{t("discover.maxCandidates")}</span>
           <input
             min={1}
             max={20}
@@ -120,10 +122,10 @@ export function DiscoverPage({ client }: { client: WorkbenchClient }) {
           />
         </label>
         <button type="submit" disabled={!topic.trim() || loading}>
-          {loading ? "Discovering..." : "Discover"}
+          {loading ? t("discover.loading") : t("discover.submit")}
         </button>
       </form>
-      {error ? <EmptyState title="Discovery unavailable" detail={error} /> : null}
+      {error ? <EmptyState title={t("discover.unavailable")} detail={error} /> : null}
       {candidates.length > 0 ? (
         <>
           <div className="toolbar-row">
@@ -132,9 +134,9 @@ export function DiscoverPage({ client }: { client: WorkbenchClient }) {
               disabled={selectedIds.length === 0}
               onClick={() => setApprovalOpen(true)}
             >
-              Ingest selected
+              {t("discover.ingestSelected")}
             </button>
-            <span className="muted">{selectedIds.length} selected</span>
+            <span className="muted">{t("discover.selectedCount", { count: selectedIds.length })}</span>
           </div>
           <CandidateTable
             candidates={candidates}
@@ -144,8 +146,8 @@ export function DiscoverPage({ client }: { client: WorkbenchClient }) {
         </>
       ) : null}
       {ingestData ? (
-        <section className="panel ingest-receipt" aria-label="Ingest receipt">
-          <h3>Ingest receipt</h3>
+        <section className="panel ingest-receipt" aria-label={t("discover.receipt")}>
+          <h3>{t("discover.receipt")}</h3>
           <ul>
             {ingestData.results.map((result) => (
               <li key={`${result.candidate_id}-${result.paper_id}`}>
@@ -161,7 +163,7 @@ export function DiscoverPage({ client }: { client: WorkbenchClient }) {
         onCancel={() => setApprovalOpen(false)}
         onApprove={approveIngest}
       />
-      {ingesting ? <p className="loading">Ingesting approved candidates...</p> : null}
+      {ingesting ? <p className="loading">{t("discover.ingesting")}</p> : null}
     </>
   );
 }

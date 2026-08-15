@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n";
 import type { EvidenceChunk } from "../types";
 
 export function EvidenceChunkCard({
@@ -7,6 +8,7 @@ export function EvidenceChunkCard({
   chunk: EvidenceChunk;
   onInspect?: (chunkId: string) => void;
 }) {
+  const { t } = useI18n();
   const title = chunk.title ?? chunk.paper_title ?? chunk.paper_id;
   const text = chunk.text ?? chunk.snippet ?? "";
 
@@ -15,15 +17,17 @@ export function EvidenceChunkCard({
       <header>
         <strong>{title}</strong>
         <span>{chunk.paper_id}</span>
-        {chunk.page !== undefined ? <span>Page {chunk.page}</span> : null}
+        {chunk.page !== undefined ? <span>{t("chunk.page", { page: chunk.page })}</span> : null}
       </header>
       <p>{text}</p>
       <footer>
         <code>chunk:{chunk.chunk_id}</code>
-        {chunk.score !== undefined ? <span>score {chunk.score.toFixed(2)}</span> : null}
+        {chunk.score !== undefined ? (
+          <span>{t("chunk.score", { score: chunk.score.toFixed(2) })}</span>
+        ) : null}
         {onInspect ? (
           <button type="button" onClick={() => onInspect(chunk.chunk_id)}>
-            Inspect chunk {chunk.chunk_id}
+            {t("chunk.inspect", { id: chunk.chunk_id })}
           </button>
         ) : null}
       </footer>

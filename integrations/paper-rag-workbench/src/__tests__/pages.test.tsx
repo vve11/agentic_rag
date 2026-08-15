@@ -1,4 +1,4 @@
-import { render, screen, waitForElementToBeRemoved } from "@testing-library/react";
+import { screen, waitForElementToBeRemoved } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
@@ -9,19 +9,21 @@ import { HealthPage } from "../pages/HealthPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { SearchPage } from "../pages/SearchPage";
+import { renderWithI18n } from "../test/render";
 
 describe("Overview and Library pages", () => {
   test("overview shows corpus health, model status, and DSH bridge", async () => {
-    render(<OverviewPage client={createWorkbenchClient({ fixtureMode: true })} />);
+    window.localStorage.clear();
+    renderWithI18n(<OverviewPage client={createWorkbenchClient({ fixtureMode: true })} />);
 
-    await waitForElementToBeRemoved(() => screen.queryByText(/loading overview/i));
+    await waitForElementToBeRemoved(() => screen.queryByText(/正在加载概览/));
 
-    expect(screen.getByRole("heading", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "概览" })).toBeInTheDocument();
     expect(screen.getByText("8")).toBeInTheDocument();
     expect(screen.getByText("345")).toBeInTheDocument();
     expect(screen.getAllByText("deepseek-v4-flash").length).toBeGreaterThan(0);
-    expect(screen.getByText("Configured")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open dsh chat/i })).toHaveAttribute(
+    expect(screen.getByText("已配置")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /打开 DSH 对话/ })).toHaveAttribute(
       "href",
       "http://127.0.0.1:3080",
     );
@@ -29,30 +31,32 @@ describe("Overview and Library pages", () => {
 
   test("library filters papers and opens a readable section drawer", async () => {
     const user = userEvent.setup();
+    window.localStorage.clear();
 
-    render(<LibraryPage client={createWorkbenchClient({ fixtureMode: true })} />);
+    renderWithI18n(<LibraryPage client={createWorkbenchClient({ fixtureMode: true })} />);
 
-    await waitForElementToBeRemoved(() => screen.queryByText(/loading library/i));
+    await waitForElementToBeRemoved(() => screen.queryByText(/正在加载论文库/));
     expect(screen.getByText(/Self-RAG/)).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText(/filter papers/i), "2005");
+    await user.type(screen.getByLabelText(/筛选论文/), "2005");
 
     expect(screen.getByText(/Retrieval-Augmented Generation/)).toBeInTheDocument();
     expect(screen.queryByText(/Self-RAG/)).not.toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText(/filter papers/i));
-    await user.click(screen.getByRole("button", { name: /open section self-rag/i }));
+    await user.clear(screen.getByLabelText(/筛选论文/));
+    await user.click(screen.getByRole("button", { name: /打开章节 self-rag/i }));
 
-    expect(await screen.findByRole("heading", { name: /introduction/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /引言/ })).toBeInTheDocument();
     expect(screen.getByText(/retrieves passages on demand/i)).toBeInTheDocument();
   });
 
   test("search page renders evidence chunks", async () => {
     const user = userEvent.setup();
-    render(<SearchPage client={createWorkbenchClient({ fixtureMode: true })} />);
+    window.localStorage.clear();
+    renderWithI18n(<SearchPage client={createWorkbenchClient({ fixtureMode: true })} />);
 
-    await user.type(screen.getByLabelText(/search evidence/i), "reflection tokens");
-    await user.click(screen.getByRole("button", { name: /^search$/i }));
+    await user.type(screen.getByLabelText(/检索证据/), "reflection tokens");
+    await user.click(screen.getByRole("button", { name: /^检索$/ }));
 
     expect(await screen.findByText("chunk:chunk-self-rag-1")).toBeInTheDocument();
     expect(screen.getByText(/retrieves passages on demand/i)).toBeInTheDocument();
@@ -60,34 +64,36 @@ describe("Overview and Library pages", () => {
 
   test("ask page renders answer citations and DSH prompt bridge", async () => {
     const user = userEvent.setup();
-    render(<AskPage client={createWorkbenchClient({ fixtureMode: true })} />);
+    window.localStorage.clear();
+    renderWithI18n(<AskPage client={createWorkbenchClient({ fixtureMode: true })} />);
 
-    await user.type(screen.getByLabelText(/question/i), "What is Self-RAG?");
-    await user.click(screen.getByRole("button", { name: /^ask$/i }));
+    await user.type(screen.getByLabelText(/问题/), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^提问$/ }));
 
     expect(await screen.findByText(/decide when to retrieve/i)).toBeInTheDocument();
     expect(screen.getByText("chunk-self-rag-1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /copy prompt for dsh/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /复制 DSH 提示词/ })).toBeInTheDocument();
   });
 
   test("discover requires approval before candidate ingest", async () => {
     const user = userEvent.setup();
+    window.localStorage.clear();
     const baseClient = createWorkbenchClient({ fixtureMode: true });
     const ingestCandidates = vi.fn(baseClient.ingestCandidates);
     const client = { ...baseClient, ingestCandidates };
 
-    render(<DiscoverPage client={client} />);
+    renderWithI18n(<DiscoverPage client={client} />);
 
-    await user.type(screen.getByLabelText(/topic/i), "agentic rag");
-    await user.click(screen.getByRole("button", { name: /discover/i }));
+    await user.type(screen.getByLabelText(/主题/), "agentic rag");
+    await user.click(screen.getByRole("button", { name: /^发现$/ }));
     expect(await screen.findByText(/Agentic Retrieval/)).toBeInTheDocument();
 
-    await user.click(screen.getByLabelText(/select candidate 11/i));
-    await user.click(screen.getByRole("button", { name: /ingest selected/i }));
+    await user.click(screen.getByLabelText(/选择候选 11/));
+    await user.click(screen.getByRole("button", { name: /入库所选/ }));
     expect(ingestCandidates).not.toHaveBeenCalled();
-    expect(screen.getByText(/write indexed paper and chunks/i)).toBeInTheDocument();
+    expect(screen.getByText(/写入索引论文和分块/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /approve ingest/i }));
+    await user.click(screen.getByRole("button", { name: /批准入库/ }));
     expect(await screen.findByText(/arxiv:2601.00001/)).toBeInTheDocument();
     expect(ingestCandidates).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -103,21 +109,23 @@ describe("Overview and Library pages", () => {
   });
 
   test("health page loads index diagnostics", async () => {
-    render(<HealthPage client={createWorkbenchClient({ fixtureMode: true })} />);
+    window.localStorage.clear();
+    renderWithI18n(<HealthPage client={createWorkbenchClient({ fixtureMode: true })} />);
 
-    await waitForElementToBeRemoved(() => screen.queryByText(/loading health/i));
+    await waitForElementToBeRemoved(() => screen.queryByText(/正在加载健康检查/));
 
-    expect(screen.getByRole("heading", { name: "Health" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "健康检查" })).toBeInTheDocument();
     expect(screen.getByText(/Dense retrieval is unavailable/i)).toBeInTheDocument();
     expect(screen.getByText(/345/)).toBeInTheDocument();
   });
 
   test("library opens paper detail", async () => {
     const user = userEvent.setup();
-    render(<LibraryPage client={createWorkbenchClient({ fixtureMode: true })} />);
+    window.localStorage.clear();
+    renderWithI18n(<LibraryPage client={createWorkbenchClient({ fixtureMode: true })} />);
 
-    await waitForElementToBeRemoved(() => screen.queryByText(/loading library/i));
-    await user.click(screen.getByRole("button", { name: /inspect paper self-rag/i }));
+    await waitForElementToBeRemoved(() => screen.queryByText(/正在加载论文库/));
+    await user.click(screen.getByRole("button", { name: /查看论文 self-rag/i }));
 
     expect(await screen.findByRole("heading", { name: /Self-RAG/i })).toBeInTheDocument();
     expect(screen.getByText(/Abstract/)).toBeInTheDocument();
@@ -125,24 +133,26 @@ describe("Overview and Library pages", () => {
 
   test("ask citation opens chunk drilldown", async () => {
     const user = userEvent.setup();
-    render(<AskPage client={createWorkbenchClient({ fixtureMode: true })} />);
+    window.localStorage.clear();
+    renderWithI18n(<AskPage client={createWorkbenchClient({ fixtureMode: true })} />);
 
-    await user.type(screen.getByLabelText(/question/i), "What is Self-RAG?");
-    await user.click(screen.getByRole("button", { name: /^ask$/i }));
+    await user.type(screen.getByLabelText(/问题/), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^提问$/ }));
     await user.click(await screen.findByRole("button", { name: /chunk-self-rag-1/i }));
 
     expect(await screen.findByText(/critiques its own generations/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open paper detail/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /打开论文详情/ })).toBeInTheDocument();
   });
 
   test("search evidence card opens chunk drilldown", async () => {
     const user = userEvent.setup();
-    render(<SearchPage client={createWorkbenchClient({ fixtureMode: true })} />);
+    window.localStorage.clear();
+    renderWithI18n(<SearchPage client={createWorkbenchClient({ fixtureMode: true })} />);
 
-    await user.type(screen.getByLabelText(/search evidence/i), "reflection tokens");
-    await user.click(screen.getByRole("button", { name: /^search$/i }));
+    await user.type(screen.getByLabelText(/检索证据/), "reflection tokens");
+    await user.click(screen.getByRole("button", { name: /^检索$/ }));
     await user.click(
-      await screen.findByRole("button", { name: /inspect chunk chunk-self-rag-1/i }),
+      await screen.findByRole("button", { name: /查看分块 chunk-self-rag-1/i }),
     );
 
     expect(await screen.findByText(/critiques its own generations/i)).toBeInTheDocument();
@@ -150,15 +160,16 @@ describe("Overview and Library pages", () => {
 
   test("ask page creates a structured dsh handoff", async () => {
     const user = userEvent.setup();
+    window.localStorage.clear();
     const baseClient = createWorkbenchClient({ fixtureMode: true });
     const dshHandoff = vi.fn(baseClient.dshHandoff);
     const client = { ...baseClient, dshHandoff };
 
-    render(<AskPage client={client} />);
+    renderWithI18n(<AskPage client={client} />);
 
-    await user.type(screen.getByLabelText(/question/i), "What is Self-RAG?");
-    await user.click(screen.getByRole("button", { name: /^ask$/i }));
-    await user.click(await screen.findByRole("button", { name: /send to dsh/i }));
+    await user.type(screen.getByLabelText(/问题/), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^提问$/ }));
+    await user.click(await screen.findByRole("button", { name: /发送到 DSH/ }));
 
     expect(dshHandoff).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -168,17 +179,18 @@ describe("Overview and Library pages", () => {
         source: "ask",
       }),
     );
-    expect(await screen.findByRole("dialog", { name: /send to dsh/i })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /发送到 DSH/ })).toBeInTheDocument();
   });
 
   test("ask page streams answer and shows agent timeline", async () => {
     const user = userEvent.setup();
-    render(<AskPage client={createWorkbenchClient({ fixtureMode: true })} />);
+    window.localStorage.clear();
+    renderWithI18n(<AskPage client={createWorkbenchClient({ fixtureMode: true })} />);
 
-    await user.type(screen.getByLabelText(/question/i), "What is Self-RAG?");
-    await user.click(screen.getByRole("button", { name: /^ask$/i }));
+    await user.type(screen.getByLabelText(/问题/), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^提问$/ }));
 
-    expect(await screen.findByRole("heading", { name: /agent timeline/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /执行轨迹/ })).toBeInTheDocument();
     expect(await screen.findByText(/Understanding question/i)).toBeInTheDocument();
     expect(await screen.findByText(/decide when to retrieve/i)).toBeInTheDocument();
     expect(screen.getByText("chunk-self-rag-1")).toBeInTheDocument();

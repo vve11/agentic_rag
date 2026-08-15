@@ -4,9 +4,11 @@ import { DshHandoffDialog } from "../components/DshHandoffDialog";
 import { EmptyState } from "../components/EmptyState";
 import { HealthSummary } from "../components/HealthSummary";
 import { QualityIssueTable } from "../components/QualityIssueTable";
+import { useI18n } from "../i18n";
 import type { DshHandoffData, IndexHealthData, WorkbenchClient } from "../types";
 
 export function HealthPage({ client }: { client: WorkbenchClient }) {
+  const { t } = useI18n();
   const [data, setData] = useState<IndexHealthData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [handoff, setHandoff] = useState<DshHandoffData | null>(null);
@@ -20,13 +22,13 @@ export function HealthPage({ client }: { client: WorkbenchClient }) {
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
-          setError(reason instanceof Error ? reason.message : "Health unavailable.");
+          setError(reason instanceof Error ? reason.message : t("health.unavailable"));
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, t]);
 
   const sendHealthToDsh = async () => {
     if (!data) return;
@@ -47,24 +49,24 @@ export function HealthPage({ client }: { client: WorkbenchClient }) {
     <>
       <header className="page-header">
         <div>
-          <h2>Health</h2>
-          <p>Inspect corpus readiness, retrieval fallback, model configuration, and data quality.</p>
+          <h2>{t("health.title")}</h2>
+          <p>{t("health.subtitle")}</p>
         </div>
       </header>
       {!data && !error ? (
-        <EmptyState title="Loading health" detail="Checking local indexes." />
+        <EmptyState title={t("health.loadingTitle")} detail={t("health.loadingDetail")} />
       ) : null}
-      {error ? <EmptyState title="Health unavailable" detail={error} /> : null}
+      {error ? <EmptyState title={t("health.unavailable")} detail={error} /> : null}
       {data ? (
         <>
           <div className="toolbar-row">
             <button type="button" onClick={sendHealthToDsh}>
-              Send to DSH
+              {t("health.sendToDsh")}
             </button>
           </div>
           <HealthSummary data={data} />
           <section className="panel">
-            <h3>Quality Issues</h3>
+            <h3>{t("health.qualityIssues")}</h3>
             <QualityIssueTable samples={data.corpus_quality.samples} />
           </section>
           {handoff ? (
