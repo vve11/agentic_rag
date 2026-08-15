@@ -1,8 +1,10 @@
 import { useState } from "react";
 
+import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
 import { EmptyState } from "../components/EmptyState";
 import { EvidenceChunkCard } from "../components/EvidenceChunkCard";
-import type { SearchData, WorkbenchClient } from "../types";
+import { PaperDetailPanel } from "../components/PaperDetailPanel";
+import type { ChunkDetailData, PaperDetailData, SearchData, WorkbenchClient } from "../types";
 
 export function SearchPage({ client }: { client: WorkbenchClient }) {
   const [query, setQuery] = useState("");
@@ -10,6 +12,8 @@ export function SearchPage({ client }: { client: WorkbenchClient }) {
   const [data, setData] = useState<SearchData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [chunkDetail, setChunkDetail] = useState<ChunkDetailData | null>(null);
+  const [paperDetail, setPaperDetail] = useState<PaperDetailData | null>(null);
 
   const search = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -18,6 +22,8 @@ export function SearchPage({ client }: { client: WorkbenchClient }) {
 
     setError(null);
     setData(null);
+    setChunkDetail(null);
+    setPaperDetail(null);
     setLoading(true);
 
     try {
@@ -32,6 +38,14 @@ export function SearchPage({ client }: { client: WorkbenchClient }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const inspectChunk = async (chunkId: string) => {
+    setChunkDetail(await client.chunkDetail(chunkId));
+  };
+
+  const openPaper = async (paperId: string) => {
+    setPaperDetail(await client.paperDetail(paperId));
   };
 
   return (
@@ -65,9 +79,13 @@ export function SearchPage({ client }: { client: WorkbenchClient }) {
       {data ? (
         <section className="evidence-list" aria-label="Search results">
           {data.results.map((chunk) => (
-            <EvidenceChunkCard key={chunk.chunk_id} chunk={chunk} />
+            <EvidenceChunkCard key={chunk.chunk_id} chunk={chunk} onInspect={inspectChunk} />
           ))}
         </section>
+      ) : null}
+      {chunkDetail ? <ChunkDetailPanel detail={chunkDetail} onOpenPaper={openPaper} /> : null}
+      {paperDetail ? (
+        <PaperDetailPanel detail={paperDetail} onInspectChunk={inspectChunk} />
       ) : null}
     </>
   );

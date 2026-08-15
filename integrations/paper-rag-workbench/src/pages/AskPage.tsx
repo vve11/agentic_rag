@@ -1,8 +1,10 @@
 import { useState } from "react";
 
 import { AnswerPanel } from "../components/AnswerPanel";
+import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
 import { EmptyState } from "../components/EmptyState";
-import type { QaData, WorkbenchClient } from "../types";
+import { PaperDetailPanel } from "../components/PaperDetailPanel";
+import type { ChunkDetailData, PaperDetailData, QaData, WorkbenchClient } from "../types";
 
 export function AskPage({ client }: { client: WorkbenchClient }) {
   const [question, setQuestion] = useState("");
@@ -12,6 +14,8 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copyState, setCopyState] = useState<string | null>(null);
+  const [chunkDetail, setChunkDetail] = useState<ChunkDetailData | null>(null);
+  const [paperDetail, setPaperDetail] = useState<PaperDetailData | null>(null);
 
   const ask = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -20,6 +24,8 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
 
     setError(null);
     setData(null);
+    setChunkDetail(null);
+    setPaperDetail(null);
     setLoading(true);
     const paperIds = paperIdsText
       .split(",")
@@ -44,6 +50,14 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const inspectChunk = async (chunkId: string) => {
+    setChunkDetail(await client.chunkDetail(chunkId));
+  };
+
+  const openPaper = async (paperId: string) => {
+    setPaperDetail(await client.paperDetail(paperId));
   };
 
   const copyPrompt = async () => {
@@ -109,7 +123,14 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
             citations={data.citations}
             chunks={data.chunks}
             abstain={data.abstain}
+            onCitationSelect={inspectChunk}
           />
+          {chunkDetail ? (
+            <ChunkDetailPanel detail={chunkDetail} onOpenPaper={openPaper} />
+          ) : null}
+          {paperDetail ? (
+            <PaperDetailPanel detail={paperDetail} onInspectChunk={inspectChunk} />
+          ) : null}
         </>
       ) : null}
     </>

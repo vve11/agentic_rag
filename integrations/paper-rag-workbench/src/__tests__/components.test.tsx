@@ -5,12 +5,15 @@ import { describe, expect, test, vi } from "vitest";
 import { ApprovalDialog } from "../components/ApprovalDialog";
 import { AnswerPanel } from "../components/AnswerPanel";
 import { CandidateTable } from "../components/CandidateTable";
+import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
 import { CitationChips } from "../components/CitationChips";
 import { EvidenceChunkCard } from "../components/EvidenceChunkCard";
 import { HealthSummary } from "../components/HealthSummary";
+import { PaperDetailPanel } from "../components/PaperDetailPanel";
 import { PaperTable } from "../components/PaperTable";
 import { QualityIssueTable } from "../components/QualityIssueTable";
-import { indexHealthFixture } from "../api/fixtures";
+import { ScoreBreakdown } from "../components/ScoreBreakdown";
+import { chunkDetailFixture, indexHealthFixture, paperDetailFixture } from "../api/fixtures";
 import type { PaperSummary } from "../types";
 
 describe("PaperTable", () => {
@@ -149,5 +152,41 @@ describe("Health diagnostics components", () => {
     expect(screen.getByText(/duplicate_chunk/i)).toBeInTheDocument();
     expect(screen.getByText(/parser_artifact/i)).toBeInTheDocument();
     expect(screen.getByText(/05e56a78/)).toBeInTheDocument();
+  });
+});
+
+describe("Paper and chunk drilldown components", () => {
+  test("paper detail panel lists sections and chunks", () => {
+    render(<PaperDetailPanel detail={paperDetailFixture} onInspectChunk={() => {}} />);
+
+    expect(screen.getByRole("heading", { name: /Self-RAG/i })).toBeInTheDocument();
+    expect(screen.getByText("Abstract")).toBeInTheDocument();
+    expect(screen.getByText("Introduction")).toBeInTheDocument();
+    expect(screen.getByText(/parser_artifacts_detected/i)).toBeInTheDocument();
+  });
+
+  test("chunk detail panel shows full text and neighbors", () => {
+    render(<ChunkDetailPanel detail={chunkDetailFixture} onOpenPaper={() => {}} />);
+
+    expect(screen.getByText(/critiques its own generations/i)).toBeInTheDocument();
+    expect(screen.getByText(/html_comment/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open paper detail/i })).toBeInTheDocument();
+  });
+
+  test("score breakdown renders known score fields", () => {
+    render(
+      <ScoreBreakdown
+        chunk={{
+          ...chunkDetailFixture.chunk,
+          score: 0.92,
+          dense_score: 0.81,
+          sparse_score: 0.74,
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/score 0.92/i)).toBeInTheDocument();
+    expect(screen.getByText(/dense 0.81/i)).toBeInTheDocument();
+    expect(screen.getByText(/sparse 0.74/i)).toBeInTheDocument();
   });
 });

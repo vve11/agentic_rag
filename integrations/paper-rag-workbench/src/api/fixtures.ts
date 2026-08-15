@@ -62,7 +62,7 @@ export const searchFixture: McpEnvelope<SearchData> = {
         paper_id: "arxiv:2310.11511",
         title: "Self-RAG",
         page: 3,
-        snippet: "SELF-RAG retrieves passages on demand and critiques its own generations.",
+        snippet: "SELF-RAG retrieves passages on demand for supported generation.",
         score: 0.92,
       },
       {

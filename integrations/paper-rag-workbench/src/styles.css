@@ -92,6 +92,9 @@ textarea {
 .row-actions button,
 .toolbar-row button,
 .form-grid button,
+.evidence-card button,
+.chunk-detail button,
+.chunk-list button,
 .citation-chips button,
 .modal button {
   border: 1px solid #c9d3dd;
@@ -108,6 +111,9 @@ textarea {
 .row-actions button:hover,
 .toolbar-row button:hover,
 .form-grid button:hover,
+.evidence-card button:hover,
+.chunk-detail button:hover,
+.chunk-list button:hover,
 .citation-chips button:hover,
 .modal button:hover {
   border-color: #6b93c8;
@@ -507,6 +513,85 @@ textarea {
 .answer-panel > p {
   color: #25313b;
   line-height: 1.55;
+}
+
+.paper-detail,
+.chunk-detail {
+  margin-top: 16px;
+}
+
+.paper-detail > header,
+.chunk-detail > header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.paper-detail h3,
+.chunk-detail h3 {
+  margin: 0 0 6px;
+}
+
+.section-list,
+.chunk-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+}
+
+.section-list li {
+  align-items: center;
+  border-bottom: 1px solid #e6ebf0;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.chunk-list button {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.chunk-full-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.inline-warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.inline-warnings span {
+  border: 1px solid #d7b65f;
+  border-radius: 999px;
+  color: #7a5200;
+  padding: 4px 8px;
+}
+
+.metadata-grid,
+.score-breakdown {
+  display: grid;
+  gap: 6px 12px;
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+.metadata-grid dd,
+.score-breakdown dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.metadata-grid dt,
+.score-breakdown dt {
+  color: #66717c;
 }
 
 .modal-backdrop {

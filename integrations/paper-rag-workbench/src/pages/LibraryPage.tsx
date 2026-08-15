@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
 import { EmptyState } from "../components/EmptyState";
+import { PaperDetailPanel } from "../components/PaperDetailPanel";
 import { PaperTable } from "../components/PaperTable";
-import type { EvidenceChunk, PaperSummary, WorkbenchClient } from "../types";
+import type {
+  ChunkDetailData,
+  EvidenceChunk,
+  PaperDetailData,
+  PaperSummary,
+  WorkbenchClient,
+} from "../types";
 
 export function LibraryPage({ client }: { client: WorkbenchClient }) {
   const [papers, setPapers] = useState<PaperSummary[] | null>(null);
@@ -11,6 +19,8 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
   const [sectionPaper, setSectionPaper] = useState<PaperSummary | null>(null);
   const [sectionChunks, setSectionChunks] = useState<EvidenceChunk[]>([]);
   const [sectionLoading, setSectionLoading] = useState(false);
+  const [paperDetail, setPaperDetail] = useState<PaperDetailData | null>(null);
+  const [chunkDetail, setChunkDetail] = useState<ChunkDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -68,6 +78,16 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
     setSectionLoading(false);
   };
 
+  const openPaperDetail = async (paper: PaperSummary) => {
+    setMessage(null);
+    setChunkDetail(null);
+    setPaperDetail(await client.paperDetail(paper.paper_id));
+  };
+
+  const inspectChunk = async (chunkId: string) => {
+    setChunkDetail(await client.chunkDetail(chunkId));
+  };
+
   if (error) {
     return <EmptyState title="Library unavailable" detail={error} />;
   }
@@ -93,6 +113,7 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
         onAsk={(paper) => setMessage(`Ask is ready for ${paper.title}.`)}
         onSearch={(paper) => setMessage(`Search is ready for ${paper.title}.`)}
         onSection={openSection}
+        onInspect={openPaperDetail}
       />
       {message ? <p className="inline-message">{message}</p> : null}
       {sectionPaper ? (
@@ -114,6 +135,20 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
             </div>
           )}
         </aside>
+      ) : null}
+      {paperDetail ? (
+        <PaperDetailPanel detail={paperDetail} onInspectChunk={inspectChunk} />
+      ) : null}
+      {chunkDetail ? (
+        <ChunkDetailPanel
+          detail={chunkDetail}
+          onOpenPaper={(paperId) =>
+            openPaperDetail({
+              paper_id: paperId,
+              title: chunkDetail.paper.title || paperId,
+            })
+          }
+        />
       ) : null}
     </>
   );

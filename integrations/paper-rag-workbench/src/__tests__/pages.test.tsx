@@ -111,4 +111,40 @@ describe("Overview and Library pages", () => {
     expect(screen.getByText(/Dense retrieval is unavailable/i)).toBeInTheDocument();
     expect(screen.getByText(/345/)).toBeInTheDocument();
   });
+
+  test("library opens paper detail", async () => {
+    const user = userEvent.setup();
+    render(<LibraryPage client={createWorkbenchClient({ fixtureMode: true })} />);
+
+    await waitForElementToBeRemoved(() => screen.queryByText(/loading library/i));
+    await user.click(screen.getByRole("button", { name: /inspect paper self-rag/i }));
+
+    expect(await screen.findByRole("heading", { name: /Self-RAG/i })).toBeInTheDocument();
+    expect(screen.getByText(/Abstract/)).toBeInTheDocument();
+  });
+
+  test("ask citation opens chunk drilldown", async () => {
+    const user = userEvent.setup();
+    render(<AskPage client={createWorkbenchClient({ fixtureMode: true })} />);
+
+    await user.type(screen.getByLabelText(/question/i), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^ask$/i }));
+    await user.click(await screen.findByRole("button", { name: /chunk-self-rag-1/i }));
+
+    expect(await screen.findByText(/critiques its own generations/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open paper detail/i })).toBeInTheDocument();
+  });
+
+  test("search evidence card opens chunk drilldown", async () => {
+    const user = userEvent.setup();
+    render(<SearchPage client={createWorkbenchClient({ fixtureMode: true })} />);
+
+    await user.type(screen.getByLabelText(/search evidence/i), "reflection tokens");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /inspect chunk chunk-self-rag-1/i }),
+    );
+
+    expect(await screen.findByText(/critiques its own generations/i)).toBeInTheDocument();
+  });
 });

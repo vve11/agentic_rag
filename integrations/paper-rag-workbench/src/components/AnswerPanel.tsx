@@ -8,11 +8,15 @@ export function AnswerPanel({
   citations,
   chunks,
   abstain,
+  onCitationSelect,
+  onChunkInspect,
 }: {
   answer: string;
   citations: string[];
   chunks: EvidenceChunk[];
   abstain: QaData["abstain"];
+  onCitationSelect?: (chunkId: string) => void;
+  onChunkInspect?: (chunkId: string) => void;
 }) {
   const decision = typeof abstain === "string" ? abstain : abstain?.decision;
   const tone = decision === "answer" || !decision ? "good" : "warn";
@@ -24,10 +28,10 @@ export function AnswerPanel({
         <StatusBadge tone={tone}>{decision ?? "answer"}</StatusBadge>
       </header>
       <p>{answer}</p>
-      <CitationChips citations={citations} />
+      <CitationChips citations={citations} onSelect={onCitationSelect} />
       <div className="evidence-list">
         {chunks.map((chunk) => (
-          <EvidenceChunkCard key={chunk.chunk_id} chunk={chunk} />
+          <EvidenceChunkCard key={chunk.chunk_id} chunk={chunk} onInspect={onChunkInspect} />
         ))}
       </div>
     </section>

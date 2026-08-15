@@ -5,11 +5,13 @@ export function PaperTable({
   onAsk,
   onSearch,
   onSection,
+  onInspect,
 }: {
   papers: PaperSummary[];
   onAsk: (paper: PaperSummary) => void;
   onSearch: (paper: PaperSummary) => void;
   onSection: (paper: PaperSummary) => void;
+  onInspect?: (paper: PaperSummary) => void;
 }) {
   if (papers.length === 0) {
     return (
@@ -54,6 +56,15 @@ export function PaperTable({
                 >
                   Section
                 </button>
+                {onInspect ? (
+                  <button
+                    type="button"
+                    aria-label={`Inspect paper ${paper.title}`}
+                    onClick={() => onInspect(paper)}
+                  >
+                    Inspect
+                  </button>
+                ) : null}
               </td>
             </tr>
           ))}
