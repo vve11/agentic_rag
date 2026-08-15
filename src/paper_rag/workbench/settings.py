@@ -14,6 +14,7 @@ class WorkbenchSettings:
     credentials_path: Path | None = None
     artifact_root: Path | None = None
     import_root: Path | None = None
+    workspace_state_path: Path | None = None
     openai_base_url: str = "https://api.deepseek.com"
     chat_model: str = "deepseek-v4-flash"
     small_model: str = "deepseek-v4-flash"
@@ -24,6 +25,7 @@ class WorkbenchSettings:
         credentials = source.get("PAPER_RAG_DSH_CREDENTIALS_PATH")
         artifact_root = source.get("PAPER_RAG_ARTIFACT_ROOT")
         import_root = source.get("PAPER_RAG_IMPORT_ROOT")
+        workspace_state_path = source.get("PAPER_RAG_WORKBENCH_STATE_PATH")
         return cls(
             actor_id=source.get("PAPER_RAG_WORKBENCH_ACTOR_ID", "workbench"),
             toolset=source.get("PAPER_RAG_WORKBENCH_TOOLSET", "research"),
@@ -31,6 +33,9 @@ class WorkbenchSettings:
             credentials_path=Path(credentials).resolve() if credentials else None,
             artifact_root=Path(artifact_root).resolve() if artifact_root else None,
             import_root=Path(import_root).resolve() if import_root else None,
+            workspace_state_path=(
+                Path(workspace_state_path).resolve() if workspace_state_path else None
+            ),
             openai_base_url=source.get("OPENAI_BASE_URL", "https://api.deepseek.com"),
             chat_model=source.get("CHAT_MODEL", "deepseek-v4-flash"),
             small_model=source.get(
