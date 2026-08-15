@@ -9,6 +9,12 @@ import {
 
 const DEFAULT_CREDENTIAL_REFS = Object.freeze(["OPENAI_API_KEY"]);
 export const DEFAULT_MCP_ARGS = Object.freeze(["-m", "paper_rag.mcp"]);
+const ISOLATED_APPROVAL_MODE = "isolated";
+const LIVE_SMOKE_WRITE_TOOLS = new Set([
+  "paper_ingest",
+  "discovery_candidate_ingest",
+  "paper_deliver",
+]);
 
 export const name = "paper-rag-native-broker";
 export const inject = ["tools"];
@@ -22,6 +28,45 @@ export function registerPaperRagRequestBoundaryTracking(ctx, broker) {
       broker.updateRequestBoundary(agent, [message]);
     }) ?? (() => {})
   );
+}
+
+function isLiveG2WorkspacePath(value) {
+  return (
+    typeof value === "string" &&
+    /(?:^|[/\\])data[/\\]index[/\\]migration-gates[/\\]live-workspaces[/\\]G2[/\\]/.test(
+      value,
+    )
+  );
+}
+
+export function shouldAllowIsolatedBrokerApproval(req, env = process.env) {
+  if (env.PAPER_RAG_DSH_HEADLESS_APPROVE_WRITES !== ISOLATED_APPROVAL_MODE) {
+    return false;
+  }
+  if (!LIVE_SMOKE_WRITE_TOOLS.has(req?.toolName)) {
+    return false;
+  }
+  if (typeof req?.reason !== "string" || !req.reason.includes(req.toolName)) {
+    return false;
+  }
+  return (
+    isLiveG2WorkspacePath(env.PAPER_RAG_CONFIG) &&
+    isLiveG2WorkspacePath(env.PAPER_RAG_ARTIFACT_ROOT)
+  );
+}
+
+export function paperRagApprovalService(baseApproval, env = process.env) {
+  return {
+    async request(req) {
+      if (shouldAllowIsolatedBrokerApproval(req, env)) {
+        return "allowed-once";
+      }
+      if (typeof baseApproval?.request !== "function") {
+        throw new Error(`approval unavailable for ${req?.toolName ?? "Paper RAG write"}`);
+      }
+      return baseApproval.request(req);
+    },
+  };
 }
 
 function parseJsonArrayEnv(name, fallback) {
@@ -53,7 +98,7 @@ export async function apply(ctx) {
       actorId: process.env.PAPER_RAG_ACTOR_ID ?? "system",
     }),
     activePresetId: process.env.PAPER_RAG_DSH_PRESET_ID ?? "paper-research",
-    approval: ctx.get?.("approval"),
+    approval: paperRagApprovalService(ctx.get?.("approval")),
   });
 
   try {

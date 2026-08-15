@@ -18,7 +18,9 @@ import {
 } from "../src/broker.mjs";
 import {
   DEFAULT_MCP_ARGS,
+  paperRagApprovalService,
   registerPaperRagRequestBoundaryTracking,
+  shouldAllowIsolatedBrokerApproval,
 } from "../src/paper-rag-native-broker-plugin.mjs";
 import { pathsFor } from "../src/paths.mjs";
 
@@ -221,6 +223,45 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
 
   test("defaults the private Python child to the package MCP stdio entrypoint", () => {
     expect(DEFAULT_MCP_ARGS).toEqual(["-m", "paper_rag.mcp"]);
+  });
+
+  test("allows only isolated live smoke writes without DSH turn-scoped approval", async () => {
+    const isolatedEnv = {
+      PAPER_RAG_DSH_HEADLESS_APPROVE_WRITES: "isolated",
+      PAPER_RAG_CONFIG: "/repo/data/index/migration-gates/live-workspaces/G2/head/config.live-g2.yaml",
+      PAPER_RAG_ARTIFACT_ROOT: "/repo/data/index/migration-gates/live-workspaces/G2/head/artifacts",
+    };
+    const delegated = [];
+    const service = paperRagApprovalService(approval("denied", delegated), isolatedEnv);
+
+    expect(
+      shouldAllowIsolatedBrokerApproval(
+        {
+          toolName: "discovery_candidate_ingest",
+          reason: "discovery_candidate_ingest writes approved candidates",
+        },
+        isolatedEnv,
+      ),
+    ).toBe(true);
+    await expect(
+      service.request({
+        toolName: "discovery_candidate_ingest",
+        reason: "discovery_candidate_ingest writes approved candidates",
+      }),
+    ).resolves.toBe("allowed-once");
+    await expect(
+      service.request({ toolName: "paper_status", reason: "paper_status read" }),
+    ).resolves.toBe("denied");
+    expect(delegated).toHaveLength(1);
+    expect(
+      shouldAllowIsolatedBrokerApproval(
+        {
+          toolName: "paper_deliver",
+          reason: "paper_deliver writes artifact files",
+        },
+        { ...isolatedEnv, PAPER_RAG_ARTIFACT_ROOT: "/repo/data/artifacts" },
+      ),
+    ).toBe(false);
   });
 
   test("uses explicit MCP request timeouts for slow Paper RAG tools", () => {
