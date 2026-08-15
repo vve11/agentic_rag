@@ -83,6 +83,60 @@ const writeInputSchema = {
   additionalProperties: false,
 };
 
+const discoverInputSchema = {
+  type: "object",
+  properties: {
+    topic: { type: "string" },
+    max_candidates: { type: "number" },
+    sources: { type: "array", items: { type: "string" } },
+  },
+  required: ["topic"],
+  additionalProperties: false,
+};
+
+const discoveryRunInputSchema = {
+  type: "object",
+  properties: {
+    run_id: { type: "number" },
+  },
+  required: ["run_id"],
+  additionalProperties: false,
+};
+
+const ingestInputSchema = {
+  type: "object",
+  properties: {
+    arxiv_id: { type: "string" },
+    pdf_url: { type: "string" },
+    pdf_path: { type: "string" },
+    title_hint: { type: "string" },
+    force: { type: "boolean" },
+  },
+  additionalProperties: false,
+};
+
+const candidateIngestInputSchema = {
+  type: "object",
+  properties: {
+    candidate_ids: { type: "array", items: { type: "number" } },
+    force: { type: "boolean" },
+  },
+  required: ["candidate_ids"],
+  additionalProperties: false,
+};
+
+const deliverInputSchema = {
+  type: "object",
+  properties: {
+    format: { type: "string" },
+    paper_ids: { type: "array", items: { type: "string" } },
+    title: { type: "string" },
+    options: { type: "object" },
+  },
+  required: ["format", "paper_ids"],
+  additionalProperties: false,
+};
+
 const structuredOutputSchema = {
   type: "object",
   additionalProperties: true,
@@ -200,6 +254,36 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       outputSchema: structuredOutputSchema,
     },
     {
+      name: "paper_discover",
+      description: "Private fixture paper discovery tool.",
+      inputSchema: discoverInputSchema,
+      outputSchema: structuredOutputSchema,
+    },
+    {
+      name: "discovery_run_get",
+      description: "Private fixture discovery run fetch tool.",
+      inputSchema: discoveryRunInputSchema,
+      outputSchema: structuredOutputSchema,
+    },
+    {
+      name: "paper_ingest",
+      description: "Private fixture paper ingest tool.",
+      inputSchema: ingestInputSchema,
+      outputSchema: structuredOutputSchema,
+    },
+    {
+      name: "discovery_candidate_ingest",
+      description: "Private fixture candidate ingest tool.",
+      inputSchema: candidateIngestInputSchema,
+      outputSchema: structuredOutputSchema,
+    },
+    {
+      name: "paper_deliver",
+      description: "Private fixture paper deliver tool.",
+      inputSchema: deliverInputSchema,
+      outputSchema: structuredOutputSchema,
+    },
+    {
       name: "write_probe",
       description: "Private fixture write probe.",
       inputSchema: writeInputSchema,
@@ -257,6 +341,78 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       credential_generation: credentialGeneration(),
       write_call_count: writeCallCount,
       citations: request.params.name === "paper_qa" ? ["chunk:c1"] : [],
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify({ ok: true }) }],
+      structuredContent,
+    };
+  }
+
+  if (request.params.name === "paper_discover" || request.params.name === "discovery_run_get") {
+    const structuredContent = {
+      ok: true,
+      tool: request.params.name,
+      received_arguments: args,
+      received_meta: receivedMeta,
+      data: {
+        run: { id: args.run_id ?? 7, topic: args.topic ?? "fixture topic" },
+        candidates: [
+          {
+            id: 11,
+            title: "Fixture Candidate",
+            source: "fixture",
+            rank: 1,
+            evidence_role: "discovery_only_not_answer_evidence",
+          },
+        ],
+        count: 1,
+      },
+      evidence_role: "discovery_only",
+      warnings: [],
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify({ ok: true }) }],
+      structuredContent,
+    };
+  }
+
+  if (
+    ["paper_ingest", "discovery_candidate_ingest", "paper_deliver"].includes(
+      request.params.name,
+    )
+  ) {
+    writeCallCount += 1;
+    const data =
+      request.params.name === "paper_deliver"
+        ? {
+            artifact: {
+              artifact_id: "artifact-fixture",
+              path: "/fixture/artifacts/artifact-fixture",
+              manifest_path: "/fixture/artifacts/artifact-fixture/manifest.json",
+            },
+            format: args.format,
+            paper_count: Array.isArray(args.paper_ids) ? args.paper_ids.length : 0,
+          }
+        : {
+            results: [
+              {
+                candidate_id: Array.isArray(args.candidate_ids) ? args.candidate_ids[0] : undefined,
+                paper_id: "paper-fixture",
+                status: "ingested",
+                n_chunks: 4,
+              },
+            ],
+            count: 1,
+          };
+    const structuredContent = {
+      ok: true,
+      tool: request.params.name,
+      received_arguments: args,
+      received_meta: receivedMeta,
+      data,
+      evidence_role: request.params.name === "paper_deliver" ? "artifact" : "metadata",
+      warnings: [],
+      write_call_count: writeCallCount,
     };
     return {
       content: [{ type: "text", text: JSON.stringify({ ok: true }) }],

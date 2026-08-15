@@ -64,6 +64,53 @@ WRITE_INPUT_SCHEMA = {
     "required": ["note"],
     "additionalProperties": False,
 }
+DISCOVER_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "topic": {"type": "string"},
+        "max_candidates": {"type": "number"},
+        "sources": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["topic"],
+    "additionalProperties": False,
+}
+DISCOVERY_RUN_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"run_id": {"type": "number"}},
+    "required": ["run_id"],
+    "additionalProperties": False,
+}
+INGEST_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "arxiv_id": {"type": "string"},
+        "pdf_url": {"type": "string"},
+        "pdf_path": {"type": "string"},
+        "title_hint": {"type": "string"},
+        "force": {"type": "boolean"},
+    },
+    "additionalProperties": False,
+}
+CANDIDATE_INGEST_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "candidate_ids": {"type": "array", "items": {"type": "number"}},
+        "force": {"type": "boolean"},
+    },
+    "required": ["candidate_ids"],
+    "additionalProperties": False,
+}
+DELIVER_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "format": {"type": "string"},
+        "paper_ids": {"type": "array", "items": {"type": "string"}},
+        "title": {"type": "string"},
+        "options": {"type": "object"},
+    },
+    "required": ["format", "paper_ids"],
+    "additionalProperties": False,
+}
 STRUCTURED_OUTPUT_SCHEMA = {"type": "object", "additionalProperties": True}
 
 
@@ -149,6 +196,36 @@ def tools() -> list[dict[str, Any]]:
             "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
         },
         {
+            "name": "paper_discover",
+            "description": "Private Python fixture discovery tool.",
+            "inputSchema": DISCOVER_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
+            "name": "discovery_run_get",
+            "description": "Private Python fixture discovery run tool.",
+            "inputSchema": DISCOVERY_RUN_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
+            "name": "paper_ingest",
+            "description": "Private Python fixture ingest tool.",
+            "inputSchema": INGEST_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
+            "name": "discovery_candidate_ingest",
+            "description": "Private Python fixture candidate ingest tool.",
+            "inputSchema": CANDIDATE_INGEST_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
+            "name": "paper_deliver",
+            "description": "Private Python fixture deliver tool.",
+            "inputSchema": DELIVER_INPUT_SCHEMA,
+            "outputSchema": STRUCTURED_OUTPUT_SCHEMA,
+        },
+        {
             "name": "write_probe",
             "description": "Private Python fixture write probe.",
             "inputSchema": WRITE_INPUT_SCHEMA,
@@ -179,6 +256,71 @@ def call_tool(params: dict[str, Any]) -> dict[str, Any]:
             "received_meta": meta,
             "has_test_credential": bool(os.environ.get("PAPER_RAG_TEST_TOKEN")),
             "citations": ["chunk:c1"] if tool_name == "paper_qa" else [],
+        }
+        return {
+            "content": [{"type": "text", "text": json.dumps({"ok": True})}],
+            "structuredContent": structured,
+        }
+    if tool_name in {"paper_discover", "discovery_run_get"}:
+        structured = {
+            "ok": True,
+            "tool": tool_name,
+            "received_arguments": args,
+            "received_meta": meta,
+            "data": {
+                "run": {"id": args.get("run_id", 7), "topic": args.get("topic", "fixture topic")},
+                "candidates": [
+                    {
+                        "id": 11,
+                        "title": "Fixture Candidate",
+                        "source": "fixture",
+                        "rank": 1,
+                        "evidence_role": "discovery_only_not_answer_evidence",
+                    }
+                ],
+                "count": 1,
+            },
+            "evidence_role": "discovery_only",
+            "warnings": [],
+        }
+        return {
+            "content": [{"type": "text", "text": json.dumps({"ok": True})}],
+            "structuredContent": structured,
+        }
+    if tool_name in {"paper_ingest", "discovery_candidate_ingest", "paper_deliver"}:
+        if tool_name == "paper_deliver":
+            data = {
+                "artifact": {
+                    "artifact_id": "artifact-fixture",
+                    "path": "/fixture/artifacts/artifact-fixture",
+                    "manifest_path": "/fixture/artifacts/artifact-fixture/manifest.json",
+                },
+                "format": args.get("format"),
+                "paper_count": len(args.get("paper_ids") or []),
+            }
+            evidence_role = "artifact"
+        else:
+            candidate_ids = args.get("candidate_ids") or []
+            data = {
+                "results": [
+                    {
+                        "candidate_id": candidate_ids[0] if candidate_ids else None,
+                        "paper_id": "paper-fixture",
+                        "status": "ingested",
+                        "n_chunks": 4,
+                    }
+                ],
+                "count": 1,
+            }
+            evidence_role = "metadata"
+        structured = {
+            "ok": True,
+            "tool": tool_name,
+            "received_arguments": args,
+            "received_meta": meta,
+            "data": data,
+            "evidence_role": evidence_role,
+            "warnings": [],
         }
         return {
             "content": [{"type": "text", "text": json.dumps({"ok": True})}],

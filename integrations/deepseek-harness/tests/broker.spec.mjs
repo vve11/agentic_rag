@@ -26,8 +26,13 @@ const pythonFixtureArgs = [
   new URL("../fixtures/private_mcp_server.py", import.meta.url).pathname,
 ];
 const cleanup = [];
-const READONLY_MODEL_TOOL_NAMES = [
+const MODEL_TOOL_NAMES = [
+  "discovery_candidate_ingest",
+  "discovery_run_get",
   "paper_compare",
+  "paper_deliver",
+  "paper_discover",
+  "paper_ingest",
   "paper_list",
   "paper_qa",
   "paper_search",
@@ -45,6 +50,11 @@ const FINAL_G1_CATALOG_NAMES = [
   "paper_section",
   "paper_compare",
   "wiki_lookup",
+  "paper_discover",
+  "discovery_run_get",
+  "paper_ingest",
+  "discovery_candidate_ingest",
+  "paper_deliver",
 ];
 
 afterEach(async () => {
@@ -143,10 +153,12 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
     expect(broker.rawToolNames()).toContain("paper_status");
     expect(broker.rawToolNames()).toContain("write_probe");
     expect(broker.modelCatalog().map((tool) => tool.name).sort()).toEqual(
-      READONLY_MODEL_TOOL_NAMES,
+      MODEL_TOOL_NAMES,
     );
     expect(broker.modelCatalog().some((tool) => tool.name.startsWith("mcp__"))).toBe(false);
     expect(broker.modelCatalog().some((tool) => tool.name === "write_probe")).toBe(false);
+    expect(broker.modelCatalog().some((tool) => tool.name === "wiki_generate")).toBe(false);
+    expect(broker.modelCatalog().some((tool) => tool.name === "export_bibtex")).toBe(false);
   });
 
   test("registers broker-owned native tools through the DSH tool registry", () => {
@@ -166,13 +178,13 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
 
     const dispose = registerPaperRagNativeTools(ctx, broker);
 
-    expect(registered.map((tool) => tool.name).sort()).toEqual(READONLY_MODEL_TOOL_NAMES);
+    expect(registered.map((tool) => tool.name).sort()).toEqual(MODEL_TOOL_NAMES);
     expect(registered.some((tool) => tool.name.startsWith("mcp__"))).toBe(false);
     expect(registered.every((tool) => typeof tool.execute === "function")).toBe(true);
 
     dispose();
     expect(disposers.map((fn) => fn.mock.calls.length)).toEqual(
-      Array.from({ length: READONLY_MODEL_TOOL_NAMES.length }, () => 1),
+      Array.from({ length: MODEL_TOOL_NAMES.length }, () => 1),
     );
   });
 
@@ -340,6 +352,53 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
       createBrokerExec({ agentId: "agent-resume", callId: "call-resume-status" }),
     );
     expect(status.structuredContent.write_call_count).toBe(0);
+  });
+
+  test("approval-gated Paper RAG writes require a direct user boundary", async () => {
+    const approvalCalls = [];
+    const broker = await startBroker({
+      approval: approval("allowed-once", approvalCalls),
+    });
+    const exec = createBrokerExec({
+      agentId: "agent-write-denied",
+      callId: "call-write-denied",
+    });
+
+    await expect(
+      broker.execute("paper_ingest", { arxiv_id: "2601.00001" }, exec),
+    ).rejects.toThrow("DIRECT_USER_AUTHORITY_REQUIRED");
+    expect(approvalCalls).toHaveLength(0);
+  });
+
+  test("approval-gated Paper RAG writes send side-effect reason and hidden boundary", async () => {
+    const approvalCalls = [];
+    const auditPath = await newAuditPath();
+    const broker = await startBroker({
+      childEnv: { PAPER_RAG_PRIVATE_AUDIT_PATH: auditPath },
+      approval: approval("allowed-once", approvalCalls),
+    });
+    const exec = createBrokerExec({
+      agentId: "agent-write-ok",
+      sessionId: "session-write-ok",
+      callId: "call-write-ok",
+    });
+    const boundary = establishBoundary(broker, exec, ["user-write"]);
+
+    const result = await broker.execute(
+      "discovery_candidate_ingest",
+      { candidate_ids: [11], force: true },
+      exec,
+    );
+
+    expect(result.structuredContent.ok).toBe(true);
+    expect(approvalCalls).toHaveLength(1);
+    expect(approvalCalls[0].toolName).toBe("discovery_candidate_ingest");
+    expect(approvalCalls[0].reason).toContain("candidate_ids=11");
+    expect(JSON.stringify(result)).not.toContain(boundary);
+    const audit = (await readAuditLines(auditPath)).find(
+      (line) => line.tool_name === "discovery_candidate_ingest",
+    );
+    expect(audit.received_meta.paper_rag.request_boundary_id).toBe(boundary);
   });
 
   test("request boundary rides hidden metadata and stays out of arguments and results", async () => {

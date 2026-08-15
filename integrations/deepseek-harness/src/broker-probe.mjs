@@ -9,21 +9,14 @@ import {
   createBrokerExec,
   redactSecrets,
 } from "./broker.mjs";
+import { BROKER_MODEL_TOOL_NAMES } from "./paper-rag-tool-catalog.mjs";
 import { runDshSessionCompatibilityProof } from "./session-proof.mjs";
 
 const fixtureCommand = process.execPath;
 const fixtureArgs = [
   new URL("../fixtures/private-mcp-server.mjs", import.meta.url).pathname,
 ];
-const READONLY_MODEL_TOOL_NAMES = [
-  "paper_compare",
-  "paper_list",
-  "paper_qa",
-  "paper_search",
-  "paper_section",
-  "paper_status",
-  "wiki_lookup",
-];
+const MODEL_TOOL_NAMES = [...BROKER_MODEL_TOOL_NAMES].sort();
 
 /** @param {string | (() => string)} [value] */
 function credentials(value = "probe-test-token") {
@@ -97,7 +90,7 @@ export async function runBrokerCompatibilityProbe(paths) {
     const rawToolNames = broker.rawToolNames().sort();
     const modelCatalog = broker.modelCatalog();
     const modelToolNames = modelCatalog.map((tool) => tool.name).sort();
-    assert.deepEqual(modelToolNames, READONLY_MODEL_TOOL_NAMES);
+    assert.deepEqual(modelToolNames, MODEL_TOOL_NAMES);
     assert.equal(modelToolNames.some((name) => name.startsWith("mcp__")), false);
     assert.equal(modelToolNames.includes("write_probe"), false);
     assert.equal(rawToolNames.includes("paper_status"), true);

@@ -38,7 +38,7 @@ export async function apply(ctx) {
       artifactRoot: process.env.PAPER_RAG_ARTIFACT_ROOT ?? join(repoRoot, "data/artifacts"),
       importRoot: process.env.PAPER_RAG_IMPORT_ROOT ?? join(repoRoot, "data/imports"),
       sourceEnv: process.env,
-      toolset: process.env.PAPER_RAG_MCP_TOOLSET ?? "readonly",
+      toolset: process.env.PAPER_RAG_MCP_TOOLSET ?? "research",
       actorId: process.env.PAPER_RAG_ACTOR_ID ?? "system",
     }),
     activePresetId: process.env.PAPER_RAG_DSH_PRESET_ID ?? "paper-research",
