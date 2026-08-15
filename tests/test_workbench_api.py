@@ -377,3 +377,79 @@ def test_dsh_handoff_builds_prompt_without_calling_tools(tmp_path):
     assert "chunk-a" in payload["prompt"]
     assert "证据引用" in payload["prompt"]
     assert calls == []
+
+
+def test_qa_stream_endpoint_frames_sse_events(tmp_path):
+    from paper_rag.workbench.api import create_app
+
+    async def fake_stream_answer(
+        question,
+        *,
+        paper_ids=None,
+        conversation_id=None,
+        user_id="system",
+        resolved_question=None,
+    ):
+        assert question == "What is Self-RAG?"
+        assert paper_ids == ["arxiv:2310.11511"]
+        assert conversation_id == "workbench"
+        assert user_id == "workbench"
+        yield {
+            "event": "start",
+            "data": {
+                "trace_id": "trace1234567890",
+                "stage": "start",
+                "status": "completed",
+                "summary": "Started Paper RAG QA",
+            },
+        }
+        yield {
+            "event": "answer_chunk",
+            "data": {
+                "trace_id": "trace1234567890",
+                "stage": "answer",
+                "text": "Self-RAG",
+            },
+        }
+        yield {
+            "event": "done",
+            "data": {
+                "trace_id": "trace1234567890",
+                "stage": "done",
+                "status": "completed",
+                "summary": "Paper RAG QA complete",
+                "answer": "Self-RAG",
+                "citations": [],
+                "chunks": [],
+                "abstain": {},
+                "n_chunks": 0,
+                "paper_ids": ["arxiv:2310.11511"],
+                "query_resolution": {"effective_question": "What is Self-RAG?"},
+            },
+        }
+
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *_args: {},
+            stream_answer_fn=fake_stream_answer,
+        )
+    )
+
+    with client.stream(
+        "POST",
+        "/api/qa/stream",
+        json={
+            "question": "What is Self-RAG?",
+            "paper_ids": ["arxiv:2310.11511"],
+            "top_k": 8,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: start" in body
+    assert '"stage": "answer"' in body
+    assert "event: done" in body
+    assert "trace1234567890" in body

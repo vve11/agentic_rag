@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import json
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from starlette.responses import StreamingResponse
 
 from paper_rag.mcp.context import McpRequestContext, McpServerConfig
 from paper_rag.mcp.registry import call_tool
@@ -24,6 +26,7 @@ from .settings import WorkbenchSettings
 
 CallTool = Callable[[str, dict[str, Any] | None, McpRequestContext], dict[str, Any]]
 IndexHealthBuilder = Callable[[WorkbenchSettings], dict[str, Any]]
+QaStreamer = Callable[..., AsyncIterator[dict[str, Any]]]
 
 
 def create_app(
@@ -32,9 +35,14 @@ def create_app(
     call_tool_fn: CallTool = call_tool,
     index_health_fn: IndexHealthBuilder | None = None,
     read_store: WorkbenchReadStore | None = None,
+    stream_answer_fn: QaStreamer | None = None,
 ) -> FastAPI:
     app_settings = settings or WorkbenchSettings.from_env()
     store = read_store or WorkbenchReadStore()
+    if stream_answer_fn is None:
+        from paper_rag.rag.async_api import stream_answer_async
+
+        stream_answer_fn = stream_answer_async
     index_health_builder = index_health_fn or (
         lambda current_settings: build_index_health(
             current_settings,
@@ -112,6 +120,20 @@ def create_app(
             call_tool_fn,
         )
 
+    @app.post("/api/qa/stream")
+    async def qa_stream(payload: QaRequest) -> StreamingResponse:
+        async def events() -> AsyncIterator[str]:
+            async for event in stream_answer_fn(
+                payload.question,
+                paper_ids=payload.paper_ids,
+                conversation_id="workbench",
+                user_id=app_settings.actor_id,
+                resolved_question=payload.resolved_question,
+            ):
+                yield _sse_frame(event)
+
+        return StreamingResponse(events(), media_type="text/event-stream")
+
     @app.post("/api/section")
     def section(payload: SectionRequest) -> dict[str, Any]:
         return _call(
@@ -187,6 +209,13 @@ def _call(
 ) -> dict[str, Any]:
     result = call_tool_fn(tool_name, args, _context(settings, tool_name=tool_name, boundary=boundary))
     return mcp_envelope(result, tool=tool_name)
+
+
+def _sse_frame(event: dict[str, Any]) -> str:
+    name = str(event.get("event") or "message")
+    data = event.get("data")
+    payload = json.dumps(data if isinstance(data, dict) else {}, ensure_ascii=False)
+    return f"event: {name}\ndata: {payload}\n\n"
 
 
 def mcp_envelope(result: dict[str, Any], *, tool: str) -> dict[str, Any]:
