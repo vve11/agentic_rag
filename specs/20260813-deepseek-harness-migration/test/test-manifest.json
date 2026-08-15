@@ -522,6 +522,23 @@
         "real LLM calls",
         "versioned durable DSH session"
       ]
+    },
+    {
+      "id": "LIVE-005",
+      "gate": "G2",
+      "runner": ".venv/bin/python scripts/migration_gate.py run-live --case LIVE-005 --config-env PAPER_RAG_CONFIG",
+      "report": "data/index/migration-gates/live/LIVE-005.json",
+      "max_age_hours": 24,
+      "requires_authorization": true,
+      "side_effects": [
+        "real LLM calls",
+        "external paper search",
+        "isolated paper download",
+        "isolated SQLite writes",
+        "isolated Qdrant writes",
+        "isolated artifact writes",
+        "versioned durable DSH session"
+      ]
     }
   ],
   "cleanup_plan": "test/cleanup-plan.md",

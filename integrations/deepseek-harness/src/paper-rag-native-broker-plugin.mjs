@@ -13,6 +13,17 @@ export const DEFAULT_MCP_ARGS = Object.freeze(["-m", "paper_rag.mcp"]);
 export const name = "paper-rag-native-broker";
 export const inject = ["tools"];
 
+export function registerPaperRagRequestBoundaryTracking(ctx, broker) {
+  if (typeof ctx?.on !== "function") {
+    return () => {};
+  }
+  return (
+    ctx.on("agent/inbox/claimed", ({ agent, message }) => {
+      broker.updateRequestBoundary(agent, [message]);
+    }) ?? (() => {})
+  );
+}
+
 function parseJsonArrayEnv(name, fallback) {
   const value = process.env[name];
   if (value === undefined || value.trim() === "") {
@@ -48,8 +59,10 @@ export async function apply(ctx) {
   try {
     await broker.activate();
     const unregisterTools = registerPaperRagNativeTools(ctx, broker);
+    const unregisterBoundaryTracking = registerPaperRagRequestBoundaryTracking(ctx, broker);
     ctx.effect(
       () => async () => {
+        unregisterBoundaryTracking();
         unregisterTools();
         await broker.close();
       },

@@ -871,11 +871,15 @@ llm: {}
     runner_source = repo_root / "integrations/deepseek-harness/src/paper-rag-headless-runner.mjs"
     runner_source.parent.mkdir(parents=True)
     runner_source.write_text("export const name = 'paper-rag-headless-runner';\n", encoding="utf-8")
+    cards_source = repo_root / "integrations/deepseek-harness/src/paper-rag-cards.mjs"
+    cards_source.write_text("export function cardTypeForTool() {}\n", encoding="utf-8")
 
     workspace = migration_gate._prepare_live001_workspace(repo_root, tmp_path / "work")
 
     runner_dest = workspace.dsh_home / "profiles/headless/src/paper-rag-headless-runner.mjs"
+    cards_dest = workspace.dsh_home / "profiles/headless/src/paper-rag-cards.mjs"
     assert runner_dest.read_text(encoding="utf-8") == runner_source.read_text(encoding="utf-8")
+    assert cards_dest.read_text(encoding="utf-8") == cards_source.read_text(encoding="utf-8")
 
 
 def test_prepare_live_g2_workspace_writes_isolated_config(tmp_path: Path):
@@ -982,6 +986,104 @@ def test_live_g2_runners_are_registered_and_use_flash_isolated_env(
     assert captured["env"]["CHAT_MODEL"] == "deepseek-v4-flash"
     assert captured["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path / "src")
     assert "test-secret" not in json.dumps(result)
+
+
+def test_live005_runner_uses_dsh_headless_isolated_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_env = {
+        "OPENAI_API_KEY": "test-secret",
+        "OPENAI_BASE_URL": "https://api.deepseek.com",
+        "CHAT_MODEL": "deepseek-v4-flash",
+        "SMALL_MODEL": "deepseek-v4-flash",
+    }
+    workspace = migration_gate.LiveG2Workspace(
+        work_root=tmp_path / "work",
+        data_root=tmp_path / "work/data",
+        index_root=tmp_path / "work/data/index",
+        artifact_root=tmp_path / "work/artifacts",
+        import_root=tmp_path / "work/imports",
+        dsh_home=tmp_path / "work/runtime/deepseek-harness/versions/0.1.0-rc.6/dsh-home",
+        config_path=tmp_path / "work/config.live-g2.yaml",
+        feedback_path=tmp_path / "work/data/index/feedback.sqlite",
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        migration_gate,
+        "_prepare_live_g2_workspace",
+        lambda repo_root, work_root, *, reset=False: workspace,
+    )
+    monkeypatch.setattr(
+        migration_gate,
+        "_assert_live_g2_workspace_isolated",
+        lambda repo_root, prepared: {"isolated": True, "workspace_root": str(prepared.work_root)},
+    )
+
+    def fake_headless(repo_root, prepared, env):
+        captured["workspace"] = prepared
+        captured["env"] = env
+        return {
+            "preset": "paper-research",
+            "tool_calls": [
+                "paper_discover",
+                "discovery_candidate_ingest",
+                "paper_qa",
+                "paper_deliver",
+            ],
+            "cards": [
+                "discovery_candidates",
+                "ingest_receipt",
+                "evidence_answer",
+                "artifact_delivery",
+            ],
+            "text": "done",
+        }
+
+    monkeypatch.setattr(
+        migration_gate,
+        "_run_live005_headless_workflow",
+        fake_headless,
+        raising=False,
+    )
+
+    result = migration_gate.run_live005_dsh_frontend_workflow(
+        tmp_path,
+        {"id": "LIVE-005"},
+        config_env="PAPER_RAG_CONFIG",
+        authorized_by="at",
+        source_env=source_env,
+    )
+
+    assert "LIVE-005" in migration_gate.LIVE_CASE_RUNNERS
+    assert result["status"] == "PASS"
+    assert result["writes_to_formal_paper_library"] is False
+    assert result["summary"]["tool_calls"][-1] == "paper_deliver"
+    assert "artifact_delivery" in result["summary"]["cards"]
+    assert captured["env"]["PAPER_RAG_MCP_TOOLSET"] == "research"
+    assert captured["env"]["PAPER_RAG_DSH_HEADLESS_REPORT_JSON"] == "1"
+    assert captured["env"]["PAPER_RAG_DSH_CREDENTIALS_PATH"].endswith(".credentials.yaml")
+    assert captured["env"]["DSH_HOME"] == str(workspace.dsh_home)
+    assert "test-secret" not in json.dumps(result)
+
+
+def test_manifest_declares_live005_dsh_frontend_smoke():
+    manifest = json.loads((SPEC / "test" / "test-manifest.json").read_text(encoding="utf-8"))
+
+    live005 = next(
+        (case for case in manifest["live_cases"] if case.get("id") == "LIVE-005"),
+        None,
+    )
+
+    assert live005 is not None
+    assert live005["gate"] == "G2"
+    assert live005["runner"] == (
+        ".venv/bin/python scripts/migration_gate.py run-live "
+        "--case LIVE-005 --config-env PAPER_RAG_CONFIG"
+    )
+    assert live005["report"] == "data/index/migration-gates/live/LIVE-005.json"
+    assert live005["requires_authorization"] is True
+    assert "versioned durable DSH session" in live005["side_effects"]
 
 
 def test_live_g2_env_adds_repo_src_to_import_path(tmp_path: Path):

@@ -15,7 +15,10 @@ import {
   registerPaperRagNativeTools,
   toolSchemaHash,
 } from "../src/broker.mjs";
-import { DEFAULT_MCP_ARGS } from "../src/paper-rag-native-broker-plugin.mjs";
+import {
+  DEFAULT_MCP_ARGS,
+  registerPaperRagRequestBoundaryTracking,
+} from "../src/paper-rag-native-broker-plugin.mjs";
 import { pathsFor } from "../src/paths.mjs";
 
 const paths = pathsFor();
@@ -425,6 +428,39 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
       (line) => line.tool_name === "write_probe",
     );
     expect(audit.received_meta.paper_rag.request_boundary_id).toBe(boundary);
+  });
+
+  test("tracks claimed direct user messages as the active write boundary", () => {
+    const broker = createTestBroker();
+    const handlers = new Map();
+    const ctx = {
+      on: vi.fn((event, handler) => {
+        handlers.set(event, handler);
+        return vi.fn();
+      }),
+    };
+    const exec = createBrokerExec({
+      agentId: "agent-claimed-boundary",
+      sessionId: "session-claimed-boundary",
+    });
+
+    registerPaperRagRequestBoundaryTracking(ctx, broker);
+
+    handlers.get("agent/inbox/claimed")({
+      agent: exec.agent,
+      message: { id: "user-claimed", source: { kind: "user" }, content: [] },
+      turn: 1,
+    });
+    handlers.get("agent/inbox/claimed")({
+      agent: exec.agent,
+      message: { id: "plugin-context", source: { kind: "plugin", plugin: "x" }, content: [] },
+      turn: 1,
+    });
+
+    expect(ctx.on).toHaveBeenCalledWith("agent/inbox/claimed", expect.any(Function));
+    expect(broker.currentRequestBoundaryId(exec.agent)).toBe(
+      deriveRequestBoundaryId("session-claimed-boundary", ["user-claimed"]),
+    );
   });
 
   test("private MCP child crash is diagnosable and restart restores tool calls", async () => {

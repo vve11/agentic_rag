@@ -84,6 +84,20 @@ Run exactly these checks:
 Return a concise final summary that states whether the first answer has at least one chunk citation
 and whether the second answer abstained because the indexed paper corpus has no evidence.
 """
+LIVE005_PROMPT = f"""\
+You are running Paper RAG migration LIVE-005 in an isolated DSH Web frontend smoke.
+Use only Paper RAG native tools. Do not use web search, shell, filesystem, memory, or general knowledge as paper evidence.
+
+Run this exact workflow from the Paper Research preset:
+1. Call paper_discover with topic "{LIVE_G2_TOPIC}", max_candidates 3, and sources ["arxiv"].
+2. Select one ingestable candidate by candidate id. Candidate results are not answer evidence.
+3. Call discovery_candidate_ingest for the selected candidate id with force true. This is approved only for the isolated smoke workspace.
+4. Call paper_qa for the ingested paper asking: "What problem does this paper solve, and what is its main method?"
+5. Call paper_deliver with format "markdown_survey", the ingested paper id, and title "{LIVE_G2_TITLE}".
+
+Return a concise final summary that names the selected candidate, the ingested paper id,
+whether paper_qa returned indexed chunk citations, and the artifact manifest path.
+"""
 CASE_COVERAGE_BY_COMMAND = {
     "mcp-contract": (
         "MCP-001",
@@ -852,8 +866,12 @@ def _prepare_live001_workspace(repo_root: Path, work_root: Path) -> Live001Works
     runner_dest = dsh_home / "profiles/headless/src/paper-rag-headless-runner.mjs"
     if not runner_source.exists():
         raise GateError(f"LIVE-001 headless runner source not found: {_relpath(runner_source, repo_root)}")
+    cards_source = repo_root / "integrations/deepseek-harness/src/paper-rag-cards.mjs"
+    if not cards_source.exists():
+        raise GateError(f"LIVE-001 headless card source not found: {_relpath(cards_source, repo_root)}")
     runner_dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(runner_source, runner_dest)
+    shutil.copy2(cards_source, runner_dest.parent / "paper-rag-cards.mjs")
 
     config_path = work_root / "config.live001.yaml"
     _write_live001_config(repo_root, data_root, index_root, config_path)
@@ -1195,6 +1213,71 @@ def run_live004_resume_session_followup(
     return _live_g2_payload(workspace, summary, env_source)
 
 
+def run_live005_dsh_frontend_workflow(
+    repo_root: Path,
+    live_case: dict[str, Any],
+    *,
+    config_env: str | None,
+    authorized_by: str,
+    source_env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    del live_case, authorized_by
+    _require_live_g2_config_env(config_env)
+    env_source = dict(os.environ if source_env is None else source_env)
+    _require_live_g2_flash_env(env_source, "LIVE-005")
+    workspace = _prepare_live_g2_workspace(repo_root, _live_g2_workspace_root(repo_root), reset=True)
+    isolation = _assert_live_g2_workspace_isolated(repo_root, workspace)
+    env = _live_g2_child_env(repo_root, workspace, env_source)
+    env.update(
+        {
+            "PAPER_RAG_DSH_HEADLESS_REPORT_JSON": "1",
+            "PAPER_RAG_DSH_HEADLESS_WORKFLOW": "1",
+            "PAPER_RAG_DSH_HEADLESS_APPROVE_WRITES": "isolated",
+        }
+    )
+    try:
+        headless_summary = _run_live005_headless_workflow(repo_root, workspace, env)
+        tool_calls = list(headless_summary.get("tool_calls") or [])
+        cards = list(headless_summary.get("cards") or [])
+        checks = [
+            {"id": "live-g2-isolated-config", "status": "PASS", "detail": isolation["workspace_root"]},
+            {
+                "id": "dsh-headless-exit",
+                "status": "PASS" if int(headless_summary.get("exit_code", 0)) == 0 else "FAIL",
+                "detail": f"exit={headless_summary.get('exit_code', 0)}",
+            },
+            {
+                "id": "dsh-headless-used-paper-research",
+                "status": "PASS" if headless_summary.get("preset") == "paper-research" else "FAIL",
+                "detail": str(headless_summary.get("preset")),
+            },
+            {
+                "id": "dsh-headless-workflow-tools",
+                "status": "PASS" if _has_live005_tools(headless_summary) else "FAIL",
+                "detail": ",".join(tool_calls),
+            },
+            {
+                "id": "dsh-headless-portable-cards",
+                "status": "PASS" if _has_live005_cards(headless_summary) else "FAIL",
+                "detail": ",".join(cards),
+            },
+            {
+                "id": "formal-library-untouched",
+                "status": "PASS",
+                "detail": f"workspace={workspace.work_root}",
+            },
+        ]
+        summary = {
+            **headless_summary,
+            "checks": checks,
+            "metrics": {"tool_calls": len(tool_calls), "cards": len(cards)},
+            "summary": headless_summary,
+        }
+    except Exception as exc:
+        summary = _live_g2_exception_summary("live-g2-dsh-frontend-workflow", exc, env_source)
+    return _live_g2_payload(workspace, summary, env_source)
+
+
 def _require_live_g2_config_env(config_env: str | None) -> None:
     if config_env not in (None, "PAPER_RAG_CONFIG"):
         raise GateError(f"LIVE-G2 requires --config-env PAPER_RAG_CONFIG, got {config_env!r}")
@@ -1231,6 +1314,7 @@ def _prepare_live_g2_workspace(repo_root: Path, work_root: Path, *, reset: bool 
         index_root / "models",
         artifact_root,
         import_root,
+        work_root / "credentials",
         dsh_home / "sessions",
     ):
         path.mkdir(parents=True, exist_ok=True)
@@ -1391,9 +1475,139 @@ def _live_g2_child_env(
             "DSH_TELEMETRY_DISABLED": "1",
             "DSH_TELEMETRY_MODE": "DISABLED",
             "DSH_TOOLS_MODE": "native",
+            "PAPER_RAG_DSH_CREDENTIALS_PATH": str(
+                workspace.work_root / "credentials/.credentials.yaml"
+            ),
+            "PAPER_RAG_DSH_SKILL_ROOT": str(repo_root / ".dsh/skills"),
+            "PAPER_RAG_DSH_PRESET_ID": "paper-research",
         }
     )
     return env
+
+
+def _run_live005_headless_workflow(
+    repo_root: Path,
+    workspace: LiveG2Workspace,
+    env: dict[str, str],
+) -> dict[str, Any]:
+    integration_root = repo_root / "integrations/deepseek-harness"
+    dsh_bin = integration_root / "node_modules/.bin/dsh"
+    patch_path = integration_root / "live-headless.patch.yml"
+    if not dsh_bin.exists():
+        raise GateError(f"LIVE-005 DSH binary not found: {_relpath(dsh_bin, repo_root)}")
+    if not patch_path.exists():
+        raise GateError(f"LIVE-005 headless patch not found: {_relpath(patch_path, repo_root)}")
+    _install_live_g2_dsh_headless_assets(repo_root, workspace)
+
+    proc = subprocess.run(
+        [
+            str(dsh_bin),
+            "--profile",
+            "headless",
+            "--patch",
+            str(patch_path),
+            LIVE005_PROMPT,
+        ],
+        cwd=integration_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=int(env.get("PAPER_RAG_LIVE_TIMEOUT_SEC", "900")),
+        check=False,
+    )
+    summary = _parse_live005_headless_json(proc.stdout)
+    summary["exit_code"] = proc.returncode
+    return summary
+
+
+def _install_live_g2_dsh_headless_assets(repo_root: Path, workspace: LiveG2Workspace) -> None:
+    preset_source = repo_root / "integrations/deepseek-harness/presets/paper-research"
+    runner_source = repo_root / "integrations/deepseek-harness/src/paper-rag-headless-runner.mjs"
+    cards_source = repo_root / "integrations/deepseek-harness/src/paper-rag-cards.mjs"
+    if not preset_source.exists():
+        raise GateError(f"LIVE-005 preset source not found: {_relpath(preset_source, repo_root)}")
+    if not runner_source.exists():
+        raise GateError(f"LIVE-005 headless runner source not found: {_relpath(runner_source, repo_root)}")
+    if not cards_source.exists():
+        raise GateError(f"LIVE-005 headless card source not found: {_relpath(cards_source, repo_root)}")
+
+    shutil.copytree(
+        preset_source,
+        workspace.dsh_home / ".agent-presets/paper-research",
+        dirs_exist_ok=True,
+    )
+    runner_dest = workspace.dsh_home / "profiles/headless/src/paper-rag-headless-runner.mjs"
+    runner_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(runner_source, runner_dest)
+    shutil.copy2(cards_source, runner_dest.parent / "paper-rag-cards.mjs")
+
+
+def _parse_live005_headless_json(stdout: str) -> dict[str, Any]:
+    text = stdout.strip()
+    if not text:
+        raise GateError("LIVE-005 headless runner produced no JSON summary")
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end < start:
+        raise GateError("LIVE-005 headless runner stdout did not contain a JSON object")
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except json.JSONDecodeError as exc:
+        raise GateError(f"LIVE-005 headless runner JSON parse failed: {exc.msg}") from exc
+    if not isinstance(parsed, dict):
+        raise GateError("LIVE-005 headless runner JSON summary must be an object")
+    return parsed
+
+
+def _has_live005_tools(summary: dict[str, Any]) -> bool:
+    calls = [str(name) for name in list(summary.get("tool_calls") or [])]
+    ok, index = _contains_ordered_call(calls, "paper_discover", 0)
+    if not ok:
+        return False
+    ok, index = _contains_any_ordered_call(
+        calls,
+        ("paper_ingest", "discovery_candidate_ingest"),
+        index + 1,
+    )
+    if not ok:
+        return False
+    ok, index = _contains_any_ordered_call(
+        calls,
+        ("paper_qa", "paper_compare", "paper_section"),
+        index + 1,
+    )
+    if not ok:
+        return False
+    ok, _index = _contains_ordered_call(calls, "paper_deliver", index + 1)
+    return ok
+
+
+def _contains_ordered_call(calls: list[str], name: str, start: int) -> tuple[bool, int]:
+    try:
+        return True, calls.index(name, start)
+    except ValueError:
+        return False, -1
+
+
+def _contains_any_ordered_call(
+    calls: list[str],
+    names: tuple[str, ...],
+    start: int,
+) -> tuple[bool, int]:
+    indexes = [calls.index(name, start) for name in names if name in calls[start:]]
+    if not indexes:
+        return False, -1
+    return True, min(indexes)
+
+
+def _has_live005_cards(summary: dict[str, Any]) -> bool:
+    cards = {str(name) for name in list(summary.get("cards") or [])}
+    return {
+        "discovery_candidates",
+        "ingest_receipt",
+        "evidence_answer",
+        "artifact_delivery",
+    } <= cards
 
 
 def _run_live002_workflow(
@@ -1925,6 +2139,7 @@ def _live_g2_payload(
         "conversation_id",
         "session_proof",
         "turns",
+        "summary",
     ):
         if key in summary:
             payload[key] = summary[key]
@@ -2006,6 +2221,7 @@ LIVE_CASE_RUNNERS: dict[str, LiveRunner] = {
     "LIVE-002": run_live002_discover_ingest_qa,
     "LIVE-003": run_live003_generate_artifacts,
     "LIVE-004": run_live004_resume_session_followup,
+    "LIVE-005": run_live005_dsh_frontend_workflow,
 }
 
 
