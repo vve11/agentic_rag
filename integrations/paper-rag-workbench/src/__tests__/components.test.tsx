@@ -16,6 +16,8 @@ import { PaperTable } from "../components/PaperTable";
 import { QualityIssueTable } from "../components/QualityIssueTable";
 import { ScoreBreakdown } from "../components/ScoreBreakdown";
 import { Shell } from "../components/Shell";
+import { createWorkbenchClient } from "../api/client";
+import { ProjectProvider, useProjectContext } from "../context/ProjectContext";
 import { renderWithI18n } from "../test/render";
 import {
   chunkDetailFixture,
@@ -260,5 +262,39 @@ describe("Streaming timeline components", () => {
     expect(screen.getByRole("heading", { name: /执行轨迹/ })).toBeInTheDocument();
     expect(screen.getByText(/Understanding question/i)).toBeInTheDocument();
     expect(screen.getByText(/Retrieved 2 chunks/i)).toBeInTheDocument();
+  });
+});
+
+describe("Project context", () => {
+  test("loads fixture projects and creates an active project", async () => {
+    const user = userEvent.setup();
+    const client = createWorkbenchClient({ fixtureMode: true });
+
+    function Probe() {
+      const { activeProject, createProject, projects } = useProjectContext();
+      return (
+        <div>
+          <p>projects:{projects.length}</p>
+          <p>active:{activeProject?.project.name ?? "none"}</p>
+          <button
+            type="button"
+            onClick={() => createProject("Scoped Notes 调研", "notes")}
+          >
+            create
+          </button>
+        </div>
+      );
+    }
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <Probe />
+      </ProjectProvider>,
+    );
+
+    expect(await screen.findByText("active:Self-RAG 调研")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "create" }));
+
+    expect(await screen.findByText("active:Scoped Notes 调研")).toBeInTheDocument();
   });
 });

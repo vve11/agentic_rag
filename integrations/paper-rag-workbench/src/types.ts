@@ -136,6 +136,9 @@ export type QaData = {
   citations: string[];
   chunks: EvidenceChunk[];
   abstain?: { decision?: string } | string;
+  note_refs?: string[];
+  context_policy?: ContextPolicy | Record<string, unknown>;
+  project_context_warnings?: string[];
 };
 
 export type QaStreamEventName =
@@ -221,6 +224,8 @@ export type QaInput = {
   paper_ids?: string[];
   resolved_question?: string;
   top_k?: number;
+  project_id?: string;
+  context_policy?: ContextPolicy;
 };
 export type SectionInput = { paper_id: string; section_name: string };
 export type DiscoverInput = { topic: string; max_candidates?: number; sources?: string[] };
@@ -246,6 +251,151 @@ export type DshHandoffInput = {
 export type DshHandoffData = {
   dsh_url: string;
   prompt: string;
+  handoff?: ProjectHandoff;
+};
+
+export type ProjectSummary = {
+  project_id: string;
+  name: string;
+  description: string;
+  status: "active" | "archived";
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectPaper = {
+  project_id: string;
+  paper_id: string;
+  title_snapshot: string;
+  source: string;
+  created_at: string;
+};
+
+export type EvidencePin = {
+  pin_id: string;
+  project_id: string;
+  chunk_id: string;
+  paper_id: string;
+  label: string;
+  note: string;
+  source: string;
+  score_snapshot?: number | null;
+  quote_snapshot: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ResearchNote = {
+  note_id: string;
+  project_id: string;
+  target_type: "project" | "paper" | "chunk";
+  target_id: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ContextPolicy = {
+  include_pinned_evidence: boolean;
+  include_notes: boolean;
+  restrict_to_project_papers: boolean;
+};
+
+export type SavedQuestion = {
+  question_id: string;
+  project_id: string;
+  question: string;
+  answer: string;
+  citations: string[];
+  chunk_ids: string[];
+  trace_id?: string | null;
+  abstain?: QaData["abstain"];
+  context_policy?: ContextPolicy | Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type CompareCell = {
+  paper_id: string;
+  dimension: string;
+  summary: string;
+  evidence_chunk_ids: string[];
+  note_ids: string[];
+  confidence: "evidence_backed" | "partial" | "missing";
+};
+
+export type CompareRun = {
+  run_id: string;
+  project_id: string;
+  dimensions: string[];
+  paper_ids: string[];
+  status: "completed" | "degraded";
+  cells: CompareCell[];
+  warnings: string[];
+  created_at?: string;
+};
+
+export type ProjectSummaryCounts = {
+  paper_count: number;
+  evidence_count: number;
+  note_count: number;
+  saved_question_count: number;
+  compare_run_count: number;
+};
+
+export type ProjectDetail = {
+  project: ProjectSummary;
+  summary: ProjectSummaryCounts;
+  papers: ProjectPaper[];
+  evidence: EvidencePin[];
+  notes: ResearchNote[];
+  saved_questions: SavedQuestion[];
+  compare_runs: CompareRun[];
+  warnings: string[];
+};
+
+export type ProjectHandoff = {
+  handoff_id: string;
+  project_id: string;
+  prompt: string;
+  paper_ids: string[];
+  chunk_ids: string[];
+  question_ids: string[];
+  created_at: string;
+};
+
+export type ProjectCreateInput = { name: string; description?: string };
+export type ProjectUpdateInput = { name?: string; description?: string };
+export type ProjectPaperInput = {
+  paper_id: string;
+  title_snapshot?: string;
+  source?: string;
+};
+export type EvidencePinInput = {
+  chunk_id: string;
+  paper_id: string;
+  quote_snapshot?: string;
+  source?: string;
+  score_snapshot?: number | null;
+  label?: string;
+  note?: string;
+};
+export type NoteInput = {
+  target_type: ResearchNote["target_type"];
+  target_id: string;
+  body: string;
+  note_id?: string;
+};
+export type SavedQuestionInput = {
+  question: string;
+  answer: string;
+  citations: string[];
+  chunk_ids: string[];
+  trace_id?: string | null;
+  abstain?: QaData["abstain"];
+  context_policy?: ContextPolicy | Record<string, unknown> | null;
+};
+export type ProjectHandoffInput = {
+  instruction?: string;
 };
 
 export type WorkbenchClient = {
@@ -262,4 +412,26 @@ export type WorkbenchClient = {
   discover(input: DiscoverInput): Promise<McpEnvelope<DiscoverData>>;
   ingestCandidates(input: CandidateIngestInput): Promise<McpEnvelope<IngestData>>;
   dshHandoff(input: DshHandoffInput): Promise<DshHandoffData>;
+  projects(includeArchived?: boolean): Promise<{ projects: ProjectSummary[] }>;
+  createProject(input: ProjectCreateInput): Promise<{ project: ProjectSummary }>;
+  project(projectId: string): Promise<ProjectDetail>;
+  updateProject(
+    projectId: string,
+    input: ProjectUpdateInput,
+  ): Promise<{ project: ProjectSummary }>;
+  archiveProject(projectId: string): Promise<{ project: ProjectSummary }>;
+  addProjectPaper(
+    projectId: string,
+    input: ProjectPaperInput,
+  ): Promise<{ paper: ProjectPaper }>;
+  pinEvidence(projectId: string, input: EvidencePinInput): Promise<{ evidence: EvidencePin }>;
+  createNote(projectId: string, input: NoteInput): Promise<{ note: ResearchNote }>;
+  saveQuestion(
+    projectId: string,
+    input: SavedQuestionInput,
+  ): Promise<{ question: SavedQuestion }>;
+  projectDshHandoff(
+    projectId: string,
+    input: ProjectHandoffInput,
+  ): Promise<DshHandoffData>;
 };

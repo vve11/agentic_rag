@@ -99,4 +99,49 @@ describe("Workbench API client", () => {
       }),
     ).resolves.toMatchObject({ prompt: "prompt" });
   });
+
+  test("fixture client manages workspace project state", async () => {
+    const client = createWorkbenchClient({ fixtureMode: true });
+
+    const created = await client.createProject({
+      name: "Self-RAG 调研",
+      description: "project",
+    });
+    const projectId = created.project.project_id;
+    const paper = await client.addProjectPaper(projectId, {
+      paper_id: "arxiv:2310.11511",
+      title_snapshot: "Self-RAG",
+      source: "library",
+    });
+    const evidence = await client.pinEvidence(projectId, {
+      chunk_id: "chunk-self-rag-1",
+      paper_id: "arxiv:2310.11511",
+      quote_snapshot: "SELF-RAG retrieves passages on demand.",
+      source: "search",
+    });
+    const note = await client.createNote(projectId, {
+      target_type: "chunk",
+      target_id: "chunk-self-rag-1",
+      body: "local note",
+    });
+    const saved = await client.saveQuestion(projectId, {
+      question: "What is Self-RAG?",
+      answer: "It retrieves and critiques.",
+      citations: ["chunk-self-rag-1"],
+      chunk_ids: ["chunk-self-rag-1"],
+      trace_id: "trace-workbench-fixture",
+      abstain: { decision: "answer" },
+    });
+    const detail = await client.project(projectId);
+    const handoff = await client.projectDshHandoff(projectId, {
+      instruction: "Compare methods.",
+    });
+
+    expect(paper.paper.paper_id).toBe("arxiv:2310.11511");
+    expect(evidence.evidence.chunk_id).toBe("chunk-self-rag-1");
+    expect(note.note.body).toBe("local note");
+    expect(saved.question.citations).toEqual(["chunk-self-rag-1"]);
+    expect(detail.summary.evidence_count).toBe(1);
+    expect(handoff.prompt).toContain("Compare methods.");
+  });
 });

@@ -6,6 +6,8 @@ import {
   ingestFixture,
   paperDetailFixture,
   papersFixture,
+  projectDetailFixture,
+  projectFixture,
   qaFixture,
   qaStreamEventsFixture,
   searchFixture,
@@ -20,15 +22,24 @@ import type {
   DiscoverInput,
   DshHandoffData,
   DshHandoffInput,
+  EvidencePinInput,
   HealthData,
   IndexHealthData,
   IngestData,
   McpEnvelope,
+  NoteInput,
   PaperDetailData,
   PaperListData,
+  ProjectCreateInput,
+  ProjectDetail,
+  ProjectHandoffInput,
+  ProjectPaperInput,
+  ProjectSummary,
+  ProjectUpdateInput,
   QaData,
   QaInput,
   QaStreamHandler,
+  SavedQuestionInput,
   SearchData,
   SearchInput,
   SectionData,
@@ -45,6 +56,9 @@ export function createWorkbenchClient(
   const baseUrl = options.baseUrl ?? "";
   const fetchImpl = options.fetchImpl ?? fetch;
   const fixtureMode = options.fixtureMode ?? import.meta.env.VITE_WORKBENCH_FIXTURES === "1";
+  const fixtureDetails = new Map<string, ProjectDetail>([
+    [projectFixture.project_id, clone(projectDetailFixture)],
+  ]);
 
   const get = async <T>(path: string): Promise<T> => {
     const response = await fetchImpl(`${baseUrl}${path}`);
@@ -59,6 +73,32 @@ export function createWorkbenchClient(
     });
     if (!response.ok) return response.json() as Promise<T>;
     return response.json() as Promise<T>;
+  };
+  const patch = async <T>(path: string, body: unknown): Promise<T> => {
+    const response = await fetchImpl(`${baseUrl}${path}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) return response.json() as Promise<T>;
+    return response.json() as Promise<T>;
+  };
+  const fixtureProjectList = (): ProjectSummary[] =>
+    Array.from(fixtureDetails.values()).map((detail) => clone(detail.project));
+  const fixtureProject = (projectId: string): ProjectDetail => {
+    const detail = fixtureDetails.get(projectId);
+    if (!detail) throw new Error(`Fixture project not found: ${projectId}`);
+    return detail;
+  };
+  const refreshSummary = (detail: ProjectDetail) => {
+    detail.summary = {
+      paper_count: detail.papers.length,
+      evidence_count: detail.evidence.length,
+      note_count: detail.notes.length,
+      saved_question_count: detail.saved_questions.length,
+      compare_run_count: detail.compare_runs.length,
+    };
+    detail.project.updated_at = nowFixture();
   };
 
   return {
@@ -114,7 +154,212 @@ export function createWorkbenchClient(
       fixtureMode ? Promise.resolve(ingestFixture) : post("/api/ingest/candidates", input),
     dshHandoff: (input: DshHandoffInput): Promise<DshHandoffData> =>
       fixtureMode ? Promise.resolve(dshHandoffFixture) : post("/api/dsh/handoff", input),
+    projects: (includeArchived = false): Promise<{ projects: ProjectSummary[] }> =>
+      fixtureMode
+        ? Promise.resolve({
+            projects: fixtureProjectList().filter(
+              (project) => includeArchived || project.status === "active",
+            ),
+          })
+        : get(`/api/projects?include_archived=${encodeURIComponent(includeArchived)}`),
+    createProject: (input: ProjectCreateInput): Promise<{ project: ProjectSummary }> => {
+      if (!fixtureMode) return post("/api/projects", input);
+      const project: ProjectSummary = {
+        project_id: `project-${fixtureDetails.size + 1}`,
+        name: input.name,
+        description: input.description ?? "",
+        status: "active",
+        created_at: nowFixture(),
+        updated_at: nowFixture(),
+      };
+      fixtureDetails.set(project.project_id, {
+        project,
+        summary: {
+          paper_count: 0,
+          evidence_count: 0,
+          note_count: 0,
+          saved_question_count: 0,
+          compare_run_count: 0,
+        },
+        papers: [],
+        evidence: [],
+        notes: [],
+        saved_questions: [],
+        compare_runs: [],
+        warnings: [],
+      });
+      return Promise.resolve({ project: clone(project) });
+    },
+    project: (projectId: string): Promise<ProjectDetail> =>
+      fixtureMode ? Promise.resolve(clone(fixtureProject(projectId))) : get(`/api/projects/${projectId}`),
+    updateProject: (
+      projectId: string,
+      input: ProjectUpdateInput,
+    ): Promise<{ project: ProjectSummary }> => {
+      if (!fixtureMode) return patch(`/api/projects/${projectId}`, input);
+      const detail = fixtureProject(projectId);
+      detail.project = {
+        ...detail.project,
+        name: input.name ?? detail.project.name,
+        description: input.description ?? detail.project.description,
+        updated_at: nowFixture(),
+      };
+      return Promise.resolve({ project: clone(detail.project) });
+    },
+    archiveProject: (projectId: string): Promise<{ project: ProjectSummary }> => {
+      if (!fixtureMode) return post(`/api/projects/${projectId}/archive`, {});
+      const detail = fixtureProject(projectId);
+      detail.project.status = "archived";
+      detail.project.updated_at = nowFixture();
+      return Promise.resolve({ project: clone(detail.project) });
+    },
+    addProjectPaper: (
+      projectId: string,
+      input: ProjectPaperInput,
+    ): Promise<{ paper: ProjectDetail["papers"][number] }> => {
+      if (!fixtureMode) return post(`/api/projects/${projectId}/papers`, input);
+      const detail = fixtureProject(projectId);
+      const existing = detail.papers.find((paper) => paper.paper_id === input.paper_id);
+      const paper =
+        existing ??
+        {
+          project_id: projectId,
+          paper_id: input.paper_id,
+          title_snapshot: input.title_snapshot ?? "",
+          source: input.source ?? "manual",
+          created_at: nowFixture(),
+        };
+      paper.title_snapshot = input.title_snapshot ?? paper.title_snapshot;
+      paper.source = input.source ?? paper.source;
+      if (!existing) detail.papers.unshift(paper);
+      refreshSummary(detail);
+      return Promise.resolve({ paper: clone(paper) });
+    },
+    pinEvidence: (
+      projectId: string,
+      input: EvidencePinInput,
+    ): Promise<{ evidence: ProjectDetail["evidence"][number] }> => {
+      if (!fixtureMode) return post(`/api/projects/${projectId}/evidence`, input);
+      const detail = fixtureProject(projectId);
+      const existing = detail.evidence.find((pin) => pin.chunk_id === input.chunk_id);
+      const evidence =
+        existing ??
+        {
+          pin_id: `pin-${detail.evidence.length + 1}`,
+          project_id: projectId,
+          chunk_id: input.chunk_id,
+          paper_id: input.paper_id,
+          label: input.label ?? "",
+          note: input.note ?? "",
+          source: input.source ?? "manual",
+          score_snapshot: input.score_snapshot,
+          quote_snapshot: input.quote_snapshot ?? "",
+          created_at: nowFixture(),
+          updated_at: nowFixture(),
+        };
+      evidence.paper_id = input.paper_id;
+      evidence.label = input.label ?? evidence.label;
+      evidence.note = input.note ?? evidence.note;
+      evidence.source = input.source ?? evidence.source;
+      evidence.score_snapshot = input.score_snapshot ?? evidence.score_snapshot;
+      evidence.quote_snapshot = input.quote_snapshot ?? evidence.quote_snapshot;
+      evidence.updated_at = nowFixture();
+      if (!existing) detail.evidence.unshift(evidence);
+      refreshSummary(detail);
+      return Promise.resolve({ evidence: clone(evidence) });
+    },
+    createNote: (projectId: string, input: NoteInput): Promise<{ note: ProjectDetail["notes"][number] }> => {
+      if (!fixtureMode) return post(`/api/projects/${projectId}/notes`, input);
+      const detail = fixtureProject(projectId);
+      const existing = input.note_id
+        ? detail.notes.find((note) => note.note_id === input.note_id)
+        : undefined;
+      const note =
+        existing ??
+        {
+          note_id: input.note_id ?? `note-${detail.notes.length + 1}`,
+          project_id: projectId,
+          target_type: input.target_type,
+          target_id: input.target_id,
+          body: input.body,
+          created_at: nowFixture(),
+          updated_at: nowFixture(),
+        };
+      note.target_type = input.target_type;
+      note.target_id = input.target_id;
+      note.body = input.body;
+      note.updated_at = nowFixture();
+      if (!existing) detail.notes.unshift(note);
+      refreshSummary(detail);
+      return Promise.resolve({ note: clone(note) });
+    },
+    saveQuestion: (
+      projectId: string,
+      input: SavedQuestionInput,
+    ): Promise<{ question: ProjectDetail["saved_questions"][number] }> => {
+      if (!fixtureMode) return post(`/api/projects/${projectId}/questions`, input);
+      const detail = fixtureProject(projectId);
+      const question = {
+        question_id: `question-${detail.saved_questions.length + 1}`,
+        project_id: projectId,
+        question: input.question,
+        answer: input.answer,
+        citations: input.citations,
+        chunk_ids: input.chunk_ids,
+        trace_id: input.trace_id ?? null,
+        abstain: input.abstain,
+        context_policy: input.context_policy ?? null,
+        created_at: nowFixture(),
+      };
+      detail.saved_questions.unshift(question);
+      refreshSummary(detail);
+      return Promise.resolve({ question: clone(question) });
+    },
+    projectDshHandoff: (
+      projectId: string,
+      input: ProjectHandoffInput,
+    ): Promise<DshHandoffData> => {
+      if (!fixtureMode) return post(`/api/projects/${projectId}/dsh-handoff`, input);
+      const detail = fixtureProject(projectId);
+      const prompt = [
+        "基于 Paper RAG Workbench 当前项目继续研究。",
+        "",
+        `项目: ${detail.project.name}`,
+        input.instruction ? `任务: ${input.instruction}` : "",
+        "论文:",
+        ...detail.papers.map((paper) => `- ${paper.paper_id}: ${paper.title_snapshot}`),
+        "证据:",
+        ...detail.evidence.map((pin) => `- ${pin.paper_id} / ${pin.chunk_id}: ${pin.quote_snapshot}`),
+        "笔记:",
+        ...detail.notes.map((note) => `- ${note.target_type}:${note.target_id}: ${note.body}`),
+        "",
+        "请使用 Paper RAG 工具核查关键结论，所有论文事实保留证据引用。",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      return Promise.resolve({
+        dsh_url: "http://127.0.0.1:3080",
+        prompt,
+        handoff: {
+          handoff_id: `handoff-${Date.now()}`,
+          project_id: projectId,
+          prompt,
+          paper_ids: detail.papers.map((paper) => paper.paper_id),
+          chunk_ids: detail.evidence.map((pin) => pin.chunk_id),
+          question_ids: detail.saved_questions.map((question) => question.question_id),
+          created_at: nowFixture(),
+        },
+      });
+    },
   };
 }
 
 export const workbenchClient = createWorkbenchClient();
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function nowFixture(): string {
+  return new Date().toISOString();
+}

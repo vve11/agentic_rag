@@ -7,6 +7,8 @@ import type {
   McpEnvelope,
   PaperDetailData,
   PaperListData,
+  ProjectDetail,
+  ProjectSummary,
   QaData,
   QaStreamEvent,
   QaStreamStage,
@@ -340,4 +342,75 @@ export const dshHandoffFixture: DshHandoffData = {
   dsh_url: "http://127.0.0.1:3080",
   prompt:
     "基于 Paper RAG Workbench 中选定的论文/证据继续研究：\n- Papers: arxiv:2310.11511\n- Chunks: chunk-self-rag-1\n- Question: What is Self-RAG?\n请使用 Paper RAG 工具回答，并保留证据引用。",
+};
+
+export const projectFixture: ProjectSummary = {
+  project_id: "project-self-rag",
+  name: "Self-RAG 调研",
+  description: "Evidence-first Self-RAG research workspace.",
+  status: "active",
+  created_at: "2026-08-15T00:00:00Z",
+  updated_at: "2026-08-15T00:00:00Z",
+};
+
+export const projectDetailFixture: ProjectDetail = {
+  project: projectFixture,
+  summary: {
+    paper_count: 1,
+    evidence_count: 1,
+    note_count: 1,
+    saved_question_count: 1,
+    compare_run_count: 0,
+  },
+  papers: [
+    {
+      project_id: projectFixture.project_id,
+      paper_id: "arxiv:2310.11511",
+      title_snapshot: "Self-RAG",
+      source: "library",
+      created_at: "2026-08-15T00:00:00Z",
+    },
+  ],
+  evidence: [
+    {
+      pin_id: "pin-self-rag-1",
+      project_id: projectFixture.project_id,
+      chunk_id: "chunk-self-rag-1",
+      paper_id: "arxiv:2310.11511",
+      label: "method",
+      note: "",
+      source: "search",
+      score_snapshot: 0.92,
+      quote_snapshot: "SELF-RAG retrieves passages on demand for supported generation.",
+      created_at: "2026-08-15T00:00:00Z",
+      updated_at: "2026-08-15T00:00:00Z",
+    },
+  ],
+  notes: [
+    {
+      note_id: "note-self-rag-1",
+      project_id: projectFixture.project_id,
+      target_type: "chunk",
+      target_id: "chunk-self-rag-1",
+      body: "This is a user note, not paper evidence.",
+      created_at: "2026-08-15T00:00:00Z",
+      updated_at: "2026-08-15T00:00:00Z",
+    },
+  ],
+  saved_questions: [
+    {
+      question_id: "question-self-rag-1",
+      project_id: projectFixture.project_id,
+      question: "What is Self-RAG?",
+      answer: qaFixture.data!.answer,
+      citations: qaFixture.data!.citations,
+      chunk_ids: qaFixture.data!.chunks.map((chunk) => chunk.chunk_id),
+      trace_id: "trace-workbench-fixture",
+      abstain: { decision: "answer" },
+      context_policy: null,
+      created_at: "2026-08-15T00:00:00Z",
+    },
+  ],
+  compare_runs: [],
+  warnings: [],
 };
