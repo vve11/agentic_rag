@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
+import { createInitialQaStreamState, reduceQaStreamEvent } from "../api/qaStream";
+import { AgentTimeline } from "../components/AgentTimeline";
 import { AnswerPanel } from "../components/AnswerPanel";
 import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
 import { DshHandoffDialog } from "../components/DshHandoffDialog";
@@ -10,6 +12,8 @@ import type {
   DshHandoffData,
   PaperDetailData,
   QaData,
+  QaStreamEvent,
+  QaStreamState,
   WorkbenchClient,
 } from "../types";
 
@@ -24,6 +28,8 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
   const [chunkDetail, setChunkDetail] = useState<ChunkDetailData | null>(null);
   const [paperDetail, setPaperDetail] = useState<PaperDetailData | null>(null);
   const [handoff, setHandoff] = useState<DshHandoffData | null>(null);
+  const [streamState, setStreamState] = useState<QaStreamState | null>(null);
+  const askRunRef = useRef(0);
 
   const ask = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -35,13 +41,37 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
     setChunkDetail(null);
     setPaperDetail(null);
     setHandoff(null);
+    setStreamState(null);
     setLoading(true);
     const paperIds = paperIdsText
       .split(",")
       .map((id) => id.trim())
       .filter(Boolean);
 
+    const input = {
+      question: trimmedQuestion,
+      paper_ids: paperIds,
+      top_k: topK,
+    };
+    const runId = askRunRef.current + 1;
+    askRunRef.current = runId;
+    const initial = createInitialQaStreamState(trimmedQuestion);
+    setStreamState(initial);
+    setData({ answer: "", citations: [], chunks: [], abstain: {} });
+
     try {
+      await client.qaStream(input, (streamEvent: QaStreamEvent) => {
+        if (askRunRef.current !== runId) return;
+        setStreamState((current) => {
+          const next = reduceQaStreamEvent(
+            current || createInitialQaStreamState(trimmedQuestion),
+            streamEvent,
+          );
+          setData(next.answer);
+          return next;
+        });
+      });
+    } catch (streamReason) {
       const envelope = await client.qa({
         question: trimmedQuestion,
         paper_ids: paperIds,
@@ -49,13 +79,16 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
       });
 
       if (!envelope.ok || !envelope.data) {
-        setError(envelope.error?.message ?? "Question answering is unavailable.");
+        setError(
+          envelope.error?.message ||
+            (streamReason instanceof Error
+              ? streamReason.message
+              : "Question answering is unavailable."),
+        );
         return;
       }
 
       setData(envelope.data);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Question answering is unavailable.");
     } finally {
       setLoading(false);
     }
@@ -94,6 +127,8 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
       setCopyState(text);
     }
   };
+
+  const hasAnswerData = Boolean(data && (data.answer || data.chunks.length || streamState?.done));
 
   return (
     <>
@@ -137,15 +172,20 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
       {error ? <EmptyState title="Answer unavailable" detail={error} /> : null}
       {data ? (
         <>
-          <div className="toolbar-row">
-            <button type="button" onClick={copyPrompt}>
-              Copy prompt for DSH
-            </button>
-            <button type="button" onClick={sendToDsh}>
-              Send to DSH
-            </button>
-            {copyState ? <span className="muted">{copyState}</span> : null}
-          </div>
+          {streamState ? (
+            <AgentTimeline stages={streamState.stages} running={loading && !streamState.done} />
+          ) : null}
+          {hasAnswerData ? (
+            <div className="toolbar-row">
+              <button type="button" onClick={copyPrompt}>
+                Copy prompt for DSH
+              </button>
+              <button type="button" onClick={sendToDsh}>
+                Send to DSH
+              </button>
+              {copyState ? <span className="muted">{copyState}</span> : null}
+            </div>
+          ) : null}
           <AnswerPanel
             answer={data.answer}
             citations={data.citations}

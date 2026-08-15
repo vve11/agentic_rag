@@ -170,4 +170,17 @@ describe("Overview and Library pages", () => {
     );
     expect(await screen.findByRole("dialog", { name: /send to dsh/i })).toBeInTheDocument();
   });
+
+  test("ask page streams answer and shows agent timeline", async () => {
+    const user = userEvent.setup();
+    render(<AskPage client={createWorkbenchClient({ fixtureMode: true })} />);
+
+    await user.type(screen.getByLabelText(/question/i), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^ask$/i }));
+
+    expect(await screen.findByRole("heading", { name: /agent timeline/i })).toBeInTheDocument();
+    expect(await screen.findByText(/Understanding question/i)).toBeInTheDocument();
+    expect(await screen.findByText(/decide when to retrieve/i)).toBeInTheDocument();
+    expect(screen.getByText("chunk-self-rag-1")).toBeInTheDocument();
+  });
 });

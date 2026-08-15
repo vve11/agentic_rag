@@ -7,10 +7,12 @@ import {
   paperDetailFixture,
   papersFixture,
   qaFixture,
+  qaStreamEventsFixture,
   searchFixture,
   sectionFixture,
   statusFixture,
 } from "./fixtures";
+import { streamPaperQa } from "./qaStream";
 import type {
   CandidateIngestInput,
   ChunkDetailData,
@@ -26,6 +28,7 @@ import type {
   PaperListData,
   QaData,
   QaInput,
+  QaStreamHandler,
   SearchData,
   SearchInput,
   SectionData,
@@ -91,6 +94,18 @@ export function createWorkbenchClient(
       fixtureMode ? Promise.resolve(searchFixture) : post("/api/search", input),
     qa: (input: QaInput): Promise<McpEnvelope<QaData>> =>
       fixtureMode ? Promise.resolve(qaFixture) : post("/api/qa", input),
+    qaStream: async (input: QaInput, onEvent: QaStreamHandler): Promise<void> => {
+      if (fixtureMode) {
+        for (const event of qaStreamEventsFixture) onEvent(event);
+        return;
+      }
+      return streamPaperQa({
+        url: `${baseUrl}/api/qa/stream`,
+        fetcher: fetchImpl,
+        body: input,
+        onEvent,
+      });
+    },
     section: (input: SectionInput): Promise<McpEnvelope<SectionData>> =>
       fixtureMode ? Promise.resolve(sectionFixture) : post("/api/section", input),
     discover: (input: DiscoverInput): Promise<McpEnvelope<DiscoverData>> =>

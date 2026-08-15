@@ -8,6 +8,8 @@ import type {
   PaperDetailData,
   PaperListData,
   QaData,
+  QaStreamEvent,
+  QaStreamStage,
   SearchData,
   SectionData,
   StatusData,
@@ -90,6 +92,96 @@ export const qaFixture: McpEnvelope<QaData> = {
     chunks: searchFixture.data!.results,
     abstain: { decision: "answer" },
   },
+};
+
+export const qaStreamEventsFixture: QaStreamEvent[] = [
+  {
+    event: "start",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "start",
+      status: "completed",
+      summary: "Started Paper RAG QA",
+    },
+  },
+  {
+    event: "intent",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "intent",
+      status: "completed",
+      summary: "Classified as factual",
+      elapsed_ms: 2,
+    },
+  },
+  {
+    event: "retrieved",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "retrieve",
+      status: "completed",
+      summary: "Retrieved 2 chunks",
+      elapsed_ms: 8,
+      n_chunks: 2,
+    },
+  },
+  {
+    event: "answer_chunk",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "answer",
+      text: "Self-RAG trains a model to decide when to retrieve",
+    },
+  },
+  {
+    event: "answer_chunk",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "answer",
+      text: ", then critique whether retrieved evidence supports generated claims.",
+    },
+  },
+  {
+    event: "done",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "done",
+      status: "completed",
+      summary: "Paper RAG QA complete",
+      answer: qaFixture.data!.answer,
+      citations: qaFixture.data!.citations,
+      chunks: qaFixture.data!.chunks,
+      abstain: qaFixture.data!.abstain,
+      n_chunks: qaFixture.data!.chunks.length,
+      paper_ids: ["arxiv:2310.11511"],
+      query_resolution: { effective_question: "What is Self-RAG?" },
+    },
+  },
+];
+
+export const qaStreamFixture: { stages: QaStreamStage[] } = {
+  stages: [
+    {
+      stage: "intent",
+      label: "Understanding question",
+      status: "completed",
+      summary: "Classified as factual",
+      elapsed_ms: 2,
+    },
+    {
+      stage: "retrieve",
+      label: "Retrieving evidence",
+      status: "completed",
+      summary: "Retrieved 2 chunks",
+      elapsed_ms: 8,
+    },
+    {
+      stage: "answer",
+      label: "Generating answer",
+      status: "completed",
+      summary: "Generated answer",
+    },
+  ],
 };
 
 export const sectionFixture: McpEnvelope<SectionData> = {

@@ -634,6 +634,64 @@ textarea {
   white-space: pre-wrap;
 }
 
+.agent-timeline {
+  background: #ffffff;
+  border: 1px solid #dde4eb;
+  border-radius: 8px;
+  margin: 16px 0;
+  padding: 16px;
+}
+
+.agent-timeline header,
+.agent-timeline li {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.agent-timeline header {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.agent-timeline ol {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-timeline li div {
+  min-width: 0;
+}
+
+.agent-timeline li p {
+  color: #5f6b76;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-timeline li span {
+  color: #66717c;
+  font-size: 13px;
+  margin-left: 8px;
+}
+
+.error-text {
+  color: #9b1c1c;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .modal-backdrop {
   align-items: center;
   background: rgba(18, 26, 34, 0.48);

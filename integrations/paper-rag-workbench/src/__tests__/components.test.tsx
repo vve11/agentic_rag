@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
 import { ApprovalDialog } from "../components/ApprovalDialog";
+import { AgentTimeline } from "../components/AgentTimeline";
 import { AnswerPanel } from "../components/AnswerPanel";
 import { CandidateTable } from "../components/CandidateTable";
 import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
@@ -19,6 +20,7 @@ import {
   dshHandoffFixture,
   indexHealthFixture,
   paperDetailFixture,
+  qaStreamFixture,
 } from "../api/fixtures";
 import type { PaperSummary } from "../types";
 
@@ -207,5 +209,15 @@ describe("DSH handoff components", () => {
       "href",
       "http://127.0.0.1:3080",
     );
+  });
+});
+
+describe("Streaming timeline components", () => {
+  test("agent timeline renders stage progress", () => {
+    render(<AgentTimeline stages={qaStreamFixture.stages} running={false} />);
+
+    expect(screen.getByRole("heading", { name: /agent timeline/i })).toBeInTheDocument();
+    expect(screen.getByText(/Understanding question/i)).toBeInTheDocument();
+    expect(screen.getByText(/Retrieved 2 chunks/i)).toBeInTheDocument();
   });
 });

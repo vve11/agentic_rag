@@ -137,6 +137,62 @@ export type QaData = {
   chunks: EvidenceChunk[];
   abstain?: { decision?: string } | string;
 };
+
+export type QaStreamEventName =
+  | "start"
+  | "intent"
+  | "rewrite"
+  | "retrieved"
+  | "reflect"
+  | "abstain"
+  | "answer_chunk"
+  | "done"
+  | "error";
+
+export type QaStageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+export type QaStreamData = {
+  trace_id?: string;
+  stage?: string;
+  status?: QaStageStatus;
+  summary?: string;
+  elapsed_ms?: number;
+  text?: string;
+  message?: string;
+  answer?: string;
+  citations?: string[];
+  chunks?: EvidenceChunk[];
+  abstain?: QaData["abstain"];
+  n_chunks?: number;
+  paper_ids?: string[];
+  query_resolution?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type QaStreamEvent = {
+  event: QaStreamEventName;
+  data: QaStreamData;
+};
+
+export type QaStreamStage = {
+  stage: string;
+  label: string;
+  status: QaStageStatus;
+  summary?: string;
+  elapsed_ms?: number;
+  error?: string;
+};
+
+export type QaStreamState = {
+  question: string;
+  answer: QaData & { trace_id?: string; n_chunks?: number };
+  stages: QaStreamStage[];
+  done: boolean;
+  error: string | null;
+};
+
+export type QaStreamHandler = (event: QaStreamEvent) => void;
+
 export type SectionData = {
   section?: { name?: string };
   section_name?: string;
@@ -201,6 +257,7 @@ export type WorkbenchClient = {
   chunkDetail(chunkId: string): Promise<ChunkDetailData>;
   search(input: SearchInput): Promise<McpEnvelope<SearchData>>;
   qa(input: QaInput): Promise<McpEnvelope<QaData>>;
+  qaStream(input: QaInput, onEvent: QaStreamHandler): Promise<void>;
   section(input: SectionInput): Promise<McpEnvelope<SectionData>>;
   discover(input: DiscoverInput): Promise<McpEnvelope<DiscoverData>>;
   ingestCandidates(input: CandidateIngestInput): Promise<McpEnvelope<IngestData>>;
