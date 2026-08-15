@@ -15,6 +15,8 @@ import { PaperDetailPanel } from "../components/PaperDetailPanel";
 import { PaperTable } from "../components/PaperTable";
 import { QualityIssueTable } from "../components/QualityIssueTable";
 import { ScoreBreakdown } from "../components/ScoreBreakdown";
+import { Shell } from "../components/Shell";
+import { renderWithI18n } from "../test/render";
 import {
   chunkDetailFixture,
   dshHandoffFixture,
@@ -23,6 +25,44 @@ import {
   qaStreamFixture,
 } from "../api/fixtures";
 import type { PaperSummary } from "../types";
+
+describe("Shell", () => {
+  test("renders Chinese navigation by default", () => {
+    window.localStorage.clear();
+
+    renderWithI18n(
+      <Shell active="overview" onNavigate={vi.fn()}>
+        <p>body</p>
+      </Shell>,
+    );
+
+    expect(screen.getByRole("navigation", { name: "工作台导航" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "概览" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "健康检查" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "DSH 对话" })).toBeInTheDocument();
+  });
+
+  test("language toggle switches navigation to English", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+
+    renderWithI18n(
+      <Shell active="overview" onNavigate={vi.fn()}>
+        <p>body</p>
+      </Shell>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "EN" }));
+
+    expect(screen.getByRole("navigation", { name: "Workbench navigation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("button", { name: "中" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "EN" })).toHaveAttribute("aria-pressed", "true");
+  });
+});
 
 describe("PaperTable", () => {
   test("renders indexed papers and dispatches row actions with the selected paper", async () => {

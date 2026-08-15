@@ -1,15 +1,21 @@
 import { Activity, BookOpen, Compass, Database, MessageSquare, Search, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { useI18n, type MessageKey } from "../i18n";
+
 const nav = [
-  { id: "overview", label: "Overview", icon: Database },
-  { id: "health", label: "Health", icon: Activity },
-  { id: "library", label: "Library", icon: BookOpen },
-  { id: "search", label: "Search", icon: Search },
-  { id: "ask", label: "Ask", icon: MessageSquare },
-  { id: "discover", label: "Discover", icon: Compass },
-  { id: "dsh", label: "DSH Chat", icon: Sparkles },
-] as const;
+  { id: "overview", labelKey: "nav.overview", icon: Database },
+  { id: "health", labelKey: "nav.health", icon: Activity },
+  { id: "library", labelKey: "nav.library", icon: BookOpen },
+  { id: "search", labelKey: "nav.search", icon: Search },
+  { id: "ask", labelKey: "nav.ask", icon: MessageSquare },
+  { id: "discover", labelKey: "nav.discover", icon: Compass },
+  { id: "dsh", labelKey: "nav.dsh", icon: Sparkles },
+] as const satisfies readonly {
+  id: string;
+  labelKey: MessageKey;
+  icon: typeof Database;
+}[];
 
 export type RouteId = (typeof nav)[number]["id"];
 
@@ -22,12 +28,24 @@ export function Shell({
   onNavigate: (route: RouteId) => void;
   children: ReactNode;
 }) {
+  const { language, setLanguage, t } = useI18n();
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <h1>Paper RAG</h1>
-        <nav aria-label="Workbench navigation">
-          {nav.map(({ id, label, icon: Icon }) => (
+        <div className="sidebar-header">
+          <h1>Paper RAG</h1>
+          <div className="language-toggle" aria-label={t("language.aria")}>
+            <button type="button" aria-pressed={language === "zh"} onClick={() => setLanguage("zh")}>
+              {t("language.zh")}
+            </button>
+            <button type="button" aria-pressed={language === "en"} onClick={() => setLanguage("en")}>
+              {t("language.en")}
+            </button>
+          </div>
+        </div>
+        <nav aria-label={t("nav.aria")}>
+          {nav.map(({ id, labelKey, icon: Icon }) => (
             <button
               key={id}
               type="button"
@@ -42,7 +60,7 @@ export function Shell({
               }}
             >
               <Icon aria-hidden="true" size={17} />
-              <span>{label}</span>
+              <span>{t(labelKey)}</span>
             </button>
           ))}
         </nav>

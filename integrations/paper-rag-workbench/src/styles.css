@@ -34,7 +34,39 @@ textarea {
 
 .sidebar h1 {
   font-size: 18px;
-  margin: 0 0 24px;
+  margin: 0;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.language-toggle {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.language-toggle button {
+  min-width: 38px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #d7dee8;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.language-toggle button[aria-pressed="true"] {
+  background: #1f5e9d;
+  color: #fff;
 }
 
 .sidebar nav {
