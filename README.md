@@ -53,6 +53,16 @@ make dsh-start
 child。核心包位于 `src/paper_rag/`，宿主适配位于
 `integrations/deepseek-harness/`。
 
+### 5. 启动 Paper RAG Workbench
+
+```bash
+.venv/bin/python scripts/start_workbench.py
+```
+
+Workbench: `http://127.0.0.1:3090`
+
+DSH Chat: `http://127.0.0.1:3080`
+
 ## 常用命令
 
 ```bash

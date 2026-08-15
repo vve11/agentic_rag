@@ -10,7 +10,7 @@ DSH_RUNTIME_ROOT := data/runtime/deepseek-harness
         qdrant-up qdrant-down init-store ingest ask eval clean clean-data \
         docker-build docker-build-bake docker-up-proactive docker-cli docker-shell \
         calibrate-abstain hard-cases eval-golden eval-golden-qa eval-report eval-citation-audit eval-ablation eval-claims eval-claims-report eval-claims-judge eval-llm-recall verify-p0 \
-        dsh-install dsh-doctor dsh-start dsh-smoke dsh-test dsh-clean-runtime
+        dsh-install dsh-doctor dsh-start dsh-smoke dsh-test dsh-clean-runtime workbench
 
 help:
 	@echo "Targets:"
@@ -20,6 +20,7 @@ help:
 	@echo "  dsh-smoke     Run DeepSeek Harness smoke checks"
 	@echo "  dsh-test      Run DeepSeek Harness deterministic tests"
 	@echo "  dsh-clean-runtime  Remove DSH versioned sessions/storages/presets, preserving credentials"
+	@echo "  workbench     Start Paper RAG Workbench on 127.0.0.1:3090 and API on 127.0.0.1:3091"
 	@echo "  install        Install runtime deps (editable)"
 	@echo "  install-dev    Install dev + mineru extras"
 	@echo "  lint           Run ruff check"
@@ -116,6 +117,9 @@ dsh-test:
 
 dsh-clean-runtime:
 	rm -rf $(DSH_RUNTIME_ROOT)/versions
+
+workbench:
+	.venv/bin/python scripts/start_workbench.py
 
 qdrant-up:
 	bash scripts/up_qdrant.sh

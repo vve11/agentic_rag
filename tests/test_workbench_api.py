@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -182,3 +185,39 @@ def test_candidate_ingest_passes_request_boundary_after_approval(tmp_path):
     assert seen["request_boundary_id"].startswith("workbench-discovery_candidate_ingest-")
     assert seen["conversation_id"] == "workbench"
     assert seen["tool_call_id"] == "workbench-discovery_candidate_ingest"
+
+
+def test_workbench_module_exports_app_factory():
+    import paper_rag.workbench as workbench
+
+    assert callable(workbench.create_app)
+    assert workbench.WorkbenchSettings().chat_model == "deepseek-v4-flash"
+
+
+def test_workbench_module_entrypoint_help_runs():
+    env = os.environ.copy()
+    env["PYTHONPATH"] = "src"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "paper_rag.workbench", "--help"],
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Run the local Paper RAG Workbench API" in result.stdout
+
+
+def test_workbench_launcher_env_defaults(tmp_path):
+    from scripts.start_workbench import build_launcher_env
+
+    env = build_launcher_env(tmp_path, {"CHAT_MODEL": "deepseek-pro"})
+
+    assert env["OPENAI_BASE_URL"] == "https://api.deepseek.com"
+    assert env["CHAT_MODEL"] == "deepseek-v4-flash"
+    assert env["SMALL_MODEL"] == "deepseek-v4-flash"
+    assert env["PAPER_RAG_DSH_CREDENTIALS_PATH"] == str(
+        tmp_path / "data/runtime/deepseek-harness/credentials/.credentials.yaml"
+    )
