@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const name = "paper-rag-native-broker";
-export const inject = ["tools"];
+export const inject = ["tools", "credentials"];
 
 export async function apply(ctx) {
   const repoRoot = process.env.PAPER_RAG_REPO_ROOT ?? process.cwd();

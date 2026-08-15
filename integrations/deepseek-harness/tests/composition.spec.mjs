@@ -68,6 +68,11 @@ describe("repo-local DeepSeek Harness runtime", () => {
     expect(syncedAgent).toContain("paper_deliver");
     expect(syncedAgent).toContain("Candidate results are not Paper RAG answer evidence");
     expect(syncedAgent).toContain("deepseek-v4-flash");
+    const syncedBrokerWrapper = await readFile(
+      join(result.destDir, "paper-rag-native-broker-plugin.mjs"),
+      "utf8",
+    );
+    expect(syncedBrokerWrapper).toContain('export const inject = ["tools", "credentials"]');
 
     const discovered = await discoverPaperResearchPreset(paths);
     expect(discovered).toMatchObject({
