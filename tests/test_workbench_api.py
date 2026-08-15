@@ -213,7 +213,7 @@ def test_workbench_module_entrypoint_help_runs():
 def test_workbench_launcher_env_defaults(tmp_path):
     from scripts.start_workbench import build_launcher_env
 
-    env = build_launcher_env(tmp_path, {"CHAT_MODEL": "deepseek-pro"})
+    env = build_launcher_env(tmp_path, {"CHAT_MODEL": "legacy-model"})
 
     assert env["OPENAI_BASE_URL"] == "https://api.deepseek.com"
     assert env["CHAT_MODEL"] == "deepseek-v4-flash"
