@@ -85,6 +85,7 @@ dev = [
     "ruff>=0.4",
     "pre-commit>=3.7",
     "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 # Convenience meta-extra: install everything needed to actually run a server.
 full = [
