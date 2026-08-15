@@ -941,12 +941,15 @@ def test_live_g2_runners_are_registered_and_use_flash_isolated_env(
         config_path=tmp_path / "work/config.live-g2.yaml",
         feedback_path=tmp_path / "work/data/index/feedback.sqlite",
     )
+    prepare_resets = []
     captured = {}
 
     monkeypatch.setattr(
         migration_gate,
         "_prepare_live_g2_workspace",
-        lambda repo_root, work_root, *, reset=False: workspace,
+        lambda repo_root, work_root, *, reset=False: (
+            prepare_resets.append(reset) or workspace
+        ),
     )
     monkeypatch.setattr(
         migration_gate,
@@ -1007,12 +1010,15 @@ def test_live005_runner_uses_dsh_headless_isolated_workflow(
         config_path=tmp_path / "work/config.live-g2.yaml",
         feedback_path=tmp_path / "work/data/index/feedback.sqlite",
     )
+    prepare_resets = []
     captured = {}
 
     monkeypatch.setattr(
         migration_gate,
         "_prepare_live_g2_workspace",
-        lambda repo_root, work_root, *, reset=False: workspace,
+        lambda repo_root, work_root, *, reset=False: (
+            prepare_resets.append(reset) or workspace
+        ),
     )
     monkeypatch.setattr(
         migration_gate,
@@ -1060,6 +1066,7 @@ def test_live005_runner_uses_dsh_headless_isolated_workflow(
     assert result["writes_to_formal_paper_library"] is False
     assert result["summary"]["tool_calls"][-1] == "paper_deliver"
     assert "artifact_delivery" in result["summary"]["cards"]
+    assert prepare_resets == [False]
     assert captured["env"]["PAPER_RAG_MCP_TOOLSET"] == "research"
     assert captured["env"]["PAPER_RAG_DSH_HEADLESS_REPORT_JSON"] == "1"
     assert captured["env"]["PAPER_RAG_DSH_HEADLESS_SCRIPTED_WORKFLOW"] == "1"

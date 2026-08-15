@@ -1225,7 +1225,7 @@ def run_live005_dsh_frontend_workflow(
     _require_live_g2_config_env(config_env)
     env_source = dict(os.environ if source_env is None else source_env)
     _require_live_g2_flash_env(env_source, "LIVE-005")
-    workspace = _prepare_live_g2_workspace(repo_root, _live_g2_workspace_root(repo_root), reset=True)
+    workspace = _prepare_live_g2_workspace(repo_root, _live_g2_workspace_root(repo_root), reset=False)
     isolation = _assert_live_g2_workspace_isolated(repo_root, workspace)
     env = _live_g2_child_env(repo_root, workspace, env_source)
     env.update(
