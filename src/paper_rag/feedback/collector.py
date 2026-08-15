@@ -1,8 +1,7 @@
 """Public collector — single entry point for all event recording.
 
 Used by:
-  - gateway router POST /api/paper_rag/feedback
-  - LangChain `paper_feedback_tool` (M11.5, optional)
+  - MCP feedback tools
   - offline scripts (judge_score after batch evaluation)
 
 Adds a tiny rate-limit guard (per-user-per-day cap) per ADR-0017 risk

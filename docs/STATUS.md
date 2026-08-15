@@ -312,7 +312,7 @@ ADR-0018 完整骨架落地：从"被动答"升级到"主动给"。
 
 ## DeepSeek Harness 迁移状态
 
-- G0-G3 gate 已通过并提交；默认模型保持 `deepseek-v4-flash`。
-- G4 默认入口正在切到 DeepSeek Harness：`README*`、`Makefile`、`.env.example` 和 CI 以 `make dsh-start` / `pnpm smoke` 为主路径。
-- `integrations/deer-flow/` 保留为 G5 前 legacy fallback，不在 G4 删除。
-- G4 cutover gate 使用 DSH smoke + clean checkout，不再要求观察窗口。
+- G0-G4 gate 已通过并提交；默认模型保持 `deepseek-v4-flash`。
+- G5 清退旧宿主源码、旧 smoke/helper、旧 gateway/middleware reference 和默认运行入口。
+- G5 前回滚锚点为 `deepseek-harness-g5-pre-removal` tag；回滚宿主代码不回滚 SQLite/Qdrant 主数据。
+- G4/G5 cutover gate 使用 DSH smoke + clean checkout，不要求观察窗口，也不执行真实写入论文库的 live smoke。

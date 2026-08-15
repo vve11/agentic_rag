@@ -59,8 +59,8 @@ The `.pre-commit-config.yaml` mirrors `.github/workflows/ci.yml`, so a clean
 1. 在 `src/paper_rag/tools/<name>.py` 实现，参数用 pydantic
 2. 在 `src/paper_rag/tools/_schema.py` 加输入 schema
 3. 在 `src/paper_rag/tools/__init__.py` 的 `__getattr__` 加路由（懒加载）
-4. 在 `backend/packages/harness/deerflow/community/paper_rag/tools.py` 加 `@tool` 包装
-5. 更新 `skills/custom/paper-research/SKILL.md` 的工具表
+4. 在 `src/paper_rag/mcp/registry.py` 注册 MCP tool schema 和 handler
+5. 更新 `integrations/deepseek-harness/presets/paper-research/` 的工具表或 preset 配置
 
 ## 加新 source（采集器）
 

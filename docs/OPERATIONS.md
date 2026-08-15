@@ -170,7 +170,7 @@ python scripts/ingest_batch.py --file ids.txt
 ## 7. DeepSeek Harness 默认入口
 
 本地交互默认使用 DeepSeek Harness 的 `paper-research` 预设。它通过 Native
-Broker 启动私有 Paper RAG MCP child，不需要启动 DeerFlow 进程。
+Broker 启动私有 Paper RAG MCP child，不需要启动其他宿主进程。
 
 ```bash
 cp .env.example .env
@@ -188,15 +188,13 @@ make dsh-test
 make dsh-smoke
 ```
 
-## 8. DeerFlow legacy fallback
+## 8. G5 后回滚
 
-`paper_rag/` 不需要 `pip install` 也能被 DeerFlow 找到（适配层走 sys.path 兜底，从 deer-flow 根向上找）。生产部署时建议设：
+旧宿主源码已在 G5 移除。需要回滚宿主层时，先确认本地 tag：
 
 ```bash
-export PAPER_RAG_HOME=/abs/path/to/paper_rag
+git rev-parse deepseek-harness-g5-pre-removal^{commit}
 ```
 
-然后启动 DeerFlow gateway 即可。Paper RAG 会通过
-`deerflow.community.paper_rag.tools` 暴露为 Harness tools，并通过内置
-`paper-research` subagent 进入 DeerFlow lead agent 的委派体系。G5 前这个路径只
-用于回滚和对照验证，新功能默认接入 DeepSeek Harness + MCP。
+然后用普通 git revert 或从该 tag 恢复旧宿主代码。SQLite/Qdrant 主数据不随宿主
+回滚；DSH runtime 清理也不得删除 Paper RAG 主数据。

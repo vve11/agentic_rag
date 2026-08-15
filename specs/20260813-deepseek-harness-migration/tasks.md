@@ -165,28 +165,28 @@
 - [ ] T139 确认 cutover smoke 覆盖 loopback、telemetry、credential path、timeout policy 和默认 preset。
 - [ ] T140 产出 G4 cutover report 并决定是否进入 G5。
 
-## 12. G5 · DeerFlow 退役
+## 12. G5 · 旧宿主退役
 
-- [ ] T150 冻结并保存退役前功能矩阵和最后一份回滚 tag/commit。
-- [ ] T151 删除 `integrations/deer-flow/`。
-- [ ] T152 删除 `scripts/deerflow_smoke.py`。
-- [ ] T153 仅在 65 个旧测试逐用例完成 host-delete/replaced/moved 分类且替代 evidence 通过后删除旧测试。
-- [ ] T154 从 `pyproject.toml` 删除 `deerflow` extra 和仅供其使用的 LangChain 依赖。
-- [ ] T155 删除 DeerFlow Make targets、环境变量和 Docker 注释。
-- [ ] T156 删除或改写运行文档中的 DeerFlow 默认路径。
-- [ ] T157 新增 ADR-0022 final 状态，将 0008/0015/0020/0021 标记 superseded。
-- [ ] T158 更新 `docs/README.md` ADR 索引和文档地图。
-- [ ] T159 运行 `rg -i 'deer.?flow'`，逐项分类为历史记录或残留运行引用。
-- [ ] T160 运行 migration-owned retrieval、QA/citation、claim、verify-p0、core/MCP/DSH、CUT、secret scan、diff hygiene。
-- [ ] T161 验证 clean checkout 从零安装和启动。
-- [ ] T162 更新 `specs/INDEX.md` 状态为 Completed。
+- [x] T150 冻结并保存退役前功能矩阵和最后一份回滚 tag/commit。
+- [x] T151 删除 `integrations/deer-flow/`。
+- [x] T152 删除 `scripts/deerflow_smoke.py`。
+- [x] T153 仅在 65 个旧测试逐用例完成 host-delete/replaced/moved 分类且替代 evidence 通过后删除旧测试。
+- [x] T154 从 `pyproject.toml` 删除 `deerflow` extra 和仅供其使用的 LangChain 依赖。
+- [x] T155 删除 DeerFlow Make targets、环境变量和 Docker 注释。
+- [x] T156 删除或改写运行文档中的 DeerFlow 默认路径。
+- [x] T157 新增 ADR-0022 final 状态，将 0008/0015/0020/0021 标记 superseded。
+- [x] T158 更新 `docs/README.md` ADR 索引和文档地图。
+- [x] T159 运行 `rg -i 'deer.?flow'`，逐项分类为历史记录或残留运行引用。
+- [x] T160 运行 migration-owned retrieval、QA/citation、claim、verify-p0、core/MCP/DSH、CUT、secret scan、diff hygiene。
+- [x] T161 验证 clean checkout 从零安装和启动。
+- [x] T162 更新 `specs/INDEX.md` 状态为 Completed。
 
 ## 13. 最终 DoD
 
-- [ ] 所有 P0/P1 SDT 通过。
-- [ ] 没有 DeerFlow 运行依赖。
-- [ ] 没有 model-visible user/session authority 字段。
-- [ ] 没有 Base64 deliverable 写入 Session。
-- [ ] Abstain、citation 和 query resolution 对比无退化。
+- [x] 所有 P0/P1 SDT 通过。
+- [x] 没有 DeerFlow 运行依赖。
+- [x] 没有 model-visible user/session authority 字段。
+- [x] 没有 Base64 deliverable 写入 Session。
+- [x] Abstain、citation 和 query resolution 对比无退化。
 - [ ] DSH 默认 loopback、telemetry disabled、native tools mode。
 - [ ] 文档、代码、测试和实际启动方式一致。

@@ -12,12 +12,12 @@
 | [`INTERVIEW_NOTES.md`](./INTERVIEW_NOTES.md) | 面试讲解硬料 |
 | [`RAG_EVAL_GUIDE.md`](./RAG_EVAL_GUIDE.md) | 全部评测集、命令、指标、gate 和报告说明 |
 | [`adrs/0022-deepseek-harness-mcp-boundary.md`](./adrs/0022-deepseek-harness-mcp-boundary.md) | DeepSeek Harness + MCP 默认宿主边界 |
-| [`M8_PRD.md`](./M8_PRD.md) | 服务化 PRD（接入 DeerFlow gateway / BetterAuth / Qdrant 容器化） |
+| [`M8_PRD.md`](./M8_PRD.md) | 历史服务化 PRD（旧宿主方案，G5 后由 DSH/MCP 替代） |
 | [`M10_PRD.md`](./M10_PRD.md) | 交付物 PRD（Markdown 综述 / PPT / Word / LaTeX bib） |
 | [`M11_PRD.md`](./M11_PRD.md) | 数据闭环 PRD（行为埋点 / hard case / abstain 自适应） |
 | [`M9_PRD.md`](./M9_PRD.md) | 主动 Agent PRD（日报 / 订阅 / 提醒 / 自动 ingest） |
 | [`adrs/`](./adrs/) | 想理解"为什么这么设计"的人 |
-| [`../specs/`](../specs/) | 跨子系统 SDD/SDT 规格；当前包含 DeepSeek Harness 替换 DeerFlow 的完整迁移方案 |
+| [`../specs/`](../specs/) | 跨子系统 SDD/SDT 规格；当前包含 DeepSeek Harness 迁移方案 |
 
 ## ADR 索引
 
@@ -30,18 +30,18 @@
 | [0005](./adrs/0005-paper-id.md) | paper_id 三级规则 | accepted |
 | [0006](./adrs/0006-agentic-paper-qa.md) | paper_qa 内闭环 | accepted |
 | [0007](./adrs/0007-wiki-self-evolve.md) | 自进化 Wiki 设计 | accepted |
-| [0008](./adrs/0008-deerflow-integration-and-guardrails.md) | DeerFlow 集成 + 护栏 | pending supersede by 0022 after G5 |
+| [0008](./adrs/0008-deerflow-integration-and-guardrails.md) | 旧宿主集成 + 护栏 | superseded by 0022 |
 | [0009](./adrs/0009-m5-p0-fixes.md) | M5 P0 生产化修复 | accepted |
 | [0010](./adrs/0010-m5-p1-retrieval-async-fts5.md) | M5 P1 检索增强 / Wiki 异步 / FTS5 | accepted |
 | [0011](./adrs/0011-m5-p2-finishing-touches.md) | M5 P2 qa_cache / 反例评测 / wiki_review / 工具 docstring / version / sanity | accepted |
 | [0012](./adrs/0012-acceptance-fixes.md) | 端到端验收发现 & 修复（embedded Qdrant / arxiv v4 / query_points） | accepted |
 | [0013](./adrs/0013-m6-large-eval-prod-streaming-bibtex.md) | M6 大评测 / 性能基准 / 可观测性 / Chaos / 多轮 / 流式 / BibTeX | accepted |
 | [0014](./adrs/0014-abstain-three-tier-decision.md) | M7 P0 abstain 三档决策（解决 n03 无证据仍出 cites 问题）+ signal_quality fail-open | accepted |
-| [0015](./adrs/0015-m8-service-deerflow-gateway.md) | M8 服务化（接 DeerFlow gateway / BetterAuth / Qdrant 容器化 / user_id 隔离） | pending supersede by 0022 after G5 |
+| [0015](./adrs/0015-m8-service-deerflow-gateway.md) | M8 服务化（旧 gateway / BetterAuth / Qdrant 容器化 / user_id 隔离） | superseded by 0022 |
 | [0016](./adrs/0016-m10-deliverables.md) | M10 交付物升级（Markdown 综述 / PPT / Word / LaTeX bib） | accepted |
 | [0017](./adrs/0017-m11-data-feedback-loop.md) | M11 数据闭环（行为埋点 / hard case 自动收集 / abstain 阈值自适应 / 人在 loop） | accepted |
 | [0018](./adrs/0018-m9-proactive-agent.md) | M9 主动 Agent（日报 / 订阅 / Stale 提醒 / 自动 ingest） | accepted |
 | [0019](./adrs/0019-two-sqlite-databases.md) | 双 SQLite 数据库边界 | accepted |
-| [0020](./adrs/0020-gateway-middleware-and-observability.md) | DeerFlow gateway 中间件与观测架构 | pending supersede by 0022 after G5 |
-| [0021](./adrs/0021-langgraph-middleware-hardening.md) | LangGraph 中间件加固 | pending supersede by 0022 after G5 |
-| [0022](./adrs/0022-deepseek-harness-mcp-boundary.md) | DeepSeek Harness + MCP 宿主边界 | accepted for G0 |
+| [0020](./adrs/0020-gateway-middleware-and-observability.md) | 旧 gateway 中间件与观测架构 | superseded by 0022 |
+| [0021](./adrs/0021-langgraph-middleware-hardening.md) | LangGraph 中间件加固 | superseded by 0022 |
+| [0022](./adrs/0022-deepseek-harness-mcp-boundary.md) | DeepSeek Harness + MCP 宿主边界 | final |

@@ -59,7 +59,7 @@ def main() -> None:
         bottomMargin=16 * mm,
         title="Paper RAG Agent Project Manual",
         author="paper_rag contributors",
-        subject="Course manual for DeerFlow-integrated Agentic RAG project",
+        subject="Course manual for DeepSeek Harness and MCP Agentic RAG project",
     )
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
 

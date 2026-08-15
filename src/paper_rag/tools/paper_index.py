@@ -1,6 +1,6 @@
 """Paper ingest tool facade.
 
-This module is the stable outer adapter used by DeerFlow and proactive
+This module is the stable outer adapter used by MCP tools and proactive
 auto-ingest hooks. It keeps source selection here and delegates the heavy work
 to ``store.ingest_pipeline``.
 """

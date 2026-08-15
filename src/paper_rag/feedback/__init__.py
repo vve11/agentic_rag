@@ -4,7 +4,7 @@ Module layout
 -------------
 - ``events`` — typed event schema + validators
 - ``store``  — SQLite-backed feedback_events table (separate file from papers.sqlite)
-- ``collector`` — single entry point used by gateway router + LangChain tool
+- ``collector`` — single entry point used by MCP tools and offline scripts
 
 Public API:
     record_event(user_id, event_type, payload, *, trace_id=None,

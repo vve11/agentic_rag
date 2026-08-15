@@ -4,7 +4,7 @@ Word, LaTeX bib).
 Module layout
 -------------
 - ``dispatch(format, paper_ids, title=None, options=None)`` — public entry
-  point used by both the gateway router and the LangChain tool.
+  point used by MCP tools and offline scripts.
 - ``survey_md`` — Markdown survey (cross-paper synthesis).
 - ``pptx``      — 12-slide reading-group deck (uses python-pptx).
 - ``docx``      — formatted Word doc (uses python-docx).

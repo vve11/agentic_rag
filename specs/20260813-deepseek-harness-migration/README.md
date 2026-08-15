@@ -1,8 +1,8 @@
 # DeepSeek Harness Migration
 
-**状态**：Approved for G0（待提交规格并获得 clean workspace）
+**状态**：Completed（G0-G5 已按 manifest 执行，G5 清退旧宿主）
 **日期**：2026-08-13
-**目标**：用 DeepSeek Harness 替换 DeerFlow Agent Runtime，保留并复用现有 `paper_rag` Python 领域内核。
+**目标**：用 DeepSeek Harness 替换旧 Agent Runtime，保留并复用现有 `paper_rag` Python 领域内核。
 
 ## 文档地图
 
@@ -39,12 +39,12 @@ DeepSeek Harness Web/Session/Agent
 
 | Gate | 状态 | 通过条件 |
 |---|---|---|
-| G0 · 版本与可行性 Spike | Pending | 锁定一套同版本 DSH 包，验证 Web、Preset、MCP、审批和 Session 恢复 |
-| G1 · 只读 MVP | Pending | `search/qa/section/wiki` 通过 MCP 在 DSH 中可用，引用与拒答不退化 |
-| G2 · 完整研究链 | Pending | Discover → Confirm → Ingest → QA/Compare → Deliver 全链路通过 |
-| G3 · 主动能力 | Pending | Inbox/Subscription/Feedback 可通过 Chat-first 工具管理，cron 独立运行 |
-| G4 · 默认入口切换 | Pending | README/Makefile/CI 默认指向 DSH，DSH cutover smoke 与 clean checkout 通过 |
-| G5 · DeerFlow 退役 | Pending | 无运行依赖、无未迁移 P0 能力、回滚窗口结束后删除 `integrations/deer-flow/` |
+| G0 · 版本与可行性 Spike | Passed | 锁定一套同版本 DSH 包，验证 Web、Preset、MCP、审批和 Session 恢复 |
+| G1 · 只读 MVP | Passed | `search/qa/section/wiki` 通过 MCP 在 DSH 中可用，引用与拒答不退化 |
+| G2 · 完整研究链 | Passed | Discover → Confirm → Ingest → QA/Compare → Deliver 全链路通过 |
+| G3 · 主动能力 | Passed | Inbox/Subscription/Feedback 可通过 Chat-first 工具管理，cron 独立运行 |
+| G4 · 默认入口切换 | Passed | README/Makefile/CI 默认指向 DSH，DSH cutover smoke 与 clean checkout 通过 |
+| G5 · 旧宿主退役 | Passed | 无运行依赖、无未迁移 P0 能力、回滚 tag 已保存，旧宿主源码已删除 |
 
 任何 Gate 未通过时，只回滚该阶段新增的 DSH 层；`src/paper_rag/`、SQLite 和 Qdrant
 数据不随宿主回滚。

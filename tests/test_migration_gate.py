@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 import zipfile
@@ -16,23 +17,55 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "specs" / "20260813-deepseek-harness-migration"
 
 
-def test_collect_legacy_tests_matches_g0_matrix_scope():
-    tests = migration_gate.collect_legacy_tests(ROOT)
-
-    counts = {}
-    for item in tests:
-        counts[item["file"]] = counts.get(item["file"], 0) + 1
-
-    assert counts == {
-        "tests/test_gateway_paper_rag.py": 17,
-        "tests/test_middleware.py": 25,
-        "tests/test_langgraph_middleware.py": 23,
-    }
-    assert len(tests) == 65
-    assert tests[0]["test_name"].startswith("test_")
+def test_collect_legacy_tests_reads_configured_source_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    rel = Path("tests/test_gateway_paper_rag.py")
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        """
+def helper():
+    return None
 
 
-def test_validate_legacy_matrix_rejects_missing_test(tmp_path: Path):
+def test_first_case():
+    pass
+
+
+async def test_second_case():
+    pass
+""".lstrip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(migration_gate, "LEGACY_TEST_FILES", (rel,))
+
+    tests = migration_gate.collect_legacy_tests(tmp_path)
+
+    assert tests == [
+        {"file": "tests/test_gateway_paper_rag.py", "test_name": "test_first_case", "line": 5},
+        {"file": "tests/test_gateway_paper_rag.py", "test_name": "test_second_case", "line": 9},
+    ]
+
+
+def test_validate_legacy_matrix_rejects_missing_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    rel = Path("tests/test_gateway_paper_rag.py")
+    source = tmp_path / rel
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """
+def test_routes_registered():
+    pass
+
+
+def test_missing_from_matrix():
+    pass
+""".lstrip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(migration_gate, "LEGACY_TEST_FILES", (rel,))
     matrix = {
         "schema_version": 1,
         "source_files": ["tests/test_gateway_paper_rag.py"],
@@ -49,8 +82,8 @@ def test_validate_legacy_matrix_rejects_missing_test(tmp_path: Path):
     path = tmp_path / "legacy-capability-matrix.json"
     path.write_text(json.dumps(matrix), encoding="utf-8")
 
-    with pytest.raises(migration_gate.GateError, match="missing 64 legacy tests"):
-        migration_gate.validate_legacy_matrix(ROOT, path)
+    with pytest.raises(migration_gate.GateError, match="missing 1 legacy tests"):
+        migration_gate.validate_legacy_matrix(tmp_path, path)
 
 
 def test_validate_committed_legacy_matrix_covers_all_65_tests():
@@ -67,6 +100,29 @@ def test_validate_committed_legacy_matrix_covers_all_65_tests():
         "capability-replaced-by-broker-or-mcp",
         "still-required-and-moved",
     }
+
+
+def test_validate_legacy_matrix_accepts_frozen_inventory_after_source_removal(tmp_path: Path):
+    matrix = {
+        "schema_version": 1,
+        "source_files": ["tests/test_gateway_paper_rag.py"],
+        "entries": [
+            {
+                "file": "tests/test_gateway_paper_rag.py",
+                "test_name": "test_routes_registered",
+                "classification": "host-specific-delete",
+                "replacement": "CUT-004",
+                "rationale": "old host-specific test is removed after cutover",
+            }
+        ],
+    }
+    path = tmp_path / "legacy-capability-matrix.json"
+    path.write_text(json.dumps(matrix), encoding="utf-8")
+
+    result = migration_gate.validate_legacy_matrix(tmp_path, path)
+
+    assert result["total"] == 1
+    assert result["source_inventory"] == "matrix"
 
 
 def test_freeze_baseline_records_dataset_hashes_and_quality_commands(tmp_path: Path):
@@ -407,12 +463,131 @@ def test_run_gate_maps_g4_cutover_cases_from_component_validators(
     assert report["go_no_go"] == "go"
 
 
+def test_run_gate_maps_g5_cutover_cases_from_cut_validator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    manifest = {
+        "owned_test_commands": [
+            {
+                "id": "cut-validator",
+                "repository": ".",
+                "command": f"{sys.executable} -c \"print('cutover removal ok')\"",
+            }
+        ],
+        "gate_components": {"G5": ["cut-validator"]},
+        "required_cases": {"G5": ["CUT-001", "CUT-004", "CUT-006"]},
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(migration_gate, "git_dirty", lambda _repo_root: False)
+    monkeypatch.setattr(migration_gate, "git_head", lambda _repo_root: "test-head")
+
+    report = migration_gate.run_gate(tmp_path, manifest_path, "G5", tmp_path / "G5.json")
+
+    assert report["cases"]["CUT-001"] == {
+        "status": "PASS",
+        "evidence": "command cut-validator passed",
+    }
+    assert report["cases"]["CUT-004"] == {
+        "status": "PASS",
+        "evidence": "command cut-validator passed",
+    }
+    assert report["cases"]["CUT-006"] == {
+        "status": "PASS",
+        "evidence": "command cut-validator passed",
+    }
+    assert report["go_no_go"] == "go"
+
+
 def test_validate_cutover_defaults_requires_dsh_default_entrypoints():
     result = migration_gate.validate_cutover_defaults(ROOT)
 
     assert result["schema_version"] == 1
     assert result["checks"]
     assert all(check["status"] == "PASS" for check in result["checks"])
+
+
+def test_validate_cutover_rejects_deerflow_runtime_residue(tmp_path: Path):
+    (tmp_path / "docs/adrs").mkdir(parents=True)
+    (tmp_path / "docs/adrs/0008-deerflow-integration-and-guardrails.md").write_text(
+        "# ADR\n\nStatus: Superseded\n\nHistorical DeerFlow decision.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs/CHANGELOG.md").write_text(
+        "G5 removed the old DeerFlow host.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src/paper_rag").mkdir(parents=True)
+    (tmp_path / "src/paper_rag/runtime.py").write_text(
+        "DEERFLOW_GATEWAY_URL = 'http://127.0.0.1:8000'\n",
+        encoding="utf-8",
+    )
+    spec_dir = tmp_path / "specs/20260813-deepseek-harness-migration"
+    spec_dir.mkdir(parents=True)
+
+    with pytest.raises(migration_gate.GateError, match="runtime residue"):
+        migration_gate.validate_cutover(tmp_path, spec_dir)
+
+
+def test_validate_cutover_allows_historical_deerflow_records(tmp_path: Path):
+    (tmp_path / "docs/adrs").mkdir(parents=True)
+    (tmp_path / "docs/adrs/0008-deerflow-integration-and-guardrails.md").write_text(
+        "# ADR\n\nStatus: Superseded by ADR-0022\n\nHistorical DeerFlow integration.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs/CHANGELOG.md").write_text(
+        "G5 removed the old DeerFlow host.\n",
+        encoding="utf-8",
+    )
+    spec_dir = tmp_path / "specs/20260813-deepseek-harness-migration"
+    spec_dir.mkdir(parents=True)
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "fixture",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "tag", "deepseek-harness-g5-pre-removal"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    result = migration_gate.validate_cutover(tmp_path, spec_dir)
+
+    assert result["schema_version"] == 1
+    assert {check["id"]: check["status"] for check in result["checks"]} == {
+        "deerflow-workspace-removed": "PASS",
+        "deerflow-smoke-removed": "PASS",
+        "makefile-deerflow-targets-removed": "PASS",
+        "pyproject-deerflow-extra-removed": "PASS",
+        "residual-runtime-references": "PASS",
+        "pre-removal-ref-recorded": "PASS",
+    }
+    assert result["residual_references"] == [
+        {
+            "path": "docs/CHANGELOG.md",
+            "line": 1,
+            "classification": "historical-changelog",
+        },
+        {
+            "path": "docs/adrs/0008-deerflow-integration-and-guardrails.md",
+            "line": 5,
+            "classification": "superseded-adr",
+        },
+    ]
 
 
 def test_validate_clean_checkout_reports_clean(monkeypatch: pytest.MonkeyPatch):

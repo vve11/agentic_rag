@@ -19,7 +19,7 @@ Source = Literal[
     "none",
 ]
 Policy = Literal["authoritative_outer", "inner_fallback", "single_turn"]
-Caller = Literal["deerflow", "rest", "python"]
+Caller = Literal["host", "rest", "python"]
 
 _REWRITE_PROMPT = """Rewrite the current question for a paper RAG system.
 
@@ -146,7 +146,7 @@ def resolve_query(ctx: QARequestContext) -> QueryResolution:
         return QueryResolution(
             raw_question=raw,
             effective_question=outer,
-            source="outer_checkpoint" if ctx.caller == "deerflow" else "api_resolved",
+            source="outer_checkpoint" if ctx.caller == "host" else "api_resolved",
             policy="authoritative_outer",
             rewrite_applied=False,
             outer_resolution_used=True,
@@ -217,6 +217,6 @@ def resolution_to_trace(resolution: QueryResolution) -> dict:
 __all__ = [
     "QARequestContext",
     "QueryResolution",
-    "resolve_query",
     "resolution_to_trace",
+    "resolve_query",
 ]

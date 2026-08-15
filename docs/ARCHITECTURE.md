@@ -57,7 +57,7 @@
 2. **双库分工不混**（ADR-0004）：Qdrant 只做向量+metadata 过滤；SQLite 只做关系/CRUD/wiki
 3. **受控 loop 分层**：`paper_discover` 负责找候选论文，`paper_qa` 内闭环负责证据问答；候选摘要不能直接当 citation
 4. **Wiki patch 不 rewrite**（ADR-0007）：LLM 只能 add_*；24h 限频；self_eval gate；版本日志
-5. **宿主层走 DeepSeek Harness + MCP**（ADR-0022）：核心包不导入宿主，DeerFlow 仅作为 G5 前 legacy fallback
+5. **宿主层走 DeepSeek Harness + MCP**（ADR-0022）：核心包不导入宿主，产品入口由 DSH preset + private MCP 承载
 
 ## 状态机（ingest_pipeline）
 
@@ -112,11 +112,10 @@ created → fetched → parsed → chunked → embedded → indexed → done
 
 ## 调用边界
 
-- `paper_rag` 包永远不导入 `deerflow.*` 或 `app.*`
+- `paper_rag` 包永远不导入宿主 UI 或 agent runtime
 - `integrations/deepseek-harness/` 通过 Native Broker 启动私有 MCP child，MCP tool 只调用稳定的 `paper_rag.tools.*`
-- `backend/.../community/paper_rag/tools.py` 通过 `_ensure_paper_rag_importable()` lazy 注入 sys.path
-- `backend/.../subagents/builtins/paper_research.py` 注册 `paper-research` 专家 subagent
-- DeerFlow fallback 不知道 `paper_rag` 的内部 schema；只看 LangChain Tool 的 JSON 字符串
+- `integrations/deepseek-harness/presets/paper-research/` 注册默认研究预设
+- `src/paper_rag/mcp/` 暴露 schema 化工具结果；凭证、actor 和 session authority 不进入模型可见上下文
 
 ## 配置生效顺序
 

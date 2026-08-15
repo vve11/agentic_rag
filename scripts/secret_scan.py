@@ -2,8 +2,8 @@
 """Lightweight repository secret scan for release preflight.
 
 This is intentionally conservative and dependency-free. It scans source,
-config, docs, tests, and the embedded DeerFlow integration for common API key
-shapes while allowing documented placeholders.
+config, docs, tests, and integration adapters for common API key shapes while
+allowing documented placeholders.
 """
 
 from __future__ import annotations
@@ -20,9 +20,7 @@ DEFAULT_PATHS = (
     "config",
     "docs",
     "examples",
-    "integrations/deer-flow/backend/app/gateway/routers",
-    "integrations/deer-flow/backend/tests/test_paper_rag_integration.py",
-    "integrations/deer-flow/frontend/src/app/workspace/paper-rag",
+    "integrations/deepseek-harness",
     "scripts",
     "src",
     "tests",

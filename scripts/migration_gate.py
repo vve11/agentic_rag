@@ -14,6 +14,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import tomllib
 import yaml
 
 LEGACY_TEST_FILES = (
@@ -163,6 +165,27 @@ CASE_COVERAGE_BY_COMMAND = {
     "clean-checkout": (
         "CUT-005",
     ),
+    "cut-validator": (
+        "CUT-001",
+        "CUT-004",
+        "CUT-006",
+    ),
+}
+
+DEERFLOW_PATTERN = re.compile(r"deer.?flow", re.IGNORECASE)
+G5_PRE_REMOVAL_REF = "deepseek-harness-g5-pre-removal"
+RESIDUAL_SCAN_SKIP_DIRS = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "data",
+    "dist",
+    "node_modules",
+    "runtime",
 }
 
 
@@ -208,7 +231,8 @@ def validate_legacy_matrix(repo_root: Path, matrix_path: Path) -> dict[str, Any]
     if not isinstance(entries, list):
         raise GateError("legacy matrix must contain entries list")
 
-    discovered = collect_legacy_tests(repo_root)
+    legacy_sources_exist = all((repo_root / rel).exists() for rel in LEGACY_TEST_FILES)
+    discovered = collect_legacy_tests(repo_root) if legacy_sources_exist else []
     expected = {(item["file"], item["test_name"]) for item in discovered}
     seen: set[tuple[str, str]] = set()
     by_file: dict[str, int] = {}
@@ -218,7 +242,7 @@ def validate_legacy_matrix(repo_root: Path, matrix_path: Path) -> dict[str, Any]
         file = entry.get("file")
         test_name = entry.get("test_name")
         key = (file, test_name)
-        if key not in expected:
+        if legacy_sources_exist and key not in expected:
             raise GateError(f"unknown legacy test at entries[{i}]: {file}::{test_name}")
         if key in seen:
             raise GateError(f"duplicate legacy test in matrix: {file}::{test_name}")
@@ -236,18 +260,20 @@ def validate_legacy_matrix(repo_root: Path, matrix_path: Path) -> dict[str, Any]
         by_file[file] = by_file.get(file, 0) + 1
         by_classification[classification] = by_classification.get(classification, 0) + 1
 
-    missing = sorted(expected - seen)
-    extra = sorted(seen - expected)
-    if missing:
-        raise GateError(f"missing {len(missing)} legacy tests in matrix")
-    if extra:
-        raise GateError(f"extra {len(extra)} legacy tests in matrix")
+    if legacy_sources_exist:
+        missing = sorted(expected - seen)
+        extra = sorted(seen - expected)
+        if missing:
+            raise GateError(f"missing {len(missing)} legacy tests in matrix")
+        if extra:
+            raise GateError(f"extra {len(extra)} legacy tests in matrix")
 
     result = {
         "schema_version": matrix.get("schema_version", 1),
         "total": len(entries),
         "by_file": by_file,
         "by_classification": by_classification,
+        "source_inventory": "source-files" if legacy_sources_exist else "matrix",
         "matrix_path": _relpath(matrix_path, repo_root),
     }
     return result
@@ -415,9 +441,9 @@ def validate_cutover_defaults(repo_root: Path) -> dict[str, Any]:
             f"Makefile must define {', '.join(DSH_CUTOVER_TARGETS)}",
         ),
         _cutover_check(
-            "makefile-dsh-before-deerflow",
-            0 <= makefile.find("dsh-start") < makefile.find("deerflow-backend"),
-            "DSH targets must be presented before DeerFlow fallback targets",
+            "makefile-no-retired-host-targets",
+            _makefile_deerflow_targets_removed(repo_root / "Makefile"),
+            "Makefile must expose DSH targets without retired host fallback targets",
         ),
         _cutover_check(
             "readme-zh-dsh-quick-start",
@@ -428,13 +454,10 @@ def validate_cutover_defaults(repo_root: Path) -> dict[str, Any]:
         ),
         _cutover_check(
             "readme-en-dsh-quick-start",
-            "Quick Start: DeepSeek Harness" in readme_en and "make dsh-start" in readme_en,
+            "Quick Start" in readme_en
+            and "DeepSeek Harness" in readme_en
+            and "make dsh-start" in readme_en,
             "README_EN.md Quick Start must default to DeepSeek Harness",
-        ),
-        _cutover_check(
-            "readmes-deerflow-legacy",
-            "legacy fallback" in readme_zh and "legacy fallback" in readme_en,
-            "DeerFlow must be marked as legacy fallback in both READMEs",
         ),
         _cutover_check(
             "env-example-dsh",
@@ -454,7 +477,7 @@ def validate_cutover_defaults(repo_root: Path) -> dict[str, Any]:
             "docs-dsh-default",
             "DeepSeek Harness 默认入口" in operations
             and "Native Broker" in architecture
-            and "DeerFlow fallback" in readme_zh,
+            and "旧宿主源码" in readme_zh,
             "Operations, architecture, and README docs must mark DSH as default",
         ),
     ]
@@ -466,6 +489,63 @@ def validate_cutover_defaults(repo_root: Path) -> dict[str, Any]:
         "schema_version": 1,
         "checks": checks,
         "targets": list(DSH_CUTOVER_TARGETS),
+    }
+
+
+def validate_cutover(repo_root: Path, spec_dir: Path) -> dict[str, Any]:
+    residuals = _collect_deerflow_residuals(repo_root)
+    runtime_residuals = [
+        residual for residual in residuals
+        if residual.get("classification") == "runtime-reference"
+    ]
+    checks = [
+        _cutover_check(
+            "deerflow-workspace-removed",
+            not (repo_root / "integrations" / "deer-flow").exists(),
+            "integrations/deer-flow must be removed for G5",
+        ),
+        _cutover_check(
+            "deerflow-smoke-removed",
+            not (repo_root / "scripts" / "deerflow_smoke.py").exists(),
+            "scripts/deerflow_smoke.py must be removed for G5",
+        ),
+        _cutover_check(
+            "makefile-deerflow-targets-removed",
+            _makefile_deerflow_targets_removed(repo_root / "Makefile"),
+            "Makefile must not expose DeerFlow targets or variables",
+        ),
+        _cutover_check(
+            "pyproject-deerflow-extra-removed",
+            _pyproject_deerflow_extra_removed(repo_root / "pyproject.toml"),
+            "pyproject must not expose the deerflow extra or DeerFlow-only dependencies",
+        ),
+        _cutover_check(
+            "residual-runtime-references",
+            not runtime_residuals,
+            "deerflow residual references must be historical records only",
+        ),
+        _cutover_check(
+            "pre-removal-ref-recorded",
+            _pre_removal_ref_recorded(repo_root),
+            f"{G5_PRE_REMOVAL_REF} must point to a commit reachable from HEAD",
+        ),
+    ]
+    failed = [check for check in checks if check["status"] != "PASS"]
+    if failed:
+        failed_ids = ", ".join(check["id"] for check in failed)
+        if runtime_residuals:
+            samples = ", ".join(
+                f"{item['path']}:{item['line']}" for item in runtime_residuals[:10]
+            )
+            raise GateError(f"cutover runtime residue: {failed_ids}; {samples}")
+        raise GateError(f"cutover check failed: {failed_ids}")
+
+    return {
+        "schema_version": 1,
+        "spec": _relpath(spec_dir, repo_root),
+        "checks": checks,
+        "residual_references": residuals,
+        "pre_removal_ref": G5_PRE_REMOVAL_REF,
     }
 
 
@@ -486,6 +566,112 @@ def validate_clean_checkout(repo_root: Path) -> dict[str, Any]:
         "dirty": False,
         "status": "PASS",
     }
+
+
+def _makefile_deerflow_targets_removed(path: Path) -> bool:
+    if not path.exists():
+        return True
+    text = path.read_text(encoding="utf-8")
+    return not re.search(r"(?im)^(?:DEER_?FLOW|deerflow-)", text)
+
+
+def _pyproject_deerflow_extra_removed(path: Path) -> bool:
+    if not path.exists():
+        return True
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    optional = data.get("project", {}).get("optional-dependencies", {})
+    if "deerflow" in optional:
+        return False
+    deps = json.dumps(optional, sort_keys=True).lower()
+    return "langchain" not in deps
+
+
+def _pre_removal_ref_recorded(repo_root: Path) -> bool:
+    if not (repo_root / ".git").exists():
+        return True
+    ref = _run_git(repo_root, "rev-parse", f"{G5_PRE_REMOVAL_REF}^{{commit}}", check=False)
+    if ref.returncode != 0 or not ref.stdout.strip():
+        return False
+    ancestor = _run_git(
+        repo_root,
+        "merge-base",
+        "--is-ancestor",
+        ref.stdout.strip(),
+        "HEAD",
+        check=False,
+    )
+    return ancestor.returncode == 0
+
+
+def _collect_deerflow_residuals(repo_root: Path) -> list[dict[str, Any]]:
+    residuals: list[dict[str, Any]] = []
+    for path in sorted(repo_root.rglob("*")):
+        if not path.is_file() or _should_skip_residual_path(path, repo_root):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        rel = path.relative_to(repo_root)
+        classification = _classify_deerflow_residual(rel, text)
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if not DEERFLOW_PATTERN.search(line):
+                continue
+            residuals.append(
+                {
+                    "path": rel.as_posix(),
+                    "line": line_no,
+                    "classification": classification,
+                }
+            )
+    residuals.sort(key=lambda item: (item["path"], item["line"]))
+    return residuals
+
+
+def _should_skip_residual_path(path: Path, repo_root: Path) -> bool:
+    rel = path.relative_to(repo_root)
+    if any(part in RESIDUAL_SCAN_SKIP_DIRS for part in rel.parts):
+        return True
+    if any(part.endswith(".egg-info") for part in rel.parts):
+        return True
+    return rel.as_posix().endswith((".pyc", ".png", ".jpg", ".jpeg", ".gif", ".pdf"))
+
+
+def _classify_deerflow_residual(rel: Path, text: str) -> str:
+    rel_posix = rel.as_posix()
+    lower_text = text.lower()
+    if rel_posix.startswith("specs/20260813-deepseek-harness-migration/"):
+        return "migration-spec"
+    if rel_posix in {"scripts/migration_gate.py", "tests/test_migration_gate.py"}:
+        return "gate-validator"
+    if "changelog" in rel.name.lower():
+        return "historical-changelog"
+    if rel_posix == "docs/STATUS.md":
+        return "status-history"
+    if rel_posix.startswith("docs/superpowers/plans/"):
+        return "historical-plan"
+    if rel_posix.startswith("docs/superpowers/specs/"):
+        return "historical-spec"
+    if rel_posix in {
+        "docs/M8_PRD.md",
+        "docs/M10_PRD.md",
+        "docs/M11_PRD.md",
+        "docs/ACCEPTANCE_REPORT.md",
+        "docs/INTERVIEW_NOTES.md",
+        "docs/P012_COMPLETION_PLAN.md",
+        "docs/VERIFICATION_REPORT.md",
+    }:
+        return "historical-product-record"
+    if rel_posix.startswith("docs/adrs/") and "superseded" in lower_text:
+        return "superseded-adr"
+    if rel_posix.startswith("docs/adrs/0022-") and "final" in lower_text:
+        return "final-migration-adr"
+    if rel_posix.startswith("docs/adrs/"):
+        return "historical-adr"
+    if rel_posix == "docs/README.md" and "adrs/" in lower_text:
+        return "adr-index"
+    return "runtime-reference"
+
 
 
 def run_live(
@@ -2124,6 +2310,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     sub.add_parser("validate-cutover-defaults")
+    p = sub.add_parser("validate-cutover")
+    p.add_argument("--spec", required=True)
     sub.add_parser("validate-clean-checkout")
 
     p = sub.add_parser("diff-check")
@@ -2165,6 +2353,8 @@ def main(argv: list[str] | None = None) -> int:
             result = validate_live(repo_root, repo_root / args.manifest, args.gate)
         elif args.command == "validate-cutover-defaults":
             result = validate_cutover_defaults(repo_root)
+        elif args.command == "validate-cutover":
+            result = validate_cutover(repo_root, repo_root / args.spec)
         elif args.command == "validate-clean-checkout":
             result = validate_clean_checkout(repo_root)
         elif args.command == "diff-check":

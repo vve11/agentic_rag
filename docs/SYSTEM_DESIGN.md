@@ -6,16 +6,15 @@
 
 ## 1. TL;DR（30 秒版）
 
-paper_rag 是一个 **Agentic RAG 学术论文研读系统**。默认交互入口正在切换到
+paper_rag 是一个 **Agentic RAG 学术论文研读系统**。默认交互入口是
 DeepSeek Harness 的 `paper-research` 预设，通过私有 MCP 调用稳定的
-`paper_rag` 核心能力；DeerFlow 在 G5 前只保留为 legacy fallback。系统支持
+`paper_rag` 核心能力。系统支持
 自然语言问答、跨文献综述生成、知识演化、订阅推送、自动入库 5 大产品能力，
 覆盖 0 → 1 完整数据闭环。
 
 技术栈：bge-m3 embedding + Qdrant 向量库 + SQLite + FTS5 混合检索 + BGE-
 reranker-v2-m3 + DeepSeek/OpenAI 兼容协议。后端 Python 3.10+，DeepSeek
-Harness 本地 UI 使用 Node 20 + pnpm；DeerFlow Gateway/Next.js 路径保留为旧
-宿主对照。**迁移 gate 覆盖 retrieval、QA/citation、claim、MCP、DSH smoke 和
+Harness 本地 UI 使用 Node 20 + pnpm。**迁移 gate 覆盖 retrieval、QA/citation、claim、MCP、DSH smoke 和
 旧能力矩阵**。
 
 ## 2. 架构图（高层）
@@ -62,8 +61,7 @@ Harness 本地 UI 使用 Node 20 + pnpm；DeerFlow Gateway/Next.js 路径保留�
        │ (P3-13)        │ (best-effort, never block inbox.write)
        └────────────────┘
 
-DeerFlow Gateway + `/workspace/paper-rag` 仍可作为 legacy fallback 启动，但不再是
-默认入口。
+旧宿主源码已在 G5 移除；回滚通过 `deepseek-harness-g5-pre-removal` tag 恢复宿主代码。
 ```
 
 ## 3. 关键决策（10 个 ADR 速览）
@@ -71,23 +69,23 @@ DeerFlow Gateway + `/workspace/paper-rag` 仍可作为 legacy fallback 启动，
 | ADR | 决策 | 为什么 |
 |---|---|---|
 | 0014 | abstain 三档（confident / weak / no_evidence） | 拒答可控，避免 LLM 幻觉式硬答 |
-| 0015 | M8 服务化：sibling 包 + gateway router | 不污染主仓 deps，Python 3.10/3.12 双 venv 兼容 |
+| 0015 | M8 服务化：sibling 包 + gateway router | 历史宿主方案，G5 后由 DSH/MCP 替代 |
 | 0016 | M10 综述生成 N+1+S 调用 | 一次 8K token 灌不下，N 篇深读 + 1 次综合 + 引用清洗 |
 | 0017 | M11 反馈数据闭环 | 用户反馈 → hard cases → 半自动阈值校准 |
 | 0018 | M9 主动 Agent + APScheduler | 用户没理由每天打开 → 给 4 类推送理由 |
 | 0019 | 双 SQLite 数据库 | papers vs feedback 写入冲突 + 备份语义不同 |
-| 0020 | gateway 8 层中间件栈 + Prom/Grafana | 可观测 + 防恶意 + Redis backend 多副本 ready |
-| 0021 | LangGraph 中间件强化（cost / latency / recursion / PII） | agent 失控两道闸 + token 成本可观测 + 默认 PII redact |
+| 0020 | gateway 8 层中间件栈 + Prom/Grafana | 历史宿主可观测方案，G5 后由 DSH/MCP gate 覆盖 |
+| 0021 | LangGraph 中间件强化（cost / latency / recursion / PII） | 历史 agent runtime 加固，G5 后由 DSH/Broker 测试覆盖 |
 
 完整 ADR 列表：`docs/adrs/`（21 份）。
 
 ## 4. 数据流（典型 QA 请求）
 
 ```
-1. 用户问 → /api/paper_rag/qa (SSE)
-2. BetterAuth 中间件验 cookie → request.state.user_id = "alice"
-3. router 依赖 get_current_user_id 注入
-4. lazy import qa_stream → 跑 _retrieve_round
+1. 用户在 DeepSeek Harness `paper-research` 预设中提问
+2. Native Broker 以固定 actor/session metadata 调用私有 MCP child
+3. MCP registry 校验输入 schema、toolset 和审批边界
+4. `paper_qa` 跑 _retrieve_round
    ├─ query_rewrite (LLM, 1 call)
    ├─ hybrid_search (BM25 + dense via Qdrant)
    └─ rerank (BGE-reranker-v2-m3, top_k*3 → top_k)
@@ -96,8 +94,8 @@ DeerFlow Gateway + `/workspace/paper-rag` 仍可作为 legacy fallback 启动，
    ├─ 0.21–0.48 → LLM 带 insufficiency hint
    └─ >= 0.48 → 正常 LLM 答
 6. validate_citations + detect_suspicious_citations
-7. SSE done event → router 拿 paper_ids
-8. asyncio.run_in_executor → paper_access.touch_many("alice", pids)
+7. structured MCP result 返回 answer/citations/trace
+8. 工具层记录 paper_access.touch_many(actor, pids)
    └─ 喂数据给 stale_scan
 9. inbox.write 不会触发（QA 路径），但若是订阅匹配 → fan_out webhook
 ```
@@ -113,7 +111,7 @@ DeerFlow Gateway + `/workspace/paper-rag` 仍可作为 legacy fallback 启动，
 | recall@k=10 | 0.90 | M5 baseline，固定 33 题 eval |
 | abstain pos_kept | 96.7% | offline 标定 |
 | abstain neg_blocked | 100% | offline 标定 |
-| 测试套件运行时间 | ~2.2s | 113 项纯逻辑测试 |
+| 测试套件运行时间 | ~2.2s | 迁移后纯逻辑测试 + MCP/DSH deterministic tests |
 | 容器构建 lean tag | ~600MB | 多阶段 + venv copy |
 
 ## 6. 故障域 / 降级路径

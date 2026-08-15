@@ -1,7 +1,7 @@
 """Streaming variant of qa_agentic.
 
-Yields events as the pipeline progresses, so callers (e.g. DeerFlow lead
-agent or a chat UI) can render incrementally instead of waiting for the
+Yields events as the pipeline progresses, so host adapters or chat UIs can
+render incrementally instead of waiting for the
 full ~2-min answer.
 
 Event types:

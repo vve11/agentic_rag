@@ -5,17 +5,12 @@ PYTHONPATH := src:tests
 DSH_DIR := integrations/deepseek-harness
 DSH_PORT ?= 3080
 DSH_RUNTIME_ROOT := data/runtime/deepseek-harness
-DEERFLOW_DIR := integrations/deer-flow
-DEERFLOW_BACKEND_PY ?= $(CURDIR)/$(DEERFLOW_DIR)/backend/.venv/bin/python
-DEERFLOW_BACKEND_PORT ?= 8001
-DEERFLOW_FRONTEND_PORT ?= 3000
 
 .PHONY: help install install-dev lint format test test-pytest smoke secret-scan course-pdf mineru-doctor mineru-download-layout rebuild-index validate-metadata \
         qdrant-up qdrant-down init-store ingest ask eval clean clean-data \
         docker-build docker-build-bake docker-up-proactive docker-cli docker-shell \
         calibrate-abstain hard-cases eval-golden eval-golden-qa eval-report eval-citation-audit eval-ablation eval-claims eval-claims-report eval-claims-judge eval-llm-recall verify-p0 \
-        dsh-install dsh-doctor dsh-start dsh-smoke dsh-test dsh-clean-runtime \
-        deerflow-backend deerflow-frontend deerflow-smoke deerflow-rebuild-index deerflow-paper-rag-test
+        dsh-install dsh-doctor dsh-start dsh-smoke dsh-test dsh-clean-runtime
 
 help:
 	@echo "Targets:"
@@ -31,7 +26,6 @@ help:
 	@echo "  format         Run ruff format"
 	@echo "  test           Run pure-logic tests (no qdrant / no llm) via _run_tests.py"
 	@echo "  test-pytest    Run tests via pytest (richer output, fixtures)"
-	@echo "  test-middleware  Run gateway + langgraph middleware tests only"
 	@echo "  smoke          Walk all modules and assert importable count"
 	@echo "  secret-scan    Scan source/config/docs for accidental API keys"
 	@echo "  course-pdf     Regenerate the course manual PDF"
@@ -62,15 +56,6 @@ help:
 	@echo "  docker-up-proactive  Start proactive cron sidecar (compose)"
 	@echo "  docker-cli CMD='...'  Run one-shot command in fresh container"
 	@echo "  docker-shell   Drop into bash inside fresh container"
-	@echo "  obs-up         Start Prometheus + Grafana monitoring stack"
-	@echo "  obs-down       Stop monitoring stack"
-	@echo "  deerflow-backend   Legacy fallback: start embedded DeerFlow gateway with paper_rag"
-	@echo "  deerflow-frontend  Legacy fallback: start embedded DeerFlow Next.js UI"
-	@echo "  deerflow-smoke     Legacy fallback: check embedded DeerFlow paper_rag endpoints"
-	@echo "  deerflow-paper-rag-test  Legacy fallback: run DeerFlow backend paper_rag integration tests"
-	@echo "  deerflow-rebuild-index  Legacy fallback: rebuild local embedded Qdrant from parsed papers"
-	@echo "  publish        Publish to GitHub (REPO=... WORKDIR=...)"
-	@echo "  publish-dryrun Preview what would be committed"
 	@echo "  clean          Remove pycache & build artifacts"
 	@echo "  clean-data     DELETE data/ (DANGEROUS)"
 
@@ -91,9 +76,6 @@ test:
 
 test-pytest:
 	@$(PY) -m pytest -q --ignore=tests/eval
-
-test-middleware:
-	@$(PY) -m pytest -q tests/test_middleware.py tests/test_langgraph_middleware.py
 
 smoke:
 	@PYTHONPATH=src $(PY) scripts/_run_smoke.py
@@ -134,33 +116,6 @@ dsh-test:
 
 dsh-clean-runtime:
 	rm -rf $(DSH_RUNTIME_ROOT)/versions
-
-deerflow-backend:
-	set -a; [ ! -f .env ] || . ./.env; set +a; \
-	    DEER_FLOW_AUTH_DISABLED=1 \
-	    DEER_FLOW_CONFIG_PATH=$(CURDIR)/$(DEERFLOW_DIR)/config.example.yaml \
-	    DEER_FLOW_HOME=$(CURDIR)/$(DEERFLOW_DIR)/.deer-flow-local \
-	    PAPER_RAG_HOME=$(CURDIR) \
-	    PAPER_RAG_CONFIG=$${PAPER_RAG_CONFIG:-$(CURDIR)/config/local.yaml} \
-	    PYTHONPATH=$(CURDIR)/$(DEERFLOW_DIR)/backend:$(CURDIR)/$(DEERFLOW_DIR)/backend/packages/harness:$(CURDIR)/src \
-	    $(DEERFLOW_BACKEND_PY) -m uvicorn app.gateway.app:app --host 127.0.0.1 --port $(DEERFLOW_BACKEND_PORT)
-
-deerflow-frontend:
-	cd $(DEERFLOW_DIR)/frontend && \
-	    DEER_FLOW_AUTH_DISABLED=1 \
-	    DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://127.0.0.1:$(DEERFLOW_BACKEND_PORT) \
-	    corepack pnpm exec next dev --turbo --hostname 127.0.0.1 --port $(DEERFLOW_FRONTEND_PORT)
-
-deerflow-smoke:
-	$(PY) scripts/deerflow_smoke.py --base-url http://127.0.0.1:$(DEERFLOW_BACKEND_PORT)
-
-deerflow-paper-rag-test:
-	PYTHONPATH=$(CURDIR)/$(DEERFLOW_DIR)/backend:$(CURDIR)/$(DEERFLOW_DIR)/backend/packages/harness:$(CURDIR)/src \
-	    $(DEERFLOW_BACKEND_PY) -m pytest -q $(DEERFLOW_DIR)/backend/tests/test_paper_rag_integration.py
-
-deerflow-rebuild-index:
-	PAPER_RAG_CONFIG=$(CURDIR)/config/local.yaml $(DEERFLOW_BACKEND_PY) scripts/init_store.py
-	PAPER_RAG_CONFIG=$(CURDIR)/config/local.yaml $(DEERFLOW_BACKEND_PY) scripts/rebuild_index_from_parsed.py
 
 qdrant-up:
 	bash scripts/up_qdrant.sh
@@ -319,38 +274,6 @@ docker-shell:
 	    -v $$PWD/config:/opt/paper_rag/config:ro \
 	    --env-file ../.env \
 	    $(DOCKER_TAG) shell
-
-# ── Observability stack (M9.7) ───────────────────────────────────────────────
-.PHONY: obs-up obs-down
-
-obs-up:
-	cd ../docker && docker compose \
-	    -f docker-compose.yaml \
-	    -f observability/docker-compose.observability.yaml \
-	    up -d prometheus grafana
-	@echo "Prometheus:  http://localhost:9090"
-	@echo "Grafana:     http://localhost:3001  (admin/admin)"
-
-obs-down:
-	cd ../docker && docker compose \
-	    -f docker-compose.yaml \
-	    -f observability/docker-compose.observability.yaml \
-	    stop prometheus grafana
-
-# ── GitHub publishing (G4) ──────────────────────────────────────────────────
-.PHONY: publish-dryrun publish
-
-publish-dryrun:
-	@echo "Files that WOULD be committed (excluding gitignored):"
-	@cd $(shell pwd) && git -c core.excludesfile=.gitignore status --porcelain --ignored 2>/dev/null | head -20 || true
-	@echo ""
-	@echo "Run: make publish REPO=https://github.com/<you>/<repo>.git WORKDIR=$$HOME/<repo>"
-
-publish:
-	@if [ -z "$(REPO)" ]; then \
-	    echo "Usage: make publish REPO=https://github.com/<you>/<repo>.git [WORKDIR=$$HOME/<repo>]"; exit 1; \
-	fi
-	bash scripts/publish_to_github.sh $(REPO) $(WORKDIR)
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +

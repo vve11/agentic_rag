@@ -1,7 +1,7 @@
 """Format dispatcher for paper_rag.deliver (M10 / ADR-0016).
 
 Routes a deliver request to the right generator. Public entry point used by
-both the gateway router and the LangChain tool.
+MCP tools and offline scripts.
 """
 
 from __future__ import annotations

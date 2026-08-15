@@ -1,17 +1,17 @@
 # ADR-0022 · DeepSeek Harness + MCP 宿主边界
 
 - **日期**: 2026-08-13
-- **状态**: accepted for G0
+- **状态**: final after G5
 - **关联**: `specs/20260813-deepseek-harness-migration/`
-- **Supersedes when G5 completes**: ADR-0008 / ADR-0015 / ADR-0020 / ADR-0021 的 DeerFlow 宿主决策
+- **Supersedes**: ADR-0008 / ADR-0015 / ADR-0020 / ADR-0021 的旧宿主决策
 
 ## Context
 
 Paper RAG 的领域内核已经覆盖论文发现、入库、混合检索、Agentic QA、拒答、引用校验、Wiki、
-交付物、反馈和主动能力。当前产品宿主是内嵌的 `integrations/deer-flow/`，它承担 Gateway、
-LangChain Tool、Agent Runtime、通用聊天入口、BetterAuth、LangGraph middleware 和监控等职责。
+交付物、反馈和主动能力。G5 后产品宿主收口到 DeepSeek Harness + MCP，旧 gateway、LangChain
+Tool、旧 Agent Runtime、通用聊天入口、BetterAuth、LangGraph middleware 和监控运行面已退役。
 
-后续产品目标改为本地单用户、Chat-first 的论文研究 Agent，而不是继续扩展多人 DeerFlow 平台。
+产品目标改为本地单用户、Chat-first 的论文研究 Agent，而不是继续扩展多人旧宿主平台。
 DeepSeek Harness 提供 Web、Session、Skill、Tool、审批和 Agent Runtime；MCP over stdio 适合作为
 宿主与 Python 领域内核之间的稳定协议边界。
 
@@ -42,35 +42,34 @@ DeepSeek Harness Web/Session/Agent
    和 Python 持久 receipt 防止 crash/reconnect/resume 重复副作用。
 6. DSH Session 只作为外层对话和工具轨迹权威，不作为论文 claim 证据。最终论文结论仍只来自
    当前 indexed chunks。
-7. G5 前保留 `integrations/deer-flow/` 作为 fallback，不删除旧宿主、旧测试或旧文档入口。
+7. G5 已删除旧宿主、旧测试和旧文档入口；回滚通过 `deepseek-harness-g5-pre-removal` tag 恢复宿主代码。
 
 ## Consequences
 
 ### Positive
 
 - 领域内核继续保持 Python 包边界，可被 DSH、Codex、Claude Code 或其他 MCP Client 复用。
-- 新产品入口更贴近本地研究助手，减少 DeerFlow gateway/auth/dashboard 相关运行面。
+- 新产品入口更贴近本地研究助手，减少旧 gateway/auth/dashboard 相关运行面。
 - 审批、凭据、Session、tool catalog 和写入幂等由迁移规格统一门禁验证。
-- G0-G5 分阶段迁移，G5 前可以回滚到 DeerFlow，不迁移或回滚 SQLite/Qdrant 主数据。
+- G0-G5 分阶段迁移；G5 后如需回滚宿主代码，仍不迁移或回滚 SQLite/Qdrant 主数据。
 
 ### Negative / Trade-offs
 
 - DeepSeek Harness 仍处 Developer Preview，必须 exact pin 版本并验证 compatible Cordis graph。
 - Native Broker 需要维护 DSH/Cordis API 适配、generation 生命周期和 exact catalog invariant。
 - 本地单用户边界不会自动提供 tenant-scoped corpus；shared corpus 语义必须在文档和测试中保持明确。
-- G4/G5 需要真实观察窗口和旧能力矩阵，迁移不能一次性删除 DeerFlow。
+- G4/G5 依赖 DSH smoke、clean checkout、旧能力矩阵和残留扫描，不执行真实写入论文库的 live smoke。
 
 ## Impact on Earlier ADRs
 
-以下 ADR 的历史内容保留，但其中关于 DeerFlow 作为长期产品宿主的决策进入待 supersede 状态：
+以下 ADR 的历史内容保留，但其中关于旧宿主作为长期产品宿主的决策进入 superseded 状态：
 
-- ADR-0008：DeerFlow LangChain Tool + Skill 集成边界将由 DSH Preset + Native Broker + private MCP 替代。
-- ADR-0015：DeerFlow Gateway / BetterAuth / HTTP 产品宿主决策将由本地 DSH Web + MCP 工具入口替代；SQLite/Qdrant 主数据不随宿主回滚。
-- ADR-0020：DeerFlow Gateway middleware 和观测栈属于旧宿主能力；仍适用的 timeout、redaction、metrics 要求迁移到 Broker/DSH/Gate。
-- ADR-0021：DeerFlow LangGraph middleware 加固属于旧 Agent Runtime；仍适用的 cost、latency、recursion、PII 能力迁移为 DSH/Broker 行为测试或被明确判定为 host-specific。
+- ADR-0008：旧 LangChain Tool + Skill 集成边界由 DSH Preset + Native Broker + private MCP 替代。
+- ADR-0015：旧 Gateway / BetterAuth / HTTP 产品宿主决策由本地 DSH Web + MCP 工具入口替代；SQLite/Qdrant 主数据不随宿主回滚。
+- ADR-0020：旧 Gateway middleware 和观测栈属于退役宿主能力；仍适用的 timeout、redaction、metrics 要求已迁移到 Broker/DSH/Gate。
+- ADR-0021：旧 LangGraph middleware 加固属于退役 Agent Runtime；仍适用的 cost、latency、recursion、PII 能力迁移为 DSH/Broker 行为测试或被明确判定为 host-specific。
 
-这些 ADR 只有在 G5 完成、DeerFlow 运行依赖被删除且替代 evidence 通过后，才从
-`pending supersede` 改为 `superseded`。
+G5 完成后，这些 ADR 从 `pending supersede` 改为 `superseded`。
 
 ## Gate Policy
 

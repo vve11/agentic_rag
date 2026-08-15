@@ -1,10 +1,10 @@
-# paper_rag — embeddable Python package (M8 / ADR-0015, hardened in M9)
+# paper_rag — embeddable Python package (DSH/MCP host, proactive sidecar ready)
 #
 # Role
 # ----
-# This Dockerfile is OPTIONAL. The primary integration with DeerFlow is via
-# the gateway container importing paper_rag as a sibling Python package
-# (PAPER_RAG_HOME env var) — see ../backend/Dockerfile.
+# This Dockerfile is OPTIONAL. The primary interactive entry point is
+# DeepSeek Harness + private MCP; this image is useful for standalone CLI,
+# pre-warming model caches, and proactive sidecar jobs.
 #
 # Use this image when:
 #   - You want a STANDALONE paper_rag CLI container (ingest scripts, calibration)
@@ -13,14 +13,14 @@
 #   - You want to run M9 proactive cron jobs (digest / stale) in a sidecar
 #     (MODE=proactive at runtime)
 #
-# It is NOT used in the default `make up` flow. Gateway gets paper_rag via
-# volume mount + sibling install. See docker/docker-compose.yaml.
+# It is NOT used by `make dsh-start`; the local DSH preset talks to the
+# repository checkout through the MCP adapter.
 #
 # Build matrix
 # ------------
 #   docker build -t paper-rag:lean              .                    # default, slim
 #   docker build -t paper-rag:bake --build-arg MODE=bake .            # pre-warm bge-m3
-#   docker build -t paper-rag:full --build-arg EXTRAS=deliver,deerflow .
+#   docker build -t paper-rag:full --build-arg EXTRAS=deliver,harness .
 #
 # Runtime modes (override CMD or set env PAPER_RAG_MODE)
 # ------------------------------------------------------

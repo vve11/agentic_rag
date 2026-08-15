@@ -19,7 +19,7 @@ def test_outer_resolved_question_is_authoritative(monkeypatch):
         explicit_paper_ids=("arxiv:flare",),
         conversation_id="thread-1",
         user_id="alice",
-        caller="deerflow",
+        caller="host",
     )
 
     out = resolver.resolve_query(ctx)

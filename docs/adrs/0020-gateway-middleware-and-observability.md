@@ -1,7 +1,7 @@
 # ADR-0020 · DeerFlow gateway 中间件栈与监控架构
 
 - **日期**: 2026-05-21
-- **状态**: accepted; pending supersede by ADR-0022 after G5
+- **状态**: superseded by ADR-0022 after G5
 - **关联**: ADR-0015（M8 服务化）/ ADR-0019（双 SQLite）
 
 ## Context
