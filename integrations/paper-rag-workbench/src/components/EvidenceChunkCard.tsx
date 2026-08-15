@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n";
 import type { EvidenceChunk } from "../types";
+import { PinEvidenceButton } from "./PinEvidenceButton";
 
 export function EvidenceChunkCard({
   chunk,
@@ -30,6 +31,7 @@ export function EvidenceChunkCard({
             {t("chunk.inspect", { id: chunk.chunk_id })}
           </button>
         ) : null}
+        <PinEvidenceButton chunk={chunk} />
       </footer>
     </article>
   );

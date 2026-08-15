@@ -256,3 +256,7 @@ export function useProjectContext(): ProjectContextValue {
   }
   return value;
 }
+
+export function useOptionalProjectContext(): ProjectContextValue | null {
+  return useContext(ProjectContext);
+}

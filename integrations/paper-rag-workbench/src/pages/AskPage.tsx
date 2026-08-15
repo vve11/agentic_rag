@@ -7,6 +7,7 @@ import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
 import { DshHandoffDialog } from "../components/DshHandoffDialog";
 import { EmptyState } from "../components/EmptyState";
 import { PaperDetailPanel } from "../components/PaperDetailPanel";
+import { useOptionalProjectContext } from "../context/ProjectContext";
 import { useI18n } from "../i18n";
 import type {
   ChunkDetailData,
@@ -20,6 +21,7 @@ import type {
 
 export function AskPage({ client }: { client: WorkbenchClient }) {
   const { t } = useI18n();
+  const project = useOptionalProjectContext();
   const [question, setQuestion] = useState("");
   const [paperIdsText, setPaperIdsText] = useState("");
   const [topK, setTopK] = useState(8);
@@ -31,6 +33,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
   const [paperDetail, setPaperDetail] = useState<PaperDetailData | null>(null);
   const [handoff, setHandoff] = useState<DshHandoffData | null>(null);
   const [streamState, setStreamState] = useState<QaStreamState | null>(null);
+  const [saveState, setSaveState] = useState<string | null>(null);
   const askRunRef = useRef(0);
 
   const ask = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -43,6 +46,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
     setChunkDetail(null);
     setPaperDetail(null);
     setHandoff(null);
+    setSaveState(null);
     setStreamState(null);
     setLoading(true);
     const paperIds = paperIdsText
@@ -130,6 +134,19 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
     }
   };
 
+  const saveAnswer = async () => {
+    if (!data || !project?.activeProjectId) return;
+    await project.saveQuestion({
+      question: question.trim(),
+      answer: data.answer,
+      citations: data.citations,
+      chunk_ids: data.chunks.map((chunk) => chunk.chunk_id),
+      trace_id: streamState?.answer.trace_id,
+      abstain: data.abstain,
+    });
+    setSaveState(t("workspace.savedAnswer"));
+  };
+
   const hasAnswerData = Boolean(data && (data.answer || data.chunks.length || streamState?.done));
 
   return (
@@ -185,7 +202,13 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
               <button type="button" onClick={sendToDsh}>
                 {t("ask.sendToDsh")}
               </button>
+              {project?.activeProjectId ? (
+                <button type="button" onClick={saveAnswer}>
+                  {t("workspace.saveAnswer")}
+                </button>
+              ) : null}
               {copyState ? <span className="muted">{copyState}</span> : null}
+              {saveState ? <span className="muted">{saveState}</span> : null}
             </div>
           ) : null}
           <AnswerPanel

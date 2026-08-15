@@ -7,12 +7,14 @@ export function PaperTable({
   onSearch,
   onSection,
   onInspect,
+  onAddProject,
 }: {
   papers: PaperSummary[];
   onAsk: (paper: PaperSummary) => void;
   onSearch: (paper: PaperSummary) => void;
   onSection: (paper: PaperSummary) => void;
   onInspect?: (paper: PaperSummary) => void;
+  onAddProject?: (paper: PaperSummary) => void;
 }) {
   const { t } = useI18n();
   if (papers.length === 0) {
@@ -73,6 +75,15 @@ export function PaperTable({
                     onClick={() => onInspect(paper)}
                   >
                     {t("paperTable.inspect")}
+                  </button>
+                ) : null}
+                {onAddProject ? (
+                  <button
+                    type="button"
+                    aria-label={t("paperTable.addProjectAria", { title: paper.title })}
+                    onClick={() => onAddProject(paper)}
+                  >
+                    {t("paperTable.addProject")}
                   </button>
                 ) : null}
               </td>

@@ -9,6 +9,8 @@ import { HealthPage } from "../pages/HealthPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { SearchPage } from "../pages/SearchPage";
+import { WorkspacePage } from "../pages/WorkspacePage";
+import { ProjectProvider } from "../context/ProjectContext";
 import { renderWithI18n } from "../test/render";
 
 describe("Overview and Library pages", () => {
@@ -194,5 +196,88 @@ describe("Overview and Library pages", () => {
     expect(await screen.findByText(/Understanding question/i)).toBeInTheDocument();
     expect(await screen.findByText(/decide when to retrieve/i)).toBeInTheDocument();
     expect(screen.getByText("chunk-self-rag-1")).toBeInTheDocument();
+  });
+
+  test("workspace page creates a project and generates project DSH handoff", async () => {
+    const user = userEvent.setup();
+    const client = createWorkbenchClient({ fixtureMode: true });
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <WorkspacePage />
+      </ProjectProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: /工作区/ })).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/项目名称/), "Scoped Notes 调研");
+    await user.click(screen.getByRole("button", { name: /创建项目/ }));
+
+    expect(await screen.findByText(/Scoped Notes 调研/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/^笔记$/), "local project note");
+    await user.click(screen.getByRole("button", { name: /保存笔记/ }));
+    expect(await screen.findByText(/local project note/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/DSH 任务/), "Compare methods.");
+    await user.click(screen.getByRole("button", { name: /发送项目到 DSH/ }));
+
+    expect(await screen.findByRole("dialog", { name: /发送到 DSH/ })).toBeInTheDocument();
+    expect(screen.getByText(/Compare methods/)).toBeInTheDocument();
+  });
+
+  test("library can add a paper to the active project", async () => {
+    const user = userEvent.setup();
+    const client = createWorkbenchClient({ fixtureMode: true });
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <LibraryPage client={client} />
+      </ProjectProvider>,
+    );
+
+    await waitForElementToBeRemoved(() => screen.queryByText(/正在加载论文库/));
+    await user.click(screen.getByRole("button", { name: /加入项目 self-rag/i }));
+
+    const detail = await client.project("project-self-rag");
+    expect(detail.papers.some((paper) => paper.paper_id === "arxiv:2310.11511")).toBe(true);
+    expect(await screen.findByText(/已加入当前项目/)).toBeInTheDocument();
+  });
+
+  test("search can pin evidence to the active project", async () => {
+    const user = userEvent.setup();
+    const client = createWorkbenchClient({ fixtureMode: true });
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <SearchPage client={client} />
+      </ProjectProvider>,
+    );
+
+    await user.type(screen.getByLabelText(/检索证据/), "reflection tokens");
+    await user.click(screen.getByRole("button", { name: /^检索$/ }));
+    await user.click(await screen.findByRole("button", { name: /钉选证据 chunk-self-rag-1/i }));
+
+    const detail = await client.project("project-self-rag");
+    expect(detail.evidence.some((pin) => pin.chunk_id === "chunk-self-rag-1")).toBe(true);
+    expect(await screen.findByText(/已钉选/)).toBeInTheDocument();
+  });
+
+  test("ask can save answer to the active project", async () => {
+    const user = userEvent.setup();
+    const client = createWorkbenchClient({ fixtureMode: true });
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <AskPage client={client} />
+      </ProjectProvider>,
+    );
+
+    await user.type(screen.getByLabelText(/问题/), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^提问$/ }));
+    await user.click(await screen.findByRole("button", { name: /保存问答/ }));
+
+    const detail = await client.project("project-self-rag");
+    expect(detail.saved_questions.some((saved) => saved.question === "What is Self-RAG?")).toBe(
+      true,
+    );
+    expect(await screen.findByText(/问答已保存/)).toBeInTheDocument();
   });
 });

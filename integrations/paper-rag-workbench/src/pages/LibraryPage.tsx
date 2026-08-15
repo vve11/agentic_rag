@@ -5,6 +5,7 @@ import { DshHandoffDialog } from "../components/DshHandoffDialog";
 import { EmptyState } from "../components/EmptyState";
 import { PaperDetailPanel } from "../components/PaperDetailPanel";
 import { PaperTable } from "../components/PaperTable";
+import { useOptionalProjectContext } from "../context/ProjectContext";
 import { useI18n } from "../i18n";
 import type {
   ChunkDetailData,
@@ -17,6 +18,7 @@ import type {
 
 export function LibraryPage({ client }: { client: WorkbenchClient }) {
   const { t } = useI18n();
+  const project = useOptionalProjectContext();
   const [papers, setPapers] = useState<PaperSummary[] | null>(null);
   const [filter, setFilter] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -105,6 +107,16 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
     );
   };
 
+  const addPaperToProject = async (paper: PaperSummary) => {
+    if (!project?.activeProjectId) return;
+    await project.addPaper({
+      paper_id: paper.paper_id,
+      title_snapshot: paper.title,
+      source: "library",
+    });
+    setMessage(t("workspace.addedPaper"));
+  };
+
   if (error) {
     return <EmptyState title={t("library.unavailable")} detail={error} />;
   }
@@ -131,6 +143,7 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
         onSearch={(paper) => setMessage(t("library.searchReady", { title: paper.title }))}
         onSection={openSection}
         onInspect={openPaperDetail}
+        onAddProject={project?.activeProjectId ? addPaperToProject : undefined}
       />
       {message ? <p className="inline-message">{message}</p> : null}
       {sectionPaper ? (

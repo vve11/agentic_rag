@@ -1,10 +1,21 @@
-import { Activity, BookOpen, Compass, Database, MessageSquare, Search, Sparkles } from "lucide-react";
+import {
+  Activity,
+  BookOpen,
+  Briefcase,
+  Compass,
+  Database,
+  MessageSquare,
+  Search,
+  Sparkles,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
+import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useI18n, type MessageKey } from "../i18n";
 
 const nav = [
   { id: "overview", labelKey: "nav.overview", icon: Database },
+  { id: "workspace", labelKey: "nav.workspace", icon: Briefcase },
   { id: "health", labelKey: "nav.health", icon: Activity },
   { id: "library", labelKey: "nav.library", icon: BookOpen },
   { id: "search", labelKey: "nav.search", icon: Search },
@@ -64,6 +75,7 @@ export function Shell({
             </button>
           ))}
         </nav>
+        <ProjectSwitcher />
       </aside>
       <section className="workspace">{children}</section>
     </main>
