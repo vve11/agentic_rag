@@ -34,6 +34,7 @@ const MCP_REQUEST_TIMEOUT_MS_BY_TOOL = Object.freeze({
 });
 const MCP_CHILD_ENV_ALLOWLIST = Object.freeze([
   "CHAT_MODEL",
+  "DEEPSEEK_BASE_URL",
   "FEEDBACK_SQLITE_PATH",
   "HOME",
   "OPENAI_BASE_URL",
@@ -613,6 +614,7 @@ export class PaperRagNativeBroker {
   }
 
   async #resolveCredentialEnv() {
+    /** @type {Record<string, string>} */
     const env = { ...this.childEnv };
     const secrets = [];
 
@@ -630,6 +632,19 @@ export class PaperRagNativeBroker {
 
       env[ref] = resolved.value;
       secrets.push(resolved.value);
+    }
+
+    if (!env.OPENAI_API_KEY && env.DEEPSEEK_API_KEY) {
+      env.OPENAI_API_KEY = env.DEEPSEEK_API_KEY;
+    }
+    if (!env.DEEPSEEK_API_KEY && env.OPENAI_API_KEY) {
+      env.DEEPSEEK_API_KEY = env.OPENAI_API_KEY;
+    }
+    if (!env.OPENAI_BASE_URL && env.DEEPSEEK_BASE_URL) {
+      env.OPENAI_BASE_URL = env.DEEPSEEK_BASE_URL;
+    }
+    if (!env.DEEPSEEK_BASE_URL && env.OPENAI_BASE_URL) {
+      env.DEEPSEEK_BASE_URL = env.OPENAI_BASE_URL;
     }
 
     this.#secrets = secrets;

@@ -18,6 +18,7 @@ import {
 } from "../src/broker.mjs";
 import {
   DEFAULT_MCP_ARGS,
+  credentialProviderForContext,
   paperRagApprovalService,
   registerPaperRagRequestBoundaryTracking,
   shouldAllowIsolatedBrokerApproval,
@@ -78,6 +79,24 @@ function credentials(value = "g0-secret-token") {
     },
     async resolve(ref) {
       return ref === "PAPER_RAG_TEST_TOKEN" ? { value: currentValue(), source: "test" } : undefined;
+    },
+  };
+}
+
+function namedCredentials(values = {}) {
+  return {
+    async describe(ref) {
+      return {
+        configured: typeof values[ref] === "string" && values[ref].length > 0,
+        writable: false,
+        source: "test",
+      };
+    },
+    async resolve(ref) {
+      const value = values[ref];
+      return typeof value === "string" && value.length > 0
+        ? { value, source: "test" }
+        : undefined;
     },
   };
 }
@@ -231,6 +250,17 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
 
   test("defaults the private Python child to the package MCP stdio entrypoint", () => {
     expect(DEFAULT_MCP_ARGS).toEqual(["-m", "paper_rag.mcp"]);
+  });
+
+  test("uses the DSH credentials service when the host context provides it", () => {
+    const service = namedCredentials({ OPENAI_API_KEY: "dsh-secret" });
+    const ctx = {
+      get(name) {
+        return name === "credentials" ? service : undefined;
+      },
+    };
+
+    expect(credentialProviderForContext(ctx)).toBe(service);
   });
 
   test("allows only isolated live smoke writes without DSH turn-scoped approval", async () => {
@@ -681,6 +711,28 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
     expect(redactSecrets("token=rotate-me-secret", ["rotate-me-secret"])).toBe(
       "token=[REDACTED]",
     );
+  });
+
+  test("aliases DeepSeek credentials into the OpenAI-compatible Paper RAG env", async () => {
+    const broker = await startBroker({
+      command: pythonFixtureCommand,
+      args: pythonFixtureArgs,
+      credentials: namedCredentials({ DEEPSEEK_API_KEY: "deepseek-secret" }),
+      credentialRefs: ["DEEPSEEK_API_KEY"],
+      childEnv: {
+        OPENAI_BASE_URL: "https://api.deepseek.com",
+        CHAT_MODEL: "deepseek-v4-flash",
+      },
+    });
+
+    const result = await broker.execute(
+      "paper_status",
+      { question: "deepseek alias check" },
+      createBrokerExec({ agentId: "agent-alias", callId: "call-alias" }),
+    );
+
+    expect(result.structuredContent.has_openai_credential).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("deepseek-secret");
   });
 
   test("does not inherit parent credential env without an explicit credential ref", async () => {

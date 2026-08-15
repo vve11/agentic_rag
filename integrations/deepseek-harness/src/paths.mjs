@@ -48,6 +48,12 @@ export function pathsFor(options = {}) {
 export function dshEnvironment(paths = pathsFor(), extra = {}) {
   return {
     ...process.env,
+    PAPER_RAG_CONFIG:
+      process.env.PAPER_RAG_CONFIG ?? join(paths.repoRoot, "config/local.yaml"),
+    OPENAI_BASE_URL:
+      process.env.OPENAI_BASE_URL ?? process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
+    CHAT_MODEL: process.env.CHAT_MODEL ?? "deepseek-v4-flash",
+    SMALL_MODEL: process.env.SMALL_MODEL ?? process.env.CHAT_MODEL ?? "deepseek-v4-flash",
     DSH_HOME: paths.dshHome,
     DSH_TELEMETRY_DISABLED: "1",
     DSH_TELEMETRY_MODE: "DISABLED",

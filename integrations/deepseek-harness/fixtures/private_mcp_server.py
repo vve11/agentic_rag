@@ -255,6 +255,7 @@ def call_tool(params: dict[str, Any]) -> dict[str, Any]:
             "received_arguments": args,
             "received_meta": meta,
             "has_test_credential": bool(os.environ.get("PAPER_RAG_TEST_TOKEN")),
+            "has_openai_credential": bool(os.environ.get("OPENAI_API_KEY")),
             "citations": ["chunk:c1"] if tool_name == "paper_qa" else [],
         }
         return {

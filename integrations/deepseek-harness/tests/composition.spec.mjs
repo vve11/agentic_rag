@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { auditDshConfigDump } from "../src/config-audit.mjs";
-import { pathsFor } from "../src/paths.mjs";
+import { dshEnvironment, pathsFor } from "../src/paths.mjs";
 import { discoverPaperResearchPreset } from "../src/preset-discovery.mjs";
 import { buildG0CompatReport } from "../src/report.mjs";
 import { withRuntimeLock } from "../src/runtime-lock.mjs";
@@ -36,6 +36,15 @@ describe("repo-local DeepSeek Harness runtime", () => {
       join(repoRoot, "data/runtime/deepseek-harness/credentials/.credentials.yaml"),
     );
     expect(paths.credentialsPath.startsWith(paths.dshHome)).toBe(false);
+  });
+
+  test("defaults the local web runtime to the local Paper RAG config", () => {
+    const paths = pathsFor({ integrationRoot });
+
+    expect(dshEnvironment(paths).PAPER_RAG_CONFIG).toBe(
+      join(repoRoot, "config/local.yaml"),
+    );
+    expect(dshEnvironment(paths).CHAT_MODEL).toBe("deepseek-v4-flash");
   });
 
   test("syncs the paper-research preset into DSH_HOME user presets", async () => {

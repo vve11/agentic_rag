@@ -7,7 +7,7 @@ import {
   registerPaperRagNativeTools,
 } from "./broker.mjs";
 
-const DEFAULT_CREDENTIAL_REFS = Object.freeze(["OPENAI_API_KEY"]);
+const DEFAULT_CREDENTIAL_REFS = Object.freeze(["OPENAI_API_KEY", "DEEPSEEK_API_KEY"]);
 export const DEFAULT_MCP_ARGS = Object.freeze(["-m", "paper_rag.mcp"]);
 const ISOLATED_APPROVAL_MODE = "isolated";
 const LIVE_SMOKE_WRITE_TOOLS = new Set([
@@ -17,7 +17,11 @@ const LIVE_SMOKE_WRITE_TOOLS = new Set([
 ]);
 
 export const name = "paper-rag-native-broker";
-export const inject = ["tools"];
+export const inject = ["tools", "credentials"];
+
+export function credentialProviderForContext(ctx) {
+  return ctx?.get?.("credentials") ?? environmentCredentialProvider();
+}
 
 export function registerPaperRagRequestBoundaryTracking(ctx, broker) {
   if (typeof ctx?.on !== "function") {
@@ -87,7 +91,7 @@ export async function apply(ctx) {
     command: process.env.PAPER_RAG_MCP_COMMAND ?? join(repoRoot, ".venv/bin/python"),
     args: parseJsonArrayEnv("PAPER_RAG_MCP_ARGS", DEFAULT_MCP_ARGS),
     cwd: repoRoot,
-    credentials: environmentCredentialProvider(),
+    credentials: credentialProviderForContext(ctx),
     credentialRefs: parseJsonArrayEnv("PAPER_RAG_MCP_CREDENTIAL_REFS", DEFAULT_CREDENTIAL_REFS),
     childEnv: buildPaperRagMcpChildEnv({
       repoRoot,
