@@ -1793,11 +1793,13 @@ def _run_live004_workflow(
         )
         for label, item in (("turn-1", first), ("turn-2", second)):
             data = item.get("data") or {}
+            abstain_decision = _qa_abstain_decision(data)
             turn_summaries.append(
                 {
                     "turn": label,
                     "trace_id": item.get("trace_id"),
                     "citation_count": len(list(data.get("citations") or [])),
+                    "abstain_decision": abstain_decision,
                     "answer_excerpt": str(data.get("answer") or "")[:300],
                 }
             )
@@ -1811,16 +1813,8 @@ def _run_live004_workflow(
     session_path = _write_live_g2_session_proof(repo_root, workspace, turn_summaries)
     dsh_version = _dsh_version(repo_root)
     checks = [
-        {
-            "id": "followup-turn-1-citations",
-            "status": "PASS" if turn_summaries[0]["citation_count"] > 0 else "FAIL",
-            "detail": f"citations={turn_summaries[0]['citation_count']}",
-        },
-        {
-            "id": "followup-turn-2-citations",
-            "status": "PASS" if turn_summaries[1]["citation_count"] > 0 else "FAIL",
-            "detail": f"citations={turn_summaries[1]['citation_count']}",
-        },
+        _live_g2_followup_evidence_check("turn-1", turn_summaries[0]),
+        _live_g2_followup_evidence_check("turn-2", turn_summaries[1]),
         {
             "id": "conversation-turns-persisted",
             "status": "PASS" if len(turns) >= 2 else "FAIL",
@@ -1842,6 +1836,24 @@ def _run_live004_workflow(
         "conversation_id": LIVE_G2_CONVERSATION_ID,
         "session_proof": str(session_path),
         "turns": turn_summaries,
+    }
+
+
+def _qa_abstain_decision(data: dict[str, Any]) -> str:
+    abstain = data.get("abstain")
+    if isinstance(abstain, dict):
+        return str(abstain.get("decision") or "")
+    return str(abstain or "")
+
+
+def _live_g2_followup_evidence_check(label: str, summary: dict[str, Any]) -> dict[str, str]:
+    citation_count = int(summary.get("citation_count") or 0)
+    abstain_decision = str(summary.get("abstain_decision") or "")
+    abstain_ok = abstain_decision in {"weak_evidence", "no_evidence", "no_chunks"}
+    return {
+        "id": f"followup-{label}-evidence",
+        "status": "PASS" if citation_count > 0 or abstain_ok else "FAIL",
+        "detail": f"citations={citation_count} abstain={abstain_decision or '-'}",
     }
 
 

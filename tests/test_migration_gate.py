@@ -1236,6 +1236,74 @@ def test_live_g2_artifact_validation_allows_zero_citations_when_file_opens(tmp_p
     }
 
 
+def test_live004_followup_accepts_explicit_no_evidence_abstain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    workspace = migration_gate.LiveG2Workspace(
+        work_root=tmp_path / "work",
+        data_root=tmp_path / "work/data",
+        index_root=tmp_path / "work/data/index",
+        artifact_root=tmp_path / "work/artifacts",
+        import_root=tmp_path / "work/imports",
+        dsh_home=tmp_path / "work/runtime/deepseek-harness/versions/0.1.0-rc.6/dsh-home",
+        config_path=tmp_path / "work/config.live-g2.yaml",
+        feedback_path=tmp_path / "work/data/index/feedback.sqlite",
+    )
+    workspace.dsh_home.mkdir(parents=True)
+    calls: list[str] = []
+
+    monkeypatch.setattr(migration_gate, "_live_g2_mcp_context", lambda *args, **kwargs: object())
+    monkeypatch.setattr(migration_gate, "_dsh_version", lambda repo_root: "0.1.0-rc.6")
+
+    from paper_rag.rag import conversation_turn_store
+
+    monkeypatch.setattr(
+        conversation_turn_store,
+        "recent_turns",
+        lambda **kwargs: [{"turn": 1}, {"turn": 2}],
+    )
+
+    def fake_mcp_call(name, args, ctx):
+        del ctx
+        assert name == "paper_qa"
+        calls.append(args["question"])
+        if len(calls) == 1:
+            return {
+                "structuredContent": {
+                    "ok": True,
+                    "tool": "paper_qa",
+                    "trace_id": "trace-1",
+                    "data": {
+                        "answer": "Cited answer",
+                        "citations": ["chunk-1"],
+                        "abstain": {"decision": "answer"},
+                    },
+                }
+            }
+        return {
+            "structuredContent": {
+                "ok": True,
+                "tool": "paper_qa",
+                "trace_id": "trace-2",
+                "data": {
+                    "answer": "No indexed evidence supports this follow-up.",
+                    "citations": [],
+                    "abstain": {"decision": "no_evidence"},
+                },
+            }
+        }
+
+    monkeypatch.setattr(migration_gate, "_mcp_call", fake_mcp_call)
+
+    result = migration_gate._run_live004_workflow(tmp_path, workspace, {}, "paper-1")
+
+    checks = {check["id"]: check for check in result["checks"]}
+    assert checks["followup-turn-1-evidence"]["status"] == "PASS"
+    assert checks["followup-turn-2-evidence"]["status"] == "PASS"
+    assert "abstain=no_evidence" in checks["followup-turn-2-evidence"]["detail"]
+    assert result["turns"][1]["abstain_decision"] == "no_evidence"
+
+
 def test_live001_summary_requires_paper_qa_citation_and_abstain():
     events = [
         {
