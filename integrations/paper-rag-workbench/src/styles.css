@@ -188,6 +188,33 @@ textarea {
   color: #4d5965;
 }
 
+.status-pill {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 650;
+  min-height: 28px;
+  padding: 4px 10px;
+  width: max-content;
+}
+
+.status-pill.healthy {
+  background: #e6f4ea;
+  color: #17663a;
+}
+
+.status-pill.degraded,
+.status-pill.fallback {
+  background: #fff4d6;
+  color: #7a5200;
+}
+
+.status-pill.blocked {
+  background: #fdecec;
+  color: #9b1c1c;
+}
+
 .filter-field {
   display: grid;
   gap: 6px;
@@ -306,6 +333,84 @@ textarea {
 .panel {
   margin-bottom: 16px;
   padding: 16px;
+}
+
+.health-summary {
+  background: #ffffff;
+  border: 1px solid #dde4eb;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.health-summary > header,
+.diagnostic-card header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.health-summary h3,
+.diagnostic-card h3 {
+  margin: 0;
+}
+
+.warning-banner {
+  background: #fff4d6;
+  border: 1px solid #d7b65f;
+  border-radius: 8px;
+  color: #7a5200;
+  margin: 12px 0;
+  padding: 12px 14px;
+}
+
+.warning-banner p {
+  margin: 0;
+}
+
+.diagnostic-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.diagnostic-card {
+  background: #ffffff;
+  border: 1px solid #dde4eb;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.diagnostic-card dl {
+  display: grid;
+  gap: 6px 12px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin: 14px 0 0;
+}
+
+.diagnostic-card dt {
+  color: #66717c;
+}
+
+.diagnostic-card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.quality-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.quality-table th,
+.quality-table td {
+  border-bottom: 1px solid #dde4eb;
+  overflow-wrap: anywhere;
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: top;
 }
 
 .form-grid {

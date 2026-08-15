@@ -5,6 +5,7 @@ import { describe, expect, test, vi } from "vitest";
 import { createWorkbenchClient } from "../api/client";
 import { AskPage } from "../pages/AskPage";
 import { DiscoverPage } from "../pages/DiscoverPage";
+import { HealthPage } from "../pages/HealthPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { SearchPage } from "../pages/SearchPage";
@@ -18,7 +19,7 @@ describe("Overview and Library pages", () => {
     expect(screen.getByRole("heading", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByText("8")).toBeInTheDocument();
     expect(screen.getByText("345")).toBeInTheDocument();
-    expect(screen.getByText("deepseek-v4-flash")).toBeInTheDocument();
+    expect(screen.getAllByText("deepseek-v4-flash").length).toBeGreaterThan(0);
     expect(screen.getByText("Configured")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open dsh chat/i })).toHaveAttribute(
       "href",
@@ -99,5 +100,15 @@ describe("Overview and Library pages", () => {
         }),
       }),
     );
+  });
+
+  test("health page loads index diagnostics", async () => {
+    render(<HealthPage client={createWorkbenchClient({ fixtureMode: true })} />);
+
+    await waitForElementToBeRemoved(() => screen.queryByText(/loading health/i));
+
+    expect(screen.getByRole("heading", { name: "Health" })).toBeInTheDocument();
+    expect(screen.getByText(/Dense retrieval is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/345/)).toBeInTheDocument();
   });
 });

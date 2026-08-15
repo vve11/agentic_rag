@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 
 import { EmptyState } from "../components/EmptyState";
+import { HealthSummary } from "../components/HealthSummary";
 import { StatusBadge } from "../components/StatusBadge";
-import type { StatusData, WorkbenchClient } from "../types";
+import type { IndexHealthData, StatusData, WorkbenchClient } from "../types";
 
 export function OverviewPage({ client }: { client: WorkbenchClient }) {
   const [data, setData] = useState<StatusData | null>(null);
+  const [health, setHealth] = useState<IndexHealthData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,6 +28,21 @@ export function OverviewPage({ client }: { client: WorkbenchClient }) {
         setError(reason instanceof Error ? reason.message : "Corpus status is unavailable.");
       });
 
+    return () => {
+      active = false;
+    };
+  }, [client]);
+
+  useEffect(() => {
+    let active = true;
+    client
+      .indexHealth()
+      .then((next) => {
+        if (active) setHealth(next);
+      })
+      .catch(() => {
+        if (active) setHealth(null);
+      });
     return () => {
       active = false;
     };
@@ -72,6 +89,7 @@ export function OverviewPage({ client }: { client: WorkbenchClient }) {
           </StatusBadge>
         </article>
       </section>
+      {health ? <HealthSummary data={health} /> : null}
     </>
   );
 }

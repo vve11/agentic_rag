@@ -1,8 +1,9 @@
-import { BookOpen, Compass, Database, MessageSquare, Search, Sparkles } from "lucide-react";
+import { Activity, BookOpen, Compass, Database, MessageSquare, Search, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 
 const nav = [
   { id: "overview", label: "Overview", icon: Database },
+  { id: "health", label: "Health", icon: Activity },
   { id: "library", label: "Library", icon: BookOpen },
   { id: "search", label: "Search", icon: Search },
   { id: "ask", label: "Ask", icon: MessageSquare },

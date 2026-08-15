@@ -4,6 +4,7 @@ import { createWorkbenchClient } from "./api/client";
 import { Shell, type RouteId } from "./components/Shell";
 import { AskPage } from "./pages/AskPage";
 import { DiscoverPage } from "./pages/DiscoverPage";
+import { HealthPage } from "./pages/HealthPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { SearchPage } from "./pages/SearchPage";
@@ -14,6 +15,7 @@ export function App() {
 
   return (
     <Shell active={route} onNavigate={setRoute}>
+      {route === "health" ? <HealthPage client={client} /> : null}
       {route === "library" ? <LibraryPage client={client} /> : null}
       {route === "search" ? <SearchPage client={client} /> : null}
       {route === "ask" ? <AskPage client={client} /> : null}

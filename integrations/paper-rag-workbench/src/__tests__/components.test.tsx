@@ -7,7 +7,10 @@ import { AnswerPanel } from "../components/AnswerPanel";
 import { CandidateTable } from "../components/CandidateTable";
 import { CitationChips } from "../components/CitationChips";
 import { EvidenceChunkCard } from "../components/EvidenceChunkCard";
+import { HealthSummary } from "../components/HealthSummary";
 import { PaperTable } from "../components/PaperTable";
+import { QualityIssueTable } from "../components/QualityIssueTable";
+import { indexHealthFixture } from "../api/fixtures";
 import type { PaperSummary } from "../types";
 
 describe("PaperTable", () => {
@@ -127,5 +130,24 @@ describe("Discovery approval components", () => {
     expect(screen.getByText(/candidate ids: 11/i)).toBeInTheDocument();
     expect(screen.getByText(/write indexed paper and chunks/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /approve ingest/i })).toBeInTheDocument();
+  });
+});
+
+describe("Health diagnostics components", () => {
+  test("health summary distinguishes degraded services", () => {
+    render(<HealthSummary data={indexHealthFixture} />);
+
+    expect(screen.getByRole("heading", { name: /index health/i })).toBeInTheDocument();
+    expect(screen.getByText(/degraded/i)).toBeInTheDocument();
+    expect(screen.getByText(/sparse fallback/i)).toBeInTheDocument();
+    expect(screen.getByText("deepseek-v4-flash")).toBeInTheDocument();
+  });
+
+  test("quality issue table shows duplicate and parser samples", () => {
+    render(<QualityIssueTable samples={indexHealthFixture.corpus_quality.samples} />);
+
+    expect(screen.getByText(/duplicate_chunk/i)).toBeInTheDocument();
+    expect(screen.getByText(/parser_artifact/i)).toBeInTheDocument();
+    expect(screen.getByText(/05e56a78/)).toBeInTheDocument();
   });
 });
