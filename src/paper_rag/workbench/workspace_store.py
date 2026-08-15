@@ -204,6 +204,12 @@ class WorkspaceStore:
         now = _now()
         note_id = note_id or _new_id("note")
         with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT project_id FROM notes WHERE note_id = ?",
+                (note_id,),
+            ).fetchone()
+            if existing is not None and existing["project_id"] != project_id:
+                raise ValueError(f"Note {note_id} does not belong to project {project_id}")
             conn.execute(
                 """
                 INSERT INTO notes
@@ -223,9 +229,9 @@ class WorkspaceStore:
                 """
                 SELECT note_id, project_id, target_type, target_id, body, created_at, updated_at
                 FROM notes
-                WHERE note_id = ?
+                WHERE project_id = ? AND note_id = ?
                 """,
-                (note_id,),
+                (project_id, note_id),
             ).fetchone()
         return _note_from_row(row)
 
@@ -239,6 +245,7 @@ class WorkspaceStore:
         trace_id: str | None = None,
         abstain: object | None = None,
         context_policy: object | None = None,
+        citation_papers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         self._require_project(project_id)
         question_id = _new_id("question")
@@ -249,9 +256,10 @@ class WorkspaceStore:
                 INSERT INTO saved_questions
                     (
                         question_id, project_id, question, answer, citations_json,
-                        chunk_ids_json, trace_id, abstain_json, context_policy_json, created_at
+                        chunk_ids_json, trace_id, abstain_json, context_policy_json,
+                        citation_papers_json, created_at
                     )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     question_id,
@@ -263,6 +271,7 @@ class WorkspaceStore:
                     trace_id,
                     _json_dumps(abstain),
                     _json_dumps(context_policy),
+                    _json_dumps(citation_papers or {}),
                     now,
                 ),
             )
@@ -270,7 +279,8 @@ class WorkspaceStore:
             row = conn.execute(
                 """
                 SELECT question_id, project_id, question, answer, citations_json,
-                       chunk_ids_json, trace_id, abstain_json, context_policy_json, created_at
+                       chunk_ids_json, trace_id, abstain_json, context_policy_json,
+                       citation_papers_json, created_at
                 FROM saved_questions
                 WHERE question_id = ?
                 """,
@@ -323,7 +333,8 @@ class WorkspaceStore:
                 for row in conn.execute(
                     """
                     SELECT question_id, project_id, question, answer, citations_json,
-                           chunk_ids_json, trace_id, abstain_json, context_policy_json, created_at
+                           chunk_ids_json, trace_id, abstain_json, context_policy_json,
+                           citation_papers_json, created_at
                     FROM saved_questions
                     WHERE project_id = ?
                     ORDER BY created_at DESC
@@ -402,6 +413,14 @@ class WorkspaceStore:
         selected_paper_ids = paper_ids or [
             paper["paper_id"] for paper in self.build_project_snapshot(project_id)["papers"]
         ]
+        project_paper_ids = {
+            paper["paper_id"] for paper in self.build_project_snapshot(project_id)["papers"]
+        }
+        unknown_paper_ids = [
+            paper_id for paper_id in selected_paper_ids if paper_id not in project_paper_ids
+        ]
+        if unknown_paper_ids:
+            raise ValueError(f"Papers not in project: {', '.join(unknown_paper_ids)}")
         selected_dimensions = dimensions or ["method", "limitation"]
         run_id = _new_id("compare")
         now = _now()
@@ -592,6 +611,7 @@ class WorkspaceStore:
                     trace_id TEXT,
                     abstain_json TEXT,
                     context_policy_json TEXT,
+                    citation_papers_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (project_id) REFERENCES projects(project_id)
                 );
@@ -633,6 +653,12 @@ class WorkspaceStore:
                 );
                 """
             )
+            _ensure_column(
+                conn,
+                "saved_questions",
+                "citation_papers_json",
+                "TEXT NOT NULL DEFAULT '{}'",
+            )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -651,6 +677,15 @@ class WorkspaceStore:
         for pin in snapshot["evidence"]:
             evidence_by_paper.setdefault(pin["paper_id"], []).append(pin)
 
+        saved_citations_by_paper: dict[str, list[str]] = {}
+        selected_paper_ids = set(paper_ids)
+        for question in snapshot["saved_questions"]:
+            citation_papers = question.get("citation_papers") or {}
+            for chunk_id in question.get("chunk_ids") or question.get("citations") or []:
+                paper_id = citation_papers.get(chunk_id)
+                if paper_id in selected_paper_ids:
+                    saved_citations_by_paper.setdefault(paper_id, []).append(chunk_id)
+
         notes_by_paper: dict[str, list[dict[str, Any]]] = {}
         notes_by_chunk: dict[str, list[dict[str, Any]]] = {}
         for note in snapshot["notes"]:
@@ -662,7 +697,10 @@ class WorkspaceStore:
         cells: list[dict[str, Any]] = []
         for paper_id in paper_ids:
             pins = evidence_by_paper.get(paper_id, [])
-            chunk_ids = [pin["chunk_id"] for pin in pins]
+            chunk_ids = _dedupe_preserve_order(
+                [pin["chunk_id"] for pin in pins]
+                + saved_citations_by_paper.get(paper_id, [])
+            )
             note_ids = [note["note_id"] for note in notes_by_paper.get(paper_id, [])]
             for chunk_id in chunk_ids:
                 note_ids.extend(note["note_id"] for note in notes_by_chunk.get(chunk_id, []))
@@ -672,6 +710,9 @@ class WorkspaceStore:
                     first_quote = pins[0].get("quote_snapshot") or pins[0]["chunk_id"]
                     summary = f"Evidence pinned for {dimension}: {first_quote}"
                     confidence = "evidence_backed"
+                elif chunk_ids:
+                    summary = f"Saved QA citation for {dimension}: {chunk_ids[0]}"
+                    confidence = "partial"
                 else:
                     summary = "No pinned evidence"
                     confidence = "missing"
@@ -837,6 +878,7 @@ def _question_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "trace_id": row["trace_id"],
         "abstain": _json_loads(row["abstain_json"], None),
         "context_policy": _json_loads(row["context_policy_json"], None),
+        "citation_papers": _json_loads(row["citation_papers_json"], {}),
         "created_at": row["created_at"],
     }
 
@@ -863,6 +905,31 @@ def _json_loads(value: str | None, default: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return default
+
+
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    definition: str,
+) -> None:
+    columns = {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
 
 
 def _new_id(prefix: str) -> str:

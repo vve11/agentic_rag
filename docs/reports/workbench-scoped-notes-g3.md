@@ -13,16 +13,17 @@ Go.
   restriction.
 - Rendered paper citations and user note references separately in the answer
   panel.
-- Saved scoped QA results with the context policy used for the answer.
+- Saved scoped QA results with the context policy used for the answer and a
+  citation-to-paper mapping for later project compare reuse.
 
 ## Verification
 
-- `.venv/bin/python -m pytest tests/test_workbench_workspace_store.py tests/test_workbench_api.py -q`: PASS, 27 tests.
-- `pnpm --dir integrations/paper-rag-workbench test`: PASS, 49 tests.
+- `.venv/bin/python -m pytest tests/test_workbench_workspace_store.py tests/test_workbench_api.py -q`: PASS, 30 tests.
+- `pnpm --dir integrations/paper-rag-workbench test`: PASS, 53 tests.
 - `pnpm --dir integrations/paper-rag-workbench build`: PASS.
 - `VITE_WORKBENCH_FIXTURES=1 pnpm --dir integrations/paper-rag-workbench playwright`: PASS, 1 test.
 - `.venv/bin/python scripts/secret_scan.py`: PASS, clean.
-- `git status --short --branch`: clean before this report.
+- `git status --short --branch`: clean at final audit.
 
 ## Read-Only Live Smoke
 

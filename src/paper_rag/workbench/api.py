@@ -295,6 +295,7 @@ def create_app(
                 trace_id=payload.trace_id,
                 abstain=payload.abstain,
                 context_policy=payload.context_policy,
+                citation_papers=payload.citation_papers,
             )
         except KeyError as exc:
             raise _http_error(404, "NOT_FOUND", str(exc)) from exc
@@ -322,6 +323,8 @@ def create_app(
             )
         except KeyError as exc:
             raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        except ValueError as exc:
+            raise _http_error(400, "BAD_REQUEST", str(exc)) from exc
         return {"run": run}
 
     @app.get("/api/projects/{project_id}/compare-runs")

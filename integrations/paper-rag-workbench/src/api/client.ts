@@ -67,13 +67,27 @@ export function createWorkbenchClient(
     if (!response.ok) throw new Error(`GET ${path} failed with ${response.status}`);
     return response.json() as Promise<T>;
   };
+  const requestError = async (method: string, path: string, response: Response) => {
+    let suffix = "";
+    try {
+      const payload = await response.json();
+      const message =
+        payload?.detail?.error?.message ??
+        payload?.detail?.message ??
+        payload?.message;
+      if (message) suffix = `: ${message}`;
+    } catch {
+      // Error bodies may be empty or non-JSON.
+    }
+    return new Error(`${method} ${path} failed with ${response.status}${suffix}`);
+  };
   const post = async <T>(path: string, body: unknown): Promise<T> => {
     const response = await fetchImpl(`${baseUrl}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!response.ok) return response.json() as Promise<T>;
+    if (!response.ok) throw await requestError("POST", path, response);
     return response.json() as Promise<T>;
   };
   const patch = async <T>(path: string, body: unknown): Promise<T> => {
@@ -82,7 +96,7 @@ export function createWorkbenchClient(
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!response.ok) return response.json() as Promise<T>;
+    if (!response.ok) throw await requestError("PATCH", path, response);
     return response.json() as Promise<T>;
   };
   const fixtureProjectList = (): ProjectSummary[] =>
@@ -367,6 +381,7 @@ export function createWorkbenchClient(
         answer: input.answer,
         citations: input.citations,
         chunk_ids: input.chunk_ids,
+        citation_papers: input.citation_papers ?? {},
         trace_id: input.trace_id ?? null,
         abstain: input.abstain,
         context_policy: input.context_policy ?? null,

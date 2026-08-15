@@ -682,11 +682,34 @@ textarea {
   padding: 8px 0;
 }
 
-.chunk-list button {
+.chunk-list-item > button {
   display: grid;
   gap: 6px;
   text-align: left;
   width: 100%;
+}
+
+.chunk-list-item {
+  border-bottom: 1px solid #e6ebf0;
+  display: grid;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.chunk-list-item:last-child {
+  border-bottom: 0;
+}
+
+.chunk-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(130px, max-content) minmax(220px, 1fr);
+}
+
+.paper-detail-actions {
+  border-top: 1px solid #e6ebf0;
+  margin-top: 12px;
+  padding-top: 12px;
 }
 
 .chunk-full-text {

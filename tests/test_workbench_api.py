@@ -863,3 +863,30 @@ def test_compare_dsh_handoff_previews_prompt_without_calling_tools(tmp_path):
     assert "Compare run" in payload["prompt"]
     assert "chunk-self-rag-1" in payload["prompt"]
     assert calls == []
+
+
+def test_compare_api_rejects_out_of_project_papers(tmp_path):
+    from paper_rag.workbench.api import create_app
+    from paper_rag.workbench.workspace_store import WorkspaceStore
+
+    store = WorkspaceStore(tmp_path / "state.sqlite")
+    project = store.create_project("RAG Compare")
+    store.add_project_paper(project["project_id"], "arxiv:2310.11511", "Self-RAG", "library")
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *_args: {},
+            workspace_store=store,
+        )
+    )
+
+    response = client.post(
+        f"/api/projects/{project['project_id']}/compare",
+        json={
+            "paper_ids": ["arxiv:2310.11511", "arxiv:outside"],
+            "dimensions": ["method"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["code"] == "BAD_REQUEST"

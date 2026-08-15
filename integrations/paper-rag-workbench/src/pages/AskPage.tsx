@@ -155,11 +155,15 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
 
   const saveAnswer = async () => {
     if (!data || !project?.activeProjectId) return;
+    const citationPapers = Object.fromEntries(
+      data.chunks.map((chunk) => [chunk.chunk_id, chunk.paper_id]),
+    );
     await project.saveQuestion({
       question: question.trim(),
       answer: data.answer,
       citations: data.citations,
       chunk_ids: data.chunks.map((chunk) => chunk.chunk_id),
+      citation_papers: citationPapers,
       trace_id: streamState?.answer.trace_id,
       abstain: data.abstain,
       context_policy: data.context_policy ?? lastContextPolicy,

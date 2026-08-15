@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { CompareMatrix } from "../components/CompareMatrix";
 import { DshHandoffDialog } from "../components/DshHandoffDialog";
@@ -20,6 +20,7 @@ export function ComparePage({ client }: { client: WorkbenchClient }) {
   const { t } = useI18n();
   const { activeProject, activeProjectId, refreshActiveProject } = useProjectContext();
   const [selectedDimensions, setSelectedDimensions] = useState<string[]>([]);
+  const [selectedPaperIds, setSelectedPaperIds] = useState<string[]>([]);
   const [run, setRun] = useState<CompareRun | null>(null);
   const [handoff, setHandoff] = useState<DshHandoffData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,11 +33,23 @@ export function ComparePage({ client }: { client: WorkbenchClient }) {
     );
   };
 
+  useEffect(() => {
+    setSelectedPaperIds(activeProject?.papers.map((paper) => paper.paper_id) ?? []);
+  }, [activeProject?.project.project_id, activeProject?.papers]);
+
+  const togglePaper = (paperId: string) => {
+    setSelectedPaperIds((current) =>
+      current.includes(paperId)
+        ? current.filter((item) => item !== paperId)
+        : [...current, paperId],
+    );
+  };
+
   const createCompare = async () => {
     if (!activeProjectId || !activeProject) return;
     setError(null);
     const result = await client.createCompareRun(activeProjectId, {
-      paper_ids: activeProject.papers.map((paper) => paper.paper_id),
+      paper_ids: selectedPaperIds,
       dimensions: selectedDimensions.length ? selectedDimensions : ["method"],
     });
     setRun(result.run);
@@ -76,16 +89,21 @@ export function ComparePage({ client }: { client: WorkbenchClient }) {
           </fieldset>
           <section>
             <h3>{t("compare.papers")}</h3>
-            <ul className="plain-list">
+            <div className="checkbox-grid">
               {activeProject.papers.map((paper) => (
-                <li key={paper.paper_id}>
-                  <code>{paper.paper_id}</code>
+                <label key={paper.paper_id}>
+                  <input
+                    type="checkbox"
+                    checked={selectedPaperIds.includes(paper.paper_id)}
+                    onChange={() => togglePaper(paper.paper_id)}
+                  />
                   <span>{paper.title_snapshot}</span>
-                </li>
+                  <code>{paper.paper_id}</code>
+                </label>
               ))}
-            </ul>
+            </div>
           </section>
-          <button type="button" onClick={createCompare}>
+          <button type="button" onClick={createCompare} disabled={!selectedPaperIds.length}>
             {t("compare.run")}
           </button>
         </section>

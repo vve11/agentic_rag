@@ -412,6 +412,9 @@ export const projectDetailFixture: ProjectDetail = {
       answer: qaFixture.data!.answer,
       citations: qaFixture.data!.citations,
       chunk_ids: qaFixture.data!.chunks.map((chunk) => chunk.chunk_id),
+      citation_papers: Object.fromEntries(
+        qaFixture.data!.chunks.map((chunk) => [chunk.chunk_id, chunk.paper_id]),
+      ),
       trace_id: "trace-workbench-fixture",
       abstain: { decision: "answer" },
       context_policy: null,

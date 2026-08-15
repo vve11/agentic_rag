@@ -12,16 +12,23 @@ Go.
 - Added a Chinese-first Workspace UI, active project switcher, add-to-project
   actions, evidence pinning, project notes, saved QA results, and project DSH
   handoff.
+- Added cross-page project actions on Library, Search, and Paper Detail so
+  papers, paper notes, chunk notes, and pinned evidence can be captured without
+  leaving the research flow.
+- Hardened project state isolation: updating an existing note from a different
+  project now fails instead of silently reassigning it.
+- Hardened Workbench API client writes so failed POST/PATCH responses reject
+  instead of being treated as successful data.
 - Kept DSH optional and prompt-only; no DSH private session internals are used.
 
 ## Verification
 
-- `.venv/bin/python -m pytest tests/test_workbench_workspace_store.py tests/test_workbench_api.py -q`: PASS, 20 tests.
-- `pnpm --dir integrations/paper-rag-workbench test`: PASS, 42 tests.
+- `.venv/bin/python -m pytest tests/test_workbench_workspace_store.py tests/test_workbench_api.py -q`: PASS, 30 tests.
+- `pnpm --dir integrations/paper-rag-workbench test`: PASS, 53 tests.
 - `pnpm --dir integrations/paper-rag-workbench build`: PASS.
 - `VITE_WORKBENCH_FIXTURES=1 pnpm --dir integrations/paper-rag-workbench playwright`: PASS, 1 test.
 - `.venv/bin/python scripts/secret_scan.py`: PASS, clean.
-- `git status --short --branch`: clean before this report.
+- `git status --short --branch`: clean at final audit.
 
 ## Degraded Modes
 

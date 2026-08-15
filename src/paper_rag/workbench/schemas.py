@@ -104,6 +104,7 @@ class SavedQuestionRequest(StrictRequest):
     trace_id: str | None = Field(None, max_length=180)
     abstain: Any | None = None
     context_policy: Any | None = None
+    citation_papers: dict[str, str] = Field(default_factory=dict, max_length=200)
 
 
 class ProjectHandoffRequest(StrictRequest):

@@ -190,3 +190,66 @@ def test_workspace_store_compare_handoff_prompt_includes_dimensions(tmp_path: Pa
     assert "method" in handoff["prompt"]
     assert "chunk-self-rag-1" in handoff["prompt"]
     assert "sk-" not in handoff["prompt"]
+
+
+def test_workspace_store_rejects_cross_project_note_update(tmp_path: Path):
+    from paper_rag.workbench.workspace_store import WorkspaceStore
+
+    store = WorkspaceStore(tmp_path / "state.sqlite")
+    project_a = store.create_project("Project A")
+    project_b = store.create_project("Project B")
+    note = store.upsert_note(project_a["project_id"], "project", project_a["project_id"], "A")
+
+    try:
+        store.upsert_note(
+            project_b["project_id"],
+            "project",
+            project_b["project_id"],
+            "B",
+            note_id=note["note_id"],
+        )
+    except ValueError as exc:
+        assert "does not belong" in str(exc)
+    else:
+        raise AssertionError("cross-project note update should fail")
+
+    assert store.build_project_snapshot(project_a["project_id"])["notes"][0]["body"] == "A"
+    assert store.build_project_snapshot(project_b["project_id"])["notes"] == []
+
+
+def test_workspace_store_compare_requires_project_papers_and_uses_saved_qa_citations(
+    tmp_path: Path,
+):
+    from paper_rag.workbench.workspace_store import WorkspaceStore
+
+    store = WorkspaceStore(tmp_path / "state.sqlite")
+    project = store.create_project("RAG Compare")
+    store.add_project_paper(project["project_id"], "arxiv:2310.11511", "Self-RAG", "library")
+    store.save_question(
+        project["project_id"],
+        "What is Self-RAG?",
+        "It retrieves.",
+        citations=["chunk-from-saved-qa"],
+        chunk_ids=["chunk-from-saved-qa"],
+        citation_papers={"chunk-from-saved-qa": "arxiv:2310.11511"},
+    )
+
+    try:
+        store.create_compare_run(
+            project["project_id"],
+            paper_ids=["arxiv:2310.11511", "arxiv:outside"],
+            dimensions=["method"],
+        )
+    except ValueError as exc:
+        assert "not in project" in str(exc)
+    else:
+        raise AssertionError("out-of-project compare paper should fail")
+
+    run = store.create_compare_run(
+        project["project_id"],
+        paper_ids=["arxiv:2310.11511"],
+        dimensions=["method"],
+    )
+
+    assert run["cells"][0]["evidence_chunk_ids"] == ["chunk-from-saved-qa"]
+    assert run["cells"][0]["confidence"] == "partial"

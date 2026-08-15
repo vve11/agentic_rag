@@ -233,6 +233,35 @@ describe("Paper and chunk drilldown components", () => {
     expect(screen.getByText(/parser_artifacts_detected/i)).toBeInTheDocument();
   });
 
+  test("paper detail panel exposes project actions for paper notes and chunk pins", async () => {
+    const user = userEvent.setup();
+    const client = createWorkbenchClient({ fixtureMode: true });
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <PaperDetailPanel detail={paperDetailFixture} onInspectChunk={() => {}} />
+      </ProjectProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: /已在项目中/ })).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: /钉选证据 chunk-self-rag-2/i }),
+    );
+    await user.type(screen.getAllByLabelText(/^笔记$/)[0], "paper-level note");
+    await user.click(screen.getAllByRole("button", { name: /保存笔记/ })[0]);
+
+    const detail = await client.project("project-self-rag");
+    expect(detail.evidence.some((pin) => pin.chunk_id === "chunk-self-rag-2")).toBe(true);
+    expect(
+      detail.notes.some(
+        (note) =>
+          note.target_type === "paper" &&
+          note.target_id === "arxiv:2310.11511" &&
+          note.body === "paper-level note",
+      ),
+    ).toBe(true);
+  });
+
   test("chunk detail panel shows full text and neighbors", () => {
     renderWithI18n(<ChunkDetailPanel detail={chunkDetailFixture} onOpenPaper={() => {}} />);
 

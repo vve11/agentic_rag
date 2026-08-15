@@ -11,18 +11,22 @@ Go.
 - Added a Chinese-first Compare route with dimension selection, project paper
   selection, a structured comparison matrix, explicit `No pinned evidence`
   states, and compare-to-DSH handoff preview.
+- Added explicit selected-paper subset submission from the UI and backend
+  membership checks so compare runs cannot include papers outside the project.
+- Compare now can use saved QA citation mappings as partial evidence while
+  still distinguishing them from pinned evidence and missing evidence states.
 - Added saved compare run visibility on the Workspace page.
 - Kept DSH optional and prompt-only; Compare does not read DSH private sessions
   and does not require DSH availability.
 
 ## Verification
 
-- `.venv/bin/python -m pytest tests/test_workbench_workspace_store.py tests/test_workbench_api.py -q`: PASS, 24 tests.
-- `pnpm --dir integrations/paper-rag-workbench test`: PASS, 45 tests.
+- `.venv/bin/python -m pytest tests/test_workbench_workspace_store.py tests/test_workbench_api.py -q`: PASS, 30 tests.
+- `pnpm --dir integrations/paper-rag-workbench test`: PASS, 53 tests.
 - `pnpm --dir integrations/paper-rag-workbench build`: PASS.
 - `VITE_WORKBENCH_FIXTURES=1 pnpm --dir integrations/paper-rag-workbench playwright`: PASS, 1 test.
 - `.venv/bin/python scripts/secret_scan.py`: PASS, clean.
-- `git status --short --branch`: clean before this report.
+- `git status --short --branch`: clean at final audit.
 
 ## Degraded Modes
 
@@ -34,6 +38,8 @@ Go.
   confidence.
 - Notes can be included as note ids for interpretation, but paper facts remain
   tied to chunk ids.
+- Saved QA citations can contribute partial evidence only when their source
+  chunk maps to the same project paper.
 
 ## Go/No-Go
 

@@ -308,6 +308,7 @@ export type SavedQuestion = {
   answer: string;
   citations: string[];
   chunk_ids: string[];
+  citation_papers?: Record<string, string>;
   trace_id?: string | null;
   abstain?: QaData["abstain"];
   context_policy?: ContextPolicy | Record<string, unknown> | null;
@@ -390,6 +391,7 @@ export type SavedQuestionInput = {
   answer: string;
   citations: string[];
   chunk_ids: string[];
+  citation_papers?: Record<string, string>;
   trace_id?: string | null;
   abstain?: QaData["abstain"];
   context_policy?: ContextPolicy | Record<string, unknown> | null;

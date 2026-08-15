@@ -1,5 +1,6 @@
 import { screen, waitForElementToBeRemoved } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect } from "react";
 import { describe, expect, test, vi } from "vitest";
 
 import { createWorkbenchClient } from "../api/client";
@@ -11,7 +12,7 @@ import { LibraryPage } from "../pages/LibraryPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { SearchPage } from "../pages/SearchPage";
 import { WorkspacePage } from "../pages/WorkspacePage";
-import { ProjectProvider } from "../context/ProjectContext";
+import { ProjectProvider, useProjectContext } from "../context/ProjectContext";
 import { renderWithI18n } from "../test/render";
 
 describe("Overview and Library pages", () => {
@@ -350,6 +351,39 @@ describe("Overview and Library pages", () => {
     expect(await screen.findByText(/已钉选/)).toBeInTheDocument();
   });
 
+  test("search can add a result paper to the active project", async () => {
+    const user = userEvent.setup();
+    const client = createWorkbenchClient({ fixtureMode: true });
+    const created = await client.createProject({ name: "Search project" });
+
+    function SelectProject() {
+      const { projects, setActiveProjectId } = useProjectContext();
+      useEffect(() => {
+        if (projects.some((project) => project.project_id === created.project.project_id)) {
+          setActiveProjectId(created.project.project_id);
+        }
+      }, [projects, setActiveProjectId]);
+      return null;
+    }
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <SelectProject />
+        <SearchPage client={client} />
+      </ProjectProvider>,
+    );
+
+    await user.type(screen.getByLabelText(/检索证据/), "reflection tokens");
+    await user.click(screen.getByRole("button", { name: /^检索$/ }));
+    const addPaperButtons = await screen.findAllByRole("button", {
+      name: /加入项目 self-rag/i,
+    });
+    await user.click(addPaperButtons[0]);
+
+    const detail = await client.project(created.project.project_id);
+    expect(detail.papers.some((paper) => paper.paper_id === "arxiv:2310.11511")).toBe(true);
+  });
+
   test("ask can save answer to the active project", async () => {
     const user = userEvent.setup();
     const client = createWorkbenchClient({ fixtureMode: true });
@@ -368,6 +402,9 @@ describe("Overview and Library pages", () => {
     expect(detail.saved_questions.some((saved) => saved.question === "What is Self-RAG?")).toBe(
       true,
     );
+    expect(detail.saved_questions[0].citation_papers).toMatchObject({
+      "chunk-self-rag-1": "arxiv:2310.11511",
+    });
     expect(await screen.findByText(/问答已保存/)).toBeInTheDocument();
   });
 
@@ -392,5 +429,25 @@ describe("Overview and Library pages", () => {
 
     expect(await screen.findByRole("dialog", { name: /发送到 DSH/ })).toBeInTheDocument();
     expect(screen.getByText(/Compare run/)).toBeInTheDocument();
+  });
+
+  test("compare page sends only the selected paper subset", async () => {
+    const user = userEvent.setup();
+    const baseClient = createWorkbenchClient({ fixtureMode: true });
+    const createCompareRun = vi.fn(baseClient.createCompareRun);
+    const client = { ...baseClient, createCompareRun };
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <ComparePage client={client} />
+      </ProjectProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: /对比/ })).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/Retrieval-Augmented Generation/));
+    await user.click(screen.getByLabelText(/方法/));
+    await user.click(screen.getByRole("button", { name: /生成对比/ }));
+
+    expect(createCompareRun.mock.calls[0][1].paper_ids).toEqual(["arxiv:2310.11511"]);
   });
 });

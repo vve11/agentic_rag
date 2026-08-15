@@ -44,6 +44,33 @@ describe("Workbench API client", () => {
     expect(result.data?.results[0].chunk_id).toBe("c1");
   });
 
+  test("throws on failed POST and PATCH responses", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          detail: {
+            error: {
+              code: init?.method === "PATCH" ? "PATCH_FAILED" : "POST_FAILED",
+              message: "Rejected request",
+            },
+          },
+        }),
+        { status: init?.method === "PATCH" ? 409 : 400 },
+      );
+    });
+    const client = createWorkbenchClient({ fetchImpl, baseUrl: "" });
+
+    await expect(
+      client.createCompareRun("project-self-rag", {
+        paper_ids: ["arxiv:outside"],
+        dimensions: ["method"],
+      }),
+    ).rejects.toThrow("POST /api/projects/project-self-rag/compare failed with 400");
+    await expect(
+      client.updateProject("project-self-rag", { name: "Renamed" }),
+    ).rejects.toThrow("PATCH /api/projects/project-self-rag failed with 409");
+  });
+
   test("client reads v2 endpoints", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
