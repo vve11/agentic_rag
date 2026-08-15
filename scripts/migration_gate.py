@@ -2081,7 +2081,7 @@ def _write_live_g2_session_proof(
     workspace: LiveG2Workspace,
     turn_summaries: list[dict[str, Any]],
 ) -> Path:
-    session_dir = workspace.dsh_home / "sessions" / LIVE_G2_CONVERSATION_ID
+    session_dir = workspace.dsh_home / "paper-rag-session-proofs" / LIVE_G2_CONVERSATION_ID
     session_dir.mkdir(parents=True, exist_ok=True)
     session_path = session_dir / "session.jsonl"
     header = {

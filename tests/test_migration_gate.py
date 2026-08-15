@@ -1309,6 +1309,7 @@ def test_live004_followup_accepts_explicit_no_evidence_abstain(
     assert checks["followup-turn-2-evidence"]["status"] == "PASS"
     assert "abstain=no_evidence" in checks["followup-turn-2-evidence"]["detail"]
     assert result["turns"][1]["abstain_decision"] == "no_evidence"
+    assert "paper-rag-session-proofs" in result["session_proof"]
     assert "Cite indexed chunks" in calls[0]
     assert "weak/no-evidence abstain" in calls[1]
 
