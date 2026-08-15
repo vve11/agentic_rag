@@ -205,6 +205,8 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
         OPENAI_BASE_URL: "https://api.deepseek.com",
         CHAT_MODEL: "deepseek-v4-flash",
         SMALL_MODEL: "deepseek-v4-flash",
+        PAPER_RAG_CONFIG: "/repo/data/index/migration-gates/live-workspaces/G2/head/config.live-g2.yaml",
+        FEEDBACK_SQLITE_PATH: "/repo/data/index/migration-gates/live-workspaces/G2/head/data/index/feedback.sqlite",
         PATH: "/usr/bin",
         HOME: "/tmp/home",
       },
@@ -215,6 +217,12 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
     expect(env.OPENAI_BASE_URL).toBe("https://api.deepseek.com");
     expect(env.CHAT_MODEL).toBe("deepseek-v4-flash");
     expect(env.SMALL_MODEL).toBe("deepseek-v4-flash");
+    expect(env.PAPER_RAG_CONFIG).toBe(
+      "/repo/data/index/migration-gates/live-workspaces/G2/head/config.live-g2.yaml",
+    );
+    expect(env.FEEDBACK_SQLITE_PATH).toBe(
+      "/repo/data/index/migration-gates/live-workspaces/G2/head/data/index/feedback.sqlite",
+    );
     expect(env.PYTHONPATH).toBe("/repo/src");
     expect(env.PAPER_RAG_MCP_TOOLSET).toBe("readonly");
     expect(env.PAPER_RAG_ARTIFACT_ROOT).toBe("/repo/data/artifacts");

@@ -1094,6 +1094,55 @@ def test_manifest_declares_live005_dsh_frontend_smoke():
     assert "versioned durable DSH session" in live005["side_effects"]
 
 
+def test_live005_headless_failure_includes_redacted_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    integration_root = tmp_path / "integrations/deepseek-harness"
+    dsh_bin = integration_root / "node_modules/.bin/dsh"
+    dsh_bin.parent.mkdir(parents=True)
+    dsh_bin.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    dsh_bin.chmod(0o755)
+    (integration_root / "live-headless.patch.yml").write_text("patch: true\n", encoding="utf-8")
+    workspace = migration_gate.LiveG2Workspace(
+        work_root=tmp_path / "work",
+        data_root=tmp_path / "work/data",
+        index_root=tmp_path / "work/data/index",
+        artifact_root=tmp_path / "work/artifacts",
+        import_root=tmp_path / "work/imports",
+        dsh_home=tmp_path / "work/runtime/deepseek-harness/versions/0.1.0-rc.6/dsh-home",
+        config_path=tmp_path / "work/config.live-g2.yaml",
+        feedback_path=tmp_path / "work/data/index/feedback.sqlite",
+    )
+    monkeypatch.setattr(
+        migration_gate,
+        "_install_live_g2_dsh_headless_assets",
+        lambda _repo_root, _workspace: None,
+    )
+    monkeypatch.setattr(
+        migration_gate.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            1,
+            stdout="",
+            stderr="dsh: discovery_candidate_ingest failed: [Errno 61] Connection refused test-secret\n",
+        ),
+    )
+
+    with pytest.raises(migration_gate.GateError) as excinfo:
+        migration_gate._run_live005_headless_workflow(
+            tmp_path,
+            workspace,
+            {"OPENAI_API_KEY": "test-secret"},
+        )
+
+    detail = str(excinfo.value)
+    assert "exit=1" in detail
+    assert "Connection refused" in detail
+    assert "test-secret" not in detail
+    assert "$OPENAI_API_KEY" in detail
+
+
 def test_live_g2_env_adds_repo_src_to_import_path(tmp_path: Path):
     (tmp_path / "src").mkdir()
     env = {"PAPER_RAG_REPO_ROOT": str(tmp_path)}

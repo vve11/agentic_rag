@@ -1516,7 +1516,13 @@ def _run_live005_headless_workflow(
         timeout=int(env.get("PAPER_RAG_LIVE_TIMEOUT_SEC", "900")),
         check=False,
     )
-    summary = _parse_live005_headless_json(proc.stdout)
+    try:
+        summary = _parse_live005_headless_json(proc.stdout)
+    except GateError as exc:
+        diagnostics = _live005_subprocess_diagnostics(proc, env)
+        if diagnostics:
+            raise GateError(f"{exc}; {diagnostics}") from exc
+        raise
     summary["exit_code"] = proc.returncode
     return summary
 
@@ -1558,6 +1564,25 @@ def _parse_live005_headless_json(stdout: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise GateError("LIVE-005 headless runner JSON summary must be an object")
     return parsed
+
+
+def _live005_subprocess_diagnostics(
+    proc: subprocess.CompletedProcess[str],
+    env_source: dict[str, str],
+) -> str:
+    parts = [f"exit={proc.returncode}"]
+    stderr = _redacted_text_excerpt(proc.stderr or "", env_source)
+    stdout = _redacted_text_excerpt(proc.stdout or "", env_source)
+    if stderr:
+        parts.append(f"stderr={stderr}")
+    if stdout:
+        parts.append(f"stdout={stdout}")
+    return "; ".join(parts)
+
+
+def _redacted_text_excerpt(text: str, env_source: dict[str, str], limit: int = 500) -> str:
+    excerpt = " ".join(text.strip().splitlines())[:limit]
+    return _redact_secret_values(excerpt, env_source)
 
 
 def _has_live005_tools(summary: dict[str, Any]) -> bool:
@@ -2207,6 +2232,10 @@ def _live_g2_exception_summary(
 
 def _redacted_error_detail(exc: Exception, env_source: dict[str, str]) -> str:
     detail = f"{type(exc).__name__}: {str(exc).splitlines()[0][:500]}"
+    return _redact_secret_values(detail, env_source)
+
+
+def _redact_secret_values(detail: str, env_source: dict[str, str]) -> str:
     for key, value in env_source.items():
         if key.endswith(("API_KEY", "TOKEN", "SECRET")) and value:
             detail = detail.replace(value, f"${key}")
