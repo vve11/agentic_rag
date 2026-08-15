@@ -2,9 +2,16 @@ import { useState } from "react";
 
 import { AnswerPanel } from "../components/AnswerPanel";
 import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
+import { DshHandoffDialog } from "../components/DshHandoffDialog";
 import { EmptyState } from "../components/EmptyState";
 import { PaperDetailPanel } from "../components/PaperDetailPanel";
-import type { ChunkDetailData, PaperDetailData, QaData, WorkbenchClient } from "../types";
+import type {
+  ChunkDetailData,
+  DshHandoffData,
+  PaperDetailData,
+  QaData,
+  WorkbenchClient,
+} from "../types";
 
 export function AskPage({ client }: { client: WorkbenchClient }) {
   const [question, setQuestion] = useState("");
@@ -16,6 +23,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
   const [copyState, setCopyState] = useState<string | null>(null);
   const [chunkDetail, setChunkDetail] = useState<ChunkDetailData | null>(null);
   const [paperDetail, setPaperDetail] = useState<PaperDetailData | null>(null);
+  const [handoff, setHandoff] = useState<DshHandoffData | null>(null);
 
   const ask = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -26,6 +34,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
     setData(null);
     setChunkDetail(null);
     setPaperDetail(null);
+    setHandoff(null);
     setLoading(true);
     const paperIds = paperIdsText
       .split(",")
@@ -58,6 +67,22 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
 
   const openPaper = async (paperId: string) => {
     setPaperDetail(await client.paperDetail(paperId));
+  };
+
+  const sendToDsh = async () => {
+    if (!data) return;
+    const paperIds = Array.from(new Set(data.chunks.map((chunk) => chunk.paper_id)));
+    const chunkIds = data.citations.length
+      ? data.citations
+      : data.chunks.map((chunk) => chunk.chunk_id);
+    setHandoff(
+      await client.dshHandoff({
+        question: question.trim(),
+        paper_ids: paperIds,
+        chunk_ids: chunkIds,
+        source: "ask",
+      }),
+    );
   };
 
   const copyPrompt = async () => {
@@ -116,6 +141,9 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
             <button type="button" onClick={copyPrompt}>
               Copy prompt for DSH
             </button>
+            <button type="button" onClick={sendToDsh}>
+              Send to DSH
+            </button>
             {copyState ? <span className="muted">{copyState}</span> : null}
           </div>
           <AnswerPanel
@@ -130,6 +158,9 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
           ) : null}
           {paperDetail ? (
             <PaperDetailPanel detail={paperDetail} onInspectChunk={inspectChunk} />
+          ) : null}
+          {handoff ? (
+            <DshHandoffDialog data={handoff} onClose={() => setHandoff(null)} />
           ) : null}
         </>
       ) : null}

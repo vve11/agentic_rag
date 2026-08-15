@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
+import { DshHandoffDialog } from "../components/DshHandoffDialog";
 import { EmptyState } from "../components/EmptyState";
 import { PaperDetailPanel } from "../components/PaperDetailPanel";
 import { PaperTable } from "../components/PaperTable";
 import type {
   ChunkDetailData,
+  DshHandoffData,
   EvidenceChunk,
   PaperDetailData,
   PaperSummary,
@@ -21,6 +23,7 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
   const [sectionLoading, setSectionLoading] = useState(false);
   const [paperDetail, setPaperDetail] = useState<PaperDetailData | null>(null);
   const [chunkDetail, setChunkDetail] = useState<ChunkDetailData | null>(null);
+  const [handoff, setHandoff] = useState<DshHandoffData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -88,6 +91,18 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
     setChunkDetail(await client.chunkDetail(chunkId));
   };
 
+  const sendPaperToDsh = async () => {
+    if (!paperDetail) return;
+    setHandoff(
+      await client.dshHandoff({
+        question: `继续研究这篇论文：${paperDetail.paper.title}`,
+        paper_ids: [paperDetail.paper.paper_id],
+        chunk_ids: paperDetail.chunks.slice(0, 8).map((chunk) => chunk.chunk_id),
+        source: "library",
+      }),
+    );
+  };
+
   if (error) {
     return <EmptyState title="Library unavailable" detail={error} />;
   }
@@ -137,7 +152,14 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
         </aside>
       ) : null}
       {paperDetail ? (
-        <PaperDetailPanel detail={paperDetail} onInspectChunk={inspectChunk} />
+        <>
+          <div className="toolbar-row">
+            <button type="button" onClick={sendPaperToDsh}>
+              Send to DSH
+            </button>
+          </div>
+          <PaperDetailPanel detail={paperDetail} onInspectChunk={inspectChunk} />
+        </>
       ) : null}
       {chunkDetail ? (
         <ChunkDetailPanel
@@ -150,6 +172,7 @@ export function LibraryPage({ client }: { client: WorkbenchClient }) {
           }
         />
       ) : null}
+      {handoff ? <DshHandoffDialog data={handoff} onClose={() => setHandoff(null)} /> : null}
     </>
   );
 }

@@ -7,13 +7,19 @@ import { AnswerPanel } from "../components/AnswerPanel";
 import { CandidateTable } from "../components/CandidateTable";
 import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
 import { CitationChips } from "../components/CitationChips";
+import { DshHandoffDialog } from "../components/DshHandoffDialog";
 import { EvidenceChunkCard } from "../components/EvidenceChunkCard";
 import { HealthSummary } from "../components/HealthSummary";
 import { PaperDetailPanel } from "../components/PaperDetailPanel";
 import { PaperTable } from "../components/PaperTable";
 import { QualityIssueTable } from "../components/QualityIssueTable";
 import { ScoreBreakdown } from "../components/ScoreBreakdown";
-import { chunkDetailFixture, indexHealthFixture, paperDetailFixture } from "../api/fixtures";
+import {
+  chunkDetailFixture,
+  dshHandoffFixture,
+  indexHealthFixture,
+  paperDetailFixture,
+} from "../api/fixtures";
 import type { PaperSummary } from "../types";
 
 describe("PaperTable", () => {
@@ -188,5 +194,18 @@ describe("Paper and chunk drilldown components", () => {
     expect(screen.getByText(/score 0.92/i)).toBeInTheDocument();
     expect(screen.getByText(/dense 0.81/i)).toBeInTheDocument();
     expect(screen.getByText(/sparse 0.74/i)).toBeInTheDocument();
+  });
+});
+
+describe("DSH handoff components", () => {
+  test("dsh handoff dialog shows prompt and open link", () => {
+    render(<DshHandoffDialog data={dshHandoffFixture} onClose={() => {}} />);
+
+    expect(screen.getByRole("dialog", { name: /send to dsh/i })).toBeInTheDocument();
+    expect(screen.getByText(/基于 Paper RAG Workbench/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open dsh/i })).toHaveAttribute(
+      "href",
+      "http://127.0.0.1:3080",
+    );
   });
 });

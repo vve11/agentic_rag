@@ -96,6 +96,8 @@ textarea {
 .chunk-detail button,
 .chunk-list button,
 .citation-chips button,
+.handoff-dialog button,
+.handoff-dialog a,
 .modal button {
   border: 1px solid #c9d3dd;
   border-radius: 6px;
@@ -115,6 +117,8 @@ textarea {
 .chunk-detail button:hover,
 .chunk-list button:hover,
 .citation-chips button:hover,
+.handoff-dialog button:hover,
+.handoff-dialog a:hover,
 .modal button:hover {
   border-color: #6b93c8;
 }
@@ -592,6 +596,42 @@ textarea {
 .metadata-grid dt,
 .score-breakdown dt {
   color: #66717c;
+}
+
+.dialog-backdrop {
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  inset: 0;
+  padding: 24px;
+  place-items: center;
+  position: fixed;
+  z-index: 20;
+}
+
+.handoff-dialog {
+  background: #ffffff;
+  border: 1px solid #dde4eb;
+  border-radius: 8px;
+  max-height: 80vh;
+  overflow: auto;
+  padding: 16px;
+  width: min(760px, 100%);
+}
+
+.handoff-dialog header,
+.handoff-dialog footer {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.handoff-dialog pre {
+  background: #f3f6f9;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  white-space: pre-wrap;
 }
 
 .modal-backdrop {

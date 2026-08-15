@@ -147,4 +147,27 @@ describe("Overview and Library pages", () => {
 
     expect(await screen.findByText(/critiques its own generations/i)).toBeInTheDocument();
   });
+
+  test("ask page creates a structured dsh handoff", async () => {
+    const user = userEvent.setup();
+    const baseClient = createWorkbenchClient({ fixtureMode: true });
+    const dshHandoff = vi.fn(baseClient.dshHandoff);
+    const client = { ...baseClient, dshHandoff };
+
+    render(<AskPage client={client} />);
+
+    await user.type(screen.getByLabelText(/question/i), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^ask$/i }));
+    await user.click(await screen.findByRole("button", { name: /send to dsh/i }));
+
+    expect(dshHandoff).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: "What is Self-RAG?",
+        paper_ids: expect.arrayContaining(["arxiv:2310.11511"]),
+        chunk_ids: expect.arrayContaining(["chunk-self-rag-1"]),
+        source: "ask",
+      }),
+    );
+    expect(await screen.findByRole("dialog", { name: /send to dsh/i })).toBeInTheDocument();
+  });
 });
