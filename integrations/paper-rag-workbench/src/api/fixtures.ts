@@ -356,7 +356,7 @@ export const projectFixture: ProjectSummary = {
 export const projectDetailFixture: ProjectDetail = {
   project: projectFixture,
   summary: {
-    paper_count: 1,
+    paper_count: 2,
     evidence_count: 1,
     note_count: 1,
     saved_question_count: 1,
@@ -367,6 +367,13 @@ export const projectDetailFixture: ProjectDetail = {
       project_id: projectFixture.project_id,
       paper_id: "arxiv:2310.11511",
       title_snapshot: "Self-RAG",
+      source: "library",
+      created_at: "2026-08-15T00:00:00Z",
+    },
+    {
+      project_id: projectFixture.project_id,
+      paper_id: "arxiv:2005.11401",
+      title_snapshot: "Retrieval-Augmented Generation",
       source: "library",
       created_at: "2026-08-15T00:00:00Z",
     },

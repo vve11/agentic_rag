@@ -2,6 +2,7 @@ import {
   Activity,
   BookOpen,
   Briefcase,
+  Columns3,
   Compass,
   Database,
   MessageSquare,
@@ -16,6 +17,7 @@ import { useI18n, type MessageKey } from "../i18n";
 const nav = [
   { id: "overview", labelKey: "nav.overview", icon: Database },
   { id: "workspace", labelKey: "nav.workspace", icon: Briefcase },
+  { id: "compare", labelKey: "nav.compare", icon: Columns3 },
   { id: "health", labelKey: "nav.health", icon: Activity },
   { id: "library", labelKey: "nav.library", icon: BookOpen },
   { id: "search", labelKey: "nav.search", icon: Search },

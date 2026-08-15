@@ -5,6 +5,7 @@ import { Shell, type RouteId } from "./components/Shell";
 import { ProjectProvider } from "./context/ProjectContext";
 import { I18nProvider } from "./i18n";
 import { AskPage } from "./pages/AskPage";
+import { ComparePage } from "./pages/ComparePage";
 import { DiscoverPage } from "./pages/DiscoverPage";
 import { HealthPage } from "./pages/HealthPage";
 import { LibraryPage } from "./pages/LibraryPage";
@@ -21,6 +22,7 @@ export function App() {
       <ProjectProvider client={client}>
         <Shell active={route} onNavigate={setRoute}>
           {route === "workspace" ? <WorkspacePage /> : null}
+          {route === "compare" ? <ComparePage client={client} /> : null}
           {route === "health" ? <HealthPage client={client} /> : null}
           {route === "library" ? <LibraryPage client={client} /> : null}
           {route === "search" ? <SearchPage client={client} /> : null}

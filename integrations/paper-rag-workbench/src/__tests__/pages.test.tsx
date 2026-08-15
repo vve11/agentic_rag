@@ -5,6 +5,7 @@ import { describe, expect, test, vi } from "vitest";
 import { createWorkbenchClient } from "../api/client";
 import { AskPage } from "../pages/AskPage";
 import { DiscoverPage } from "../pages/DiscoverPage";
+import { ComparePage } from "../pages/ComparePage";
 import { HealthPage } from "../pages/HealthPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { OverviewPage } from "../pages/OverviewPage";
@@ -279,5 +280,28 @@ describe("Overview and Library pages", () => {
       true,
     );
     expect(await screen.findByText(/问答已保存/)).toBeInTheDocument();
+  });
+
+  test("compare page creates an evidence-first matrix and DSH handoff", async () => {
+    const user = userEvent.setup();
+    const client = createWorkbenchClient({ fixtureMode: true });
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <ComparePage client={client} />
+      </ProjectProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: /对比/ })).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/方法/));
+    await user.click(screen.getByLabelText(/限制/));
+    await user.click(screen.getByRole("button", { name: /生成对比/ }));
+
+    expect((await screen.findAllByText("chunk-self-rag-1")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/No pinned evidence/).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /发送对比到 DSH/ }));
+
+    expect(await screen.findByRole("dialog", { name: /发送到 DSH/ })).toBeInTheDocument();
+    expect(screen.getByText(/Compare run/)).toBeInTheDocument();
   });
 });

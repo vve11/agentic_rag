@@ -397,6 +397,10 @@ export type SavedQuestionInput = {
 export type ProjectHandoffInput = {
   instruction?: string;
 };
+export type CompareInput = {
+  paper_ids: string[];
+  dimensions: string[];
+};
 
 export type WorkbenchClient = {
   health(): Promise<HealthData>;
@@ -434,4 +438,8 @@ export type WorkbenchClient = {
     projectId: string,
     input: ProjectHandoffInput,
   ): Promise<DshHandoffData>;
+  createCompareRun(projectId: string, input: CompareInput): Promise<{ run: CompareRun }>;
+  compareRuns(projectId: string): Promise<{ runs: CompareRun[] }>;
+  compareRun(projectId: string, runId: string): Promise<{ run: CompareRun }>;
+  compareDshHandoff(projectId: string, runId: string): Promise<DshHandoffData>;
 };

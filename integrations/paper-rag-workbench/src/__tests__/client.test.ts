@@ -144,4 +144,25 @@ describe("Workbench API client", () => {
     expect(detail.summary.evidence_count).toBe(1);
     expect(handoff.prompt).toContain("Compare methods.");
   });
+
+  test("fixture client creates compare runs and compare handoff prompts", async () => {
+    const client = createWorkbenchClient({ fixtureMode: true });
+
+    const run = await client.createCompareRun("project-self-rag", {
+      paper_ids: ["arxiv:2310.11511", "arxiv:2005.11401"],
+      dimensions: ["method", "limitation"],
+    });
+    const runs = await client.compareRuns("project-self-rag");
+    const loaded = await client.compareRun("project-self-rag", run.run.run_id);
+    const handoff = await client.compareDshHandoff("project-self-rag", run.run.run_id);
+
+    expect(run.run.status).toBe("degraded");
+    expect(run.run.cells.some((cell) => cell.evidence_chunk_ids.includes("chunk-self-rag-1"))).toBe(
+      true,
+    );
+    expect(run.run.cells.some((cell) => cell.summary === "No pinned evidence")).toBe(true);
+    expect(runs.runs[0].run_id).toBe(run.run.run_id);
+    expect(loaded.run.run_id).toBe(run.run.run_id);
+    expect(handoff.prompt).toContain("Compare run");
+  });
 });

@@ -80,6 +80,11 @@ export function WorkspacePage() {
                   count: activeProject.summary.saved_question_count,
                 })}
               </span>
+              <span>
+                {t("workspace.compareCount", {
+                  count: activeProject.summary.compare_run_count,
+                })}
+              </span>
             </div>
             <label>
               <span>{t("workspace.dshInstruction")}</span>
@@ -139,6 +144,18 @@ export function WorkspacePage() {
                 <li key={question.question_id}>
                   <strong>{question.question}</strong>
                   <span>{question.answer}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className="panel">
+            <h3>{t("workspace.compareRuns")}</h3>
+            <ul className="plain-list">
+              {activeProject.compare_runs.map((run) => (
+                <li key={run.run_id}>
+                  <strong>{run.run_id}</strong>
+                  <span>{run.dimensions.join(", ")}</span>
+                  <code>{run.status}</code>
                 </li>
               ))}
             </ul>

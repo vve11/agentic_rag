@@ -8,6 +8,7 @@ import { AnswerPanel } from "../components/AnswerPanel";
 import { CandidateTable } from "../components/CandidateTable";
 import { ChunkDetailPanel } from "../components/ChunkDetailPanel";
 import { CitationChips } from "../components/CitationChips";
+import { CompareMatrix } from "../components/CompareMatrix";
 import { DshHandoffDialog } from "../components/DshHandoffDialog";
 import { EvidenceChunkCard } from "../components/EvidenceChunkCard";
 import { HealthSummary } from "../components/HealthSummary";
@@ -26,7 +27,7 @@ import {
   paperDetailFixture,
   qaStreamFixture,
 } from "../api/fixtures";
-import type { PaperSummary } from "../types";
+import type { CompareRun, PaperSummary } from "../types";
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -296,5 +297,43 @@ describe("Project context", () => {
     await user.click(screen.getByRole("button", { name: "create" }));
 
     expect(await screen.findByText("active:Scoped Notes 调研")).toBeInTheDocument();
+  });
+});
+
+describe("Compare components", () => {
+  test("compare matrix shows evidence chunk ids and missing evidence states", () => {
+    const run: CompareRun = {
+      run_id: "compare-1",
+      project_id: "project-self-rag",
+      dimensions: ["method", "limitation"],
+      paper_ids: ["arxiv:2310.11511", "arxiv:2005.11401"],
+      status: "degraded",
+      warnings: ["LLM synthesis unavailable; rendered evidence-only matrix."],
+      cells: [
+        {
+          paper_id: "arxiv:2310.11511",
+          dimension: "method",
+          summary: "Evidence pinned for method: SELF-RAG retrieves passages on demand.",
+          evidence_chunk_ids: ["chunk-self-rag-1"],
+          note_ids: ["note-self-rag-1"],
+          confidence: "evidence_backed",
+        },
+        {
+          paper_id: "arxiv:2005.11401",
+          dimension: "method",
+          summary: "No pinned evidence",
+          evidence_chunk_ids: [],
+          note_ids: [],
+          confidence: "missing",
+        },
+      ],
+      created_at: "2026-08-15T00:00:00Z",
+    };
+
+    renderWithI18n(<CompareMatrix run={run} />);
+
+    expect(screen.getByText("chunk-self-rag-1")).toBeInTheDocument();
+    expect(screen.getAllByText("No pinned evidence").length).toBeGreaterThan(0);
+    expect(screen.getByText(/evidence_backed/)).toBeInTheDocument();
   });
 });

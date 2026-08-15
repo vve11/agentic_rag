@@ -32,6 +32,11 @@ test("workbench bilingual fixture flow", async ({ page }) => {
   await expect(page.getByRole("cell", { name: /Self-RAG/ }).first()).toBeVisible();
   await page.getByRole("button", { name: /加入项目 self-rag/i }).first().click();
   await expect(page.getByText(/已加入当前项目/)).toBeVisible();
+  await page
+    .getByRole("button", { name: /加入项目 retrieval-augmented generation/i })
+    .first()
+    .click();
+  await expect(page.getByText(/已加入当前项目/)).toBeVisible();
   await page.getByRole("button", { name: /查看论文 self-rag/i }).click();
   await expect(page.getByText(/Abstract/)).toBeVisible();
 
@@ -56,7 +61,21 @@ test("workbench bilingual fixture flow", async ({ page }) => {
   await expect(page.getByRole("dialog", { name: /发送到 DSH/ })).toBeVisible();
   await page.getByRole("button", { name: /关闭 DSH 交接/ }).click();
 
+  await nav.getByRole("button", { name: /对比/ }).click();
+  await expect(page.getByRole("heading", { name: "对比" })).toBeVisible();
+  await page.getByLabel(/方法/).check();
+  await page.getByLabel(/限制/).check();
+  await page.getByRole("button", { name: /生成对比/ }).click();
+  await expect(page.getByText("chunk-self-rag-1").first()).toBeVisible();
+  await expect(page.getByText(/No pinned evidence/).first()).toBeVisible();
+  await page.getByRole("button", { name: /发送对比到 DSH/ }).click();
+  await expect(page.getByRole("dialog", { name: /发送到 DSH/ })).toBeVisible();
+  await expect(page.getByText(/Compare run/)).toBeVisible();
+  await page.getByRole("button", { name: /关闭 DSH 交接/ }).click();
+
   await nav.getByRole("button", { name: /工作区/ }).click();
+  await expect(page.getByRole("heading", { name: /对比记录/ })).toBeVisible();
+  await expect(page.getByText(/compare-1/)).toBeVisible();
   await page.getByLabel(/DSH 任务/).fill("Compare methods.");
   await page.getByRole("button", { name: /发送项目到 DSH/ }).click();
   await expect(page.getByRole("dialog", { name: /发送到 DSH/ })).toBeVisible();

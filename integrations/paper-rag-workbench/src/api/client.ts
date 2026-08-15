@@ -18,6 +18,8 @@ import { streamPaperQa } from "./qaStream";
 import type {
   CandidateIngestInput,
   ChunkDetailData,
+  CompareInput,
+  CompareRun,
   DiscoverData,
   DiscoverInput,
   DshHandoffData,
@@ -99,6 +101,45 @@ export function createWorkbenchClient(
       compare_run_count: detail.compare_runs.length,
     };
     detail.project.updated_at = nowFixture();
+  };
+  const buildFixtureCompareRun = (projectId: string, input: CompareInput): CompareRun => {
+    const detail = fixtureProject(projectId);
+    const paperIds =
+      input.paper_ids.length > 0
+        ? input.paper_ids
+        : detail.papers.map((paper) => paper.paper_id);
+    const dimensions = input.dimensions.length > 0 ? input.dimensions : ["method"];
+    const cells: CompareRun["cells"] = paperIds.flatMap((paperId) => {
+      const pins = detail.evidence.filter((pin) => pin.paper_id === paperId);
+      const noteIds = detail.notes
+        .filter(
+          (note) =>
+            (note.target_type === "paper" && note.target_id === paperId) ||
+            (note.target_type === "chunk" &&
+              pins.some((pin) => pin.chunk_id === note.target_id)),
+        )
+        .map((note) => note.note_id);
+      return dimensions.map((dimension) => ({
+        paper_id: paperId,
+        dimension,
+        summary: pins.length
+          ? `Evidence pinned for ${dimension}: ${pins[0].quote_snapshot}`
+          : "No pinned evidence",
+        evidence_chunk_ids: pins.map((pin) => pin.chunk_id),
+        note_ids: noteIds,
+        confidence: pins.length ? "evidence_backed" : "missing",
+      }));
+    });
+    return {
+      run_id: `compare-${detail.compare_runs.length + 1}`,
+      project_id: projectId,
+      dimensions,
+      paper_ids: paperIds,
+      status: "degraded",
+      cells,
+      warnings: ["LLM synthesis unavailable; rendered evidence-only matrix."],
+      created_at: nowFixture(),
+    };
   };
 
   return {
@@ -347,6 +388,61 @@ export function createWorkbenchClient(
           paper_ids: detail.papers.map((paper) => paper.paper_id),
           chunk_ids: detail.evidence.map((pin) => pin.chunk_id),
           question_ids: detail.saved_questions.map((question) => question.question_id),
+          created_at: nowFixture(),
+        },
+      });
+    },
+    createCompareRun: (
+      projectId: string,
+      input: CompareInput,
+    ): Promise<{ run: CompareRun }> => {
+      if (!fixtureMode) return post(`/api/projects/${projectId}/compare`, input);
+      const detail = fixtureProject(projectId);
+      const run = buildFixtureCompareRun(projectId, input);
+      detail.compare_runs.unshift(run);
+      refreshSummary(detail);
+      return Promise.resolve({ run: clone(run) });
+    },
+    compareRuns: (projectId: string): Promise<{ runs: CompareRun[] }> =>
+      fixtureMode
+        ? Promise.resolve({ runs: clone(fixtureProject(projectId).compare_runs) })
+        : get(`/api/projects/${projectId}/compare-runs`),
+    compareRun: (projectId: string, runId: string): Promise<{ run: CompareRun }> => {
+      if (!fixtureMode) return get(`/api/projects/${projectId}/compare-runs/${runId}`);
+      const run = fixtureProject(projectId).compare_runs.find((item) => item.run_id === runId);
+      if (!run) throw new Error(`Fixture compare run not found: ${runId}`);
+      return Promise.resolve({ run: clone(run) });
+    },
+    compareDshHandoff: (projectId: string, runId: string): Promise<DshHandoffData> => {
+      if (!fixtureMode) {
+        return post(`/api/projects/${projectId}/compare-runs/${runId}/dsh-handoff`, {});
+      }
+      const run = fixtureProject(projectId).compare_runs.find((item) => item.run_id === runId);
+      if (!run) throw new Error(`Fixture compare run not found: ${runId}`);
+      const prompt = [
+        "Continue from this Paper RAG Workbench Compare run.",
+        "",
+        `Compare run: ${run.run_id}`,
+        `Dimensions: ${run.dimensions.join(", ")}`,
+        ...run.cells.map(
+          (cell) =>
+            `- ${cell.paper_id} / ${cell.dimension}: ${cell.summary} | evidence: ${
+              cell.evidence_chunk_ids.join(", ") || "No pinned evidence"
+            }`,
+        ),
+      ].join("\n");
+      return Promise.resolve({
+        dsh_url: "http://127.0.0.1:3080",
+        prompt,
+        handoff: {
+          handoff_id: `handoff-${Date.now()}`,
+          project_id: projectId,
+          prompt,
+          paper_ids: run.paper_ids,
+          chunk_ids: Array.from(
+            new Set(run.cells.flatMap((cell) => cell.evidence_chunk_ids)),
+          ),
+          question_ids: [],
           created_at: nowFixture(),
         },
       });

@@ -311,6 +311,47 @@ textarea {
   white-space: nowrap;
 }
 
+.compare-panel header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.compare-table {
+  table-layout: fixed;
+}
+
+.compare-table th:first-child,
+.compare-table td:first-child {
+  width: 190px;
+}
+
+.compare-table td p {
+  line-height: 1.5;
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.compare-table small {
+  color: #66717c;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.compare-table .citation-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.compare-table .citation-list code {
+  background: #eef2f6;
+  border-radius: 6px;
+  padding: 4px 6px;
+  white-space: normal;
+}
+
 .row-actions {
   display: flex;
   flex-wrap: wrap;
@@ -465,6 +506,36 @@ textarea {
 .form-grid label {
   display: grid;
   gap: 6px;
+}
+
+.form-grid fieldset {
+  border: 1px solid #cbd5df;
+  border-radius: 8px;
+  margin: 0;
+  padding: 10px;
+}
+
+.form-grid legend {
+  color: #4b5560;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 0 4px;
+}
+
+.checkbox-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.checkbox-grid label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.checkbox-grid input {
+  width: auto;
 }
 
 .form-grid label:first-child {
