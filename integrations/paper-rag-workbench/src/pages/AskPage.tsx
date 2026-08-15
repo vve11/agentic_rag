@@ -11,9 +11,11 @@ import { useOptionalProjectContext } from "../context/ProjectContext";
 import { useI18n } from "../i18n";
 import type {
   ChunkDetailData,
+  ContextPolicy,
   DshHandoffData,
   PaperDetailData,
   QaData,
+  QaInput,
   QaStreamEvent,
   QaStreamState,
   WorkbenchClient,
@@ -34,6 +36,12 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
   const [handoff, setHandoff] = useState<DshHandoffData | null>(null);
   const [streamState, setStreamState] = useState<QaStreamState | null>(null);
   const [saveState, setSaveState] = useState<string | null>(null);
+  const [includePinnedEvidence, setIncludePinnedEvidence] = useState(false);
+  const [includeNotes, setIncludeNotes] = useState(false);
+  const [restrictToProjectPapers, setRestrictToProjectPapers] = useState(false);
+  const [lastContextPolicy, setLastContextPolicy] = useState<
+    ContextPolicy | Record<string, unknown> | null
+  >(null);
   const askRunRef = useRef(0);
 
   const ask = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -54,11 +62,26 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
       .map((id) => id.trim())
       .filter(Boolean);
 
-    const input = {
+    const contextPolicy: ContextPolicy = {
+      include_pinned_evidence: includePinnedEvidence,
+      include_notes: includeNotes,
+      restrict_to_project_papers: restrictToProjectPapers,
+    };
+    const contextEnabled =
+      Boolean(project?.activeProjectId) &&
+      (contextPolicy.include_pinned_evidence ||
+        contextPolicy.include_notes ||
+        contextPolicy.restrict_to_project_papers);
+    const input: QaInput = {
       question: trimmedQuestion,
       paper_ids: paperIds,
       top_k: topK,
     };
+    if (contextEnabled && project?.activeProjectId) {
+      input.project_id = project.activeProjectId;
+      input.context_policy = contextPolicy;
+    }
+    setLastContextPolicy(contextEnabled ? contextPolicy : null);
     const runId = askRunRef.current + 1;
     askRunRef.current = runId;
     const initial = createInitialQaStreamState(trimmedQuestion);
@@ -78,11 +101,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
         });
       });
     } catch (streamReason) {
-      const envelope = await client.qa({
-        question: trimmedQuestion,
-        paper_ids: paperIds,
-        top_k: topK,
-      });
+      const envelope = await client.qa(input);
 
       if (!envelope.ok || !envelope.data) {
         setError(
@@ -143,6 +162,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
       chunk_ids: data.chunks.map((chunk) => chunk.chunk_id),
       trace_id: streamState?.answer.trace_id,
       abstain: data.abstain,
+      context_policy: data.context_policy ?? lastContextPolicy,
     });
     setSaveState(t("workspace.savedAnswer"));
   };
@@ -188,6 +208,40 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
           {loading ? t("ask.loading") : t("ask.submit")}
         </button>
       </form>
+      {project?.activeProjectId ? (
+        <section className="panel ask-context-panel" aria-label={t("ask.contextTitle")}>
+          <div>
+            <h3>{t("ask.contextTitle")}</h3>
+            <p>{t("ask.contextDetail")}</p>
+          </div>
+          <div className="checkbox-grid">
+            <label>
+              <input
+                type="checkbox"
+                checked={includePinnedEvidence}
+                onChange={(event) => setIncludePinnedEvidence(event.target.checked)}
+              />
+              <span>{t("ask.includePinnedEvidence")}</span>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={includeNotes}
+                onChange={(event) => setIncludeNotes(event.target.checked)}
+              />
+              <span>{t("ask.includeNotes")}</span>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={restrictToProjectPapers}
+                onChange={(event) => setRestrictToProjectPapers(event.target.checked)}
+              />
+              <span>{t("ask.restrictToProjectPapers")}</span>
+            </label>
+          </div>
+        </section>
+      ) : null}
       {error ? <EmptyState title={t("ask.unavailable")} detail={error} /> : null}
       {data ? (
         <>
@@ -214,6 +268,7 @@ export function AskPage({ client }: { client: WorkbenchClient }) {
           <AnswerPanel
             answer={data.answer}
             citations={data.citations}
+            noteRefs={data.note_refs}
             chunks={data.chunks}
             abstain={data.abstain}
             onCitationSelect={inspectChunk}

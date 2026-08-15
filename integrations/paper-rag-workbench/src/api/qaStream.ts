@@ -104,6 +104,16 @@ export function reduceQaStreamEvent(
         citations: Array.isArray(event.data.citations) ? event.data.citations : [],
         chunks: Array.isArray(event.data.chunks) ? event.data.chunks : state.answer.chunks,
         abstain: (event.data.abstain || state.answer.abstain) as QaData["abstain"],
+        note_refs: Array.isArray(event.data.note_refs)
+          ? event.data.note_refs.map(String)
+          : state.answer.note_refs,
+        context_policy:
+          typeof event.data.context_policy === "object" && event.data.context_policy !== null
+            ? (event.data.context_policy as QaData["context_policy"])
+            : state.answer.context_policy,
+        project_context_warnings: Array.isArray(event.data.project_context_warnings)
+          ? event.data.project_context_warnings.map(String)
+          : state.answer.project_context_warnings,
         trace_id: event.data.trace_id || state.answer.trace_id,
         n_chunks: typeof event.data.n_chunks === "number" ? event.data.n_chunks : undefined,
       },

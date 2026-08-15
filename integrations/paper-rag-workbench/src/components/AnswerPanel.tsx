@@ -7,6 +7,7 @@ import { StatusBadge } from "./StatusBadge";
 export function AnswerPanel({
   answer,
   citations,
+  noteRefs = [],
   chunks,
   abstain,
   onCitationSelect,
@@ -14,6 +15,7 @@ export function AnswerPanel({
 }: {
   answer: string;
   citations: string[];
+  noteRefs?: string[];
   chunks: EvidenceChunk[];
   abstain: QaData["abstain"];
   onCitationSelect?: (chunkId: string) => void;
@@ -31,6 +33,16 @@ export function AnswerPanel({
       </header>
       <p>{answer}</p>
       <CitationChips citations={citations} onSelect={onCitationSelect} />
+      {noteRefs.length ? (
+        <section className="note-reference-list">
+          <h4>{t("answer.noteRefs")}</h4>
+          <div className="citation-list">
+            {noteRefs.map((noteId) => (
+              <code key={noteId}>{noteId}</code>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <div className="evidence-list">
         {chunks.map((chunk) => (
           <EvidenceChunkCard key={chunk.chunk_id} chunk={chunk} onInspect={onChunkInspect} />

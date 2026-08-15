@@ -165,4 +165,29 @@ describe("Workbench API client", () => {
     expect(loaded.run.run_id).toBe(run.run.run_id);
     expect(handoff.prompt).toContain("Compare run");
   });
+
+  test("fixture client returns scoped note refs when project context is enabled", async () => {
+    const client = createWorkbenchClient({ fixtureMode: true });
+    const input = {
+      question: "What is Self-RAG?",
+      project_id: "project-self-rag",
+      context_policy: {
+        include_pinned_evidence: true,
+        include_notes: true,
+        restrict_to_project_papers: true,
+      },
+    };
+    const events: string[] = [];
+
+    const qa = await client.qa(input);
+    await client.qaStream(input, (event) => {
+      if (event.event === "done" && Array.isArray(event.data.note_refs)) {
+        events.push(...event.data.note_refs.map(String));
+      }
+    });
+
+    expect(qa.data?.note_refs).toContain("note-self-rag-1");
+    expect(qa.data?.context_policy).toEqual(input.context_policy);
+    expect(events).toContain("note-self-rag-1");
+  });
 });

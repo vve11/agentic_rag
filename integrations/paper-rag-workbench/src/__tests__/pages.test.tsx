@@ -199,6 +199,95 @@ describe("Overview and Library pages", () => {
     expect(screen.getByText("chunk-self-rag-1")).toBeInTheDocument();
   });
 
+  test("ask page keeps global QA payload unchanged when context toggles are off", async () => {
+    const user = userEvent.setup();
+    const baseClient = createWorkbenchClient({ fixtureMode: true });
+    const qaStream = vi.fn(async (...args: Parameters<typeof baseClient.qaStream>) => {
+      const [, onEvent] = args;
+      onEvent({
+        event: "done",
+        data: {
+          trace_id: "trace-global",
+          stage: "done",
+          status: "completed",
+          answer: "Global answer",
+          citations: [],
+          chunks: [],
+          abstain: { decision: "answer" },
+        },
+      });
+    });
+    const client = { ...baseClient, qaStream };
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <AskPage client={client} />
+      </ProjectProvider>,
+    );
+
+    await user.type(screen.getByLabelText(/问题/), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^提问$/ }));
+
+    expect(await screen.findByText(/Global answer/)).toBeInTheDocument();
+    expect(qaStream.mock.calls[0][0]).not.toHaveProperty("project_id");
+    expect(qaStream.mock.calls[0][0]).not.toHaveProperty("context_policy");
+  });
+
+  test("ask page sends scoped context and saves the scoped policy", async () => {
+    const user = userEvent.setup();
+    const baseClient = createWorkbenchClient({ fixtureMode: true });
+    const qaStream = vi.fn(async (...args: Parameters<typeof baseClient.qaStream>) => {
+      const [input, onEvent] = args;
+      onEvent({
+        event: "done",
+        data: {
+          trace_id: "trace-scoped",
+          stage: "done",
+          status: "completed",
+          answer: "Scoped answer",
+          citations: ["chunk-self-rag-1"],
+          note_refs: ["note-self-rag-1"],
+          context_policy: input.context_policy,
+          chunks: [],
+          abstain: { decision: "answer" },
+        },
+      });
+    });
+    const client = { ...baseClient, qaStream };
+
+    renderWithI18n(
+      <ProjectProvider client={client}>
+        <AskPage client={client} />
+      </ProjectProvider>,
+    );
+
+    await user.click(await screen.findByLabelText(/包含钉选证据/));
+    await user.click(screen.getByLabelText(/包含笔记/));
+    await user.click(screen.getByLabelText(/限制到项目论文/));
+    await user.type(screen.getByLabelText(/问题/), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^提问$/ }));
+
+    expect(await screen.findByText(/Scoped answer/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /用户笔记引用/ })).toBeInTheDocument();
+    expect(screen.getByText("note-self-rag-1")).toBeInTheDocument();
+    expect(qaStream.mock.calls[0][0]).toMatchObject({
+      project_id: "project-self-rag",
+      context_policy: {
+        include_pinned_evidence: true,
+        include_notes: true,
+        restrict_to_project_papers: true,
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: /保存问答/ }));
+    const detail = await client.project("project-self-rag");
+    expect(detail.saved_questions[0].context_policy).toEqual({
+      include_pinned_evidence: true,
+      include_notes: true,
+      restrict_to_project_papers: true,
+    });
+  });
+
   test("workspace page creates a project and generates project DSH handoff", async () => {
     const user = userEvent.setup();
     const client = createWorkbenchClient({ fixtureMode: true });

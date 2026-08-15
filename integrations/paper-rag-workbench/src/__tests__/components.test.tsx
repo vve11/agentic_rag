@@ -148,6 +148,22 @@ describe("Evidence components", () => {
     expect(screen.getByText("c1")).toBeInTheDocument();
     expect(screen.getByText(/reflection tokens/i)).toBeInTheDocument();
   });
+
+  test("AnswerPanel renders user note references separately from paper citations", () => {
+    renderWithI18n(
+      <AnswerPanel
+        answer="Self-RAG critiques generations."
+        citations={["chunk-self-rag-1"]}
+        noteRefs={["note-self-rag-1"]}
+        chunks={[]}
+        abstain={{ decision: "answer" }}
+      />,
+    );
+
+    expect(screen.getByText("chunk-self-rag-1")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /用户笔记引用/ })).toBeInTheDocument();
+    expect(screen.getByText("note-self-rag-1")).toBeInTheDocument();
+  });
 });
 
 describe("Discovery approval components", () => {

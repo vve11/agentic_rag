@@ -49,10 +49,14 @@ test("workbench bilingual fixture flow", async ({ page }) => {
   await expect(page.getByText(/critiques its own generations/i)).toBeVisible();
 
   await nav.getByRole("button", { name: /^问答$/ }).click();
+  await page.getByLabel(/包含钉选证据/).check();
+  await page.getByLabel(/包含笔记/).check();
+  await page.getByLabel(/限制到项目论文/).check();
   await page.getByLabel(/问题/).fill("What is Self-RAG?");
   await page.locator("form").getByRole("button", { name: /^提问$/ }).click();
   await expect(page.getByRole("heading", { name: /执行轨迹/ })).toBeVisible();
   await expect(page.getByText(/Understanding question/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /用户笔记引用/ })).toBeVisible();
   await page.getByRole("button", { name: /保存问答/ }).click();
   await expect(page.getByText(/问答已保存/)).toBeVisible();
   await page.getByRole("button", { name: "chunk-self-rag-1", exact: true }).click();

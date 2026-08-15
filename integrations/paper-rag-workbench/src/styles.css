@@ -622,6 +622,31 @@ textarea {
   line-height: 1.55;
 }
 
+.ask-context-panel {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 2fr);
+}
+
+.ask-context-panel h3,
+.note-reference-list h4 {
+  margin: 0;
+}
+
+.ask-context-panel p {
+  color: #5f6b76;
+  margin: 4px 0 0;
+}
+
+.note-reference-list {
+  border-top: 1px solid #e6ebf0;
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
 .paper-detail,
 .chunk-detail {
   margin-top: 16px;
@@ -850,6 +875,10 @@ textarea {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ask-context-panel {
     grid-template-columns: 1fr;
   }
 

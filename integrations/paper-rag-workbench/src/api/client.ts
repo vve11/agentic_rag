@@ -141,6 +141,17 @@ export function createWorkbenchClient(
       created_at: nowFixture(),
     };
   };
+  const fixtureQaEnvelope = (input: QaInput): McpEnvelope<QaData> => {
+    const envelope = clone(qaFixture);
+    if (!input.project_id || !input.context_policy || !envelope.data) return envelope;
+    const detail = fixtureProject(input.project_id);
+    envelope.data.note_refs = input.context_policy.include_notes
+      ? detail.notes.map((note) => note.note_id)
+      : [];
+    envelope.data.context_policy = input.context_policy;
+    envelope.data.project_context_warnings = [];
+    return envelope;
+  };
 
   return {
     health: (): Promise<HealthData> =>
@@ -174,10 +185,19 @@ export function createWorkbenchClient(
     search: (input: SearchInput): Promise<McpEnvelope<SearchData>> =>
       fixtureMode ? Promise.resolve(searchFixture) : post("/api/search", input),
     qa: (input: QaInput): Promise<McpEnvelope<QaData>> =>
-      fixtureMode ? Promise.resolve(qaFixture) : post("/api/qa", input),
+      fixtureMode ? Promise.resolve(fixtureQaEnvelope(input)) : post("/api/qa", input),
     qaStream: async (input: QaInput, onEvent: QaStreamHandler): Promise<void> => {
       if (fixtureMode) {
-        for (const event of qaStreamEventsFixture) onEvent(event);
+        const envelope = fixtureQaEnvelope(input);
+        for (const event of qaStreamEventsFixture) {
+          const next = clone(event);
+          if (next.event === "done" && envelope.data) {
+            next.data.note_refs = envelope.data.note_refs;
+            next.data.context_policy = envelope.data.context_policy;
+            next.data.project_context_warnings = envelope.data.project_context_warnings;
+          }
+          onEvent(next);
+        }
         return;
       }
       return streamPaperQa({
