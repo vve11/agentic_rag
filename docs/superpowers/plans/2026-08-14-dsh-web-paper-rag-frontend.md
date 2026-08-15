@@ -192,7 +192,7 @@ describe("Paper RAG portable cards", () => {
 Run:
 
 ```bash
-pnpm --dir integrations/deepseek-harness vitest run tests/paper-rag-cards.spec.mjs
+pnpm --dir integrations/deepseek-harness exec vitest run tests/paper-rag-cards.spec.mjs
 ```
 
 Expected: fail with a module-not-found error for `../src/paper-rag-cards.mjs`.
@@ -265,7 +265,7 @@ Include helper functions `titleFor`, `populateCard`, `renderPortableCardMarkdown
 Run:
 
 ```bash
-pnpm --dir integrations/deepseek-harness vitest run tests/paper-rag-cards.spec.mjs
+pnpm --dir integrations/deepseek-harness exec vitest run tests/paper-rag-cards.spec.mjs
 ```
 
 Expected: PASS.
@@ -369,7 +369,7 @@ test("approval-gated Paper RAG writes send side-effect reason and hidden boundar
 Run:
 
 ```bash
-pnpm --dir integrations/deepseek-harness vitest run tests/broker.spec.mjs
+pnpm --dir integrations/deepseek-harness exec vitest run tests/broker.spec.mjs
 ```
 
 Expected: fail because research tools are not in the broker catalog and fixture MCP servers do not list them.
@@ -527,7 +527,7 @@ Modify `integrations/deepseek-harness/src/broker-probe.mjs` so `READONLY_MODEL_T
 Run:
 
 ```bash
-pnpm --dir integrations/deepseek-harness vitest run tests/broker.spec.mjs tests/broker-probe.spec.mjs
+pnpm --dir integrations/deepseek-harness exec vitest run tests/broker.spec.mjs tests/broker-probe.spec.mjs
 ```
 
 Expected: PASS.
@@ -728,7 +728,7 @@ expect(syncedAgent).toContain("deepseek-v4-flash");
 Run:
 
 ```bash
-pnpm --dir integrations/deepseek-harness vitest run tests/composition.spec.mjs
+pnpm --dir integrations/deepseek-harness exec vitest run tests/composition.spec.mjs
 ```
 
 Expected: fail because the current persona does not name the full guided workflow or flash model.
@@ -764,7 +764,7 @@ Write tools (`paper_ingest`, `discovery_candidate_ingest`, `paper_deliver`) requ
 Run:
 
 ```bash
-pnpm --dir integrations/deepseek-harness vitest run tests/composition.spec.mjs
+pnpm --dir integrations/deepseek-harness exec vitest run tests/composition.spec.mjs
 ```
 
 Expected: PASS.
@@ -838,7 +838,7 @@ test("summarizes Paper RAG tool calls and portable cards from a headless session
 Run:
 
 ```bash
-pnpm --dir integrations/deepseek-harness vitest run tests/paper-rag-headless-runner.spec.mjs
+pnpm --dir integrations/deepseek-harness exec vitest run tests/paper-rag-headless-runner.spec.mjs
 ```
 
 Expected: fail because `summarize` does not accept `includeWorkflow` or emit `tool_calls` and `cards`.
@@ -944,7 +944,7 @@ Add this entry to `specs/20260813-deepseek-harness-migration/test/test-manifest.
 Run:
 
 ```bash
-pnpm --dir integrations/deepseek-harness vitest run tests/paper-rag-headless-runner.spec.mjs
+pnpm --dir integrations/deepseek-harness exec vitest run tests/paper-rag-headless-runner.spec.mjs
 PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_migration_gate.py
 ```
 
