@@ -20,7 +20,7 @@ export const name = "paper-rag-native-broker";
 export const inject = ["tools", "credentials"];
 
 export function credentialProviderForContext(ctx) {
-  return ctx?.get?.("credentials") ?? environmentCredentialProvider();
+  return ctx?.credentials ?? ctx?.get?.("credentials") ?? environmentCredentialProvider();
 }
 
 export function registerPaperRagRequestBoundaryTracking(ctx, broker) {

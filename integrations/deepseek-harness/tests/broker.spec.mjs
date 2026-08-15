@@ -263,6 +263,13 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
     expect(credentialProviderForContext(ctx)).toBe(service);
   });
 
+  test("uses ctx.credentials when Cordis injects the credential service directly", () => {
+    const service = namedCredentials({ DEEPSEEK_API_KEY: "dsh-secret" });
+    const ctx = { credentials: service };
+
+    expect(credentialProviderForContext(ctx)).toBe(service);
+  });
+
   test("allows only isolated live smoke writes without DSH turn-scoped approval", async () => {
     const isolatedEnv = {
       PAPER_RAG_DSH_HEADLESS_APPROVE_WRITES: "isolated",
