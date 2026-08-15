@@ -1062,6 +1062,7 @@ def test_live005_runner_uses_dsh_headless_isolated_workflow(
     assert "artifact_delivery" in result["summary"]["cards"]
     assert captured["env"]["PAPER_RAG_MCP_TOOLSET"] == "research"
     assert captured["env"]["PAPER_RAG_DSH_HEADLESS_REPORT_JSON"] == "1"
+    assert captured["env"]["PAPER_RAG_DSH_HEADLESS_SCRIPTED_WORKFLOW"] == "1"
     assert captured["env"]["PAPER_RAG_DSH_CREDENTIALS_PATH"].endswith(".credentials.yaml")
     assert captured["env"]["DSH_HOME"] == str(workspace.dsh_home)
     assert "test-secret" not in json.dumps(result)

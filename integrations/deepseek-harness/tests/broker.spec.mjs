@@ -11,6 +11,7 @@ import {
   buildPaperRagMcpChildEnv,
   createBrokerExec,
   deriveRequestBoundaryId,
+  mcpRequestOptionsForTool,
   redactSecrets,
   registerPaperRagNativeTools,
   toolSchemaHash,
@@ -220,6 +221,21 @@ describe("PaperRagNativeBroker private MCP boundary", () => {
 
   test("defaults the private Python child to the package MCP stdio entrypoint", () => {
     expect(DEFAULT_MCP_ARGS).toEqual(["-m", "paper_rag.mcp"]);
+  });
+
+  test("uses explicit MCP request timeouts for slow Paper RAG tools", () => {
+    const signal = new AbortController().signal;
+
+    expect(mcpRequestOptionsForTool("paper_discover", signal)).toMatchObject({
+      signal,
+      timeout: expect.any(Number),
+      resetTimeoutOnProgress: true,
+    });
+    expect(mcpRequestOptionsForTool("paper_discover", signal).timeout).toBeGreaterThan(60_000);
+    expect(mcpRequestOptionsForTool("discovery_candidate_ingest", signal).timeout).toBeGreaterThan(
+      mcpRequestOptionsForTool("paper_status", signal).timeout,
+    );
+    expect(mcpRequestOptionsForTool("paper_deliver", signal).timeout).toBeGreaterThan(60_000);
   });
 
   test("renders bounded model text from the canonical private MCP result", async () => {

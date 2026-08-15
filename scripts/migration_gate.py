@@ -1232,6 +1232,7 @@ def run_live005_dsh_frontend_workflow(
         {
             "PAPER_RAG_DSH_HEADLESS_REPORT_JSON": "1",
             "PAPER_RAG_DSH_HEADLESS_WORKFLOW": "1",
+            "PAPER_RAG_DSH_HEADLESS_SCRIPTED_WORKFLOW": "1",
             "PAPER_RAG_DSH_HEADLESS_APPROVE_WRITES": "isolated",
         }
     )

@@ -93,6 +93,83 @@ describe("Paper RAG live headless runner", () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
+  test("scripted workflow executes Paper RAG native tools through DSH tools runtime", async () => {
+    const agentCtx = {};
+    const session = { seq: 1, events: [] };
+    const agent = {
+      id: "agent-scripted",
+      ctx: agentCtx,
+      session,
+      whenIdle: vi.fn().mockResolvedValue(undefined),
+    };
+    const mount = vi.fn().mockResolvedValue({ id: "paper-research" });
+    const flush = vi.fn().mockResolvedValue(undefined);
+    const create = vi.fn(async (options) => {
+      await options.setup(agentCtx);
+      return { agent };
+    });
+    const execute = vi.fn(async (exec) => scriptedToolResult(exec.name));
+    const stdout = { write: vi.fn() };
+    const stderr = { write: vi.fn() };
+    const exit = vi.fn();
+    const emit = vi.fn();
+    const ctx = {
+      emit,
+      get(name) {
+        return {
+          agentDefaultModel: {
+            currentSelection: () => ({
+              provider: "deepseek-official",
+              model: "deepseek-v4-flash",
+            }),
+          },
+          agentPresets: { mount },
+          agents: { create },
+          sessions: { flush },
+          tools: { execute },
+        }[name];
+      },
+    };
+
+    await run(
+      ctx,
+      {
+        task: "run fixed smoke",
+        preset: "paper-research",
+        scriptedWorkflow: true,
+        includeWorkflow: true,
+        reportJson: true,
+      },
+      { stdout, stderr, exit },
+    );
+
+    expect(emit).toHaveBeenCalledWith(
+      "agent/inbox/claimed",
+      expect.objectContaining({
+        agent,
+        message: expect.objectContaining({ source: { kind: "user" } }),
+      }),
+    );
+    expect(execute.mock.calls.map(([exec]) => exec.name)).toEqual([
+      "paper_discover",
+      "discovery_candidate_ingest",
+      "paper_qa",
+      "paper_deliver",
+    ]);
+    expect(execute.mock.calls[1][0].arguments).toEqual({ candidate_ids: [11], force: true });
+    expect(execute.mock.calls[2][0].arguments.paper_ids).toEqual(["paper-11"]);
+    expect(flush).toHaveBeenCalledWith(session);
+    const payload = JSON.parse(stdout.write.mock.calls[0][0]);
+    expect(payload).toMatchObject({
+      preset: "paper-research",
+      tool_calls: ["paper_discover", "discovery_candidate_ingest", "paper_qa", "paper_deliver"],
+      cards: ["discovery_candidates", "ingest_receipt", "evidence_answer", "artifact_delivery"],
+      reason: { kind: "completed" },
+    });
+    expect(stderr.write).not.toHaveBeenCalled();
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
   test("summarizes Paper RAG tool calls and portable cards from a headless session", () => {
     const events = [
       { seq: 1, type: "turn/start", data: {} },
@@ -173,3 +250,44 @@ describe("Paper RAG live headless runner", () => {
     ).toBe(false);
   });
 });
+
+function scriptedToolResult(name) {
+  const byName = {
+    paper_discover: {
+      ok: true,
+      tool: "paper_discover",
+      data: {
+        candidates: [{ id: 11, title: "Candidate", paper_id: "paper-11" }],
+      },
+    },
+    discovery_candidate_ingest: {
+      ok: true,
+      tool: "discovery_candidate_ingest",
+      data: {
+        results: [{ candidate_id: 11, paper_id: "paper-11", status: "ingested" }],
+      },
+    },
+    paper_qa: {
+      ok: true,
+      tool: "paper_qa",
+      data: {
+        citations: ["chunk-1"],
+        chunks: [{ chunk_id: "chunk-1", paper_id: "paper-11" }],
+      },
+    },
+    paper_deliver: {
+      ok: true,
+      tool: "paper_deliver",
+      data: {
+        artifact: { manifest_path: "/tmp/manifest.json" },
+      },
+    },
+  };
+  return {
+    isError: false,
+    value: {
+      structuredContent: byName[name],
+    },
+    content: [{ type: "text", text: `${name} ok` }],
+  };
+}

@@ -21,6 +21,17 @@ import {
 const BROKER_CALLER = "deepseek_harness";
 const APPROVAL_ALLOW_ONCE = "allowed-once";
 const REQUEST_BOUNDARY_NAMESPACE = "3ef5d38b-0fcb-5ec8-9f49-6fc0b9b7c4ec";
+const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 120_000;
+const MCP_REQUEST_TIMEOUT_MS_BY_TOOL = Object.freeze({
+  discovery_candidate_ingest: 420_000,
+  discovery_run_get: 120_000,
+  paper_compare: 240_000,
+  paper_deliver: 300_000,
+  paper_discover: 180_000,
+  paper_ingest: 420_000,
+  paper_qa: 240_000,
+  paper_section: 180_000,
+});
 const MCP_CHILD_ENV_ALLOWLIST = Object.freeze([
   "CHAT_MODEL",
   "HOME",
@@ -64,6 +75,18 @@ function jsonContent(value) {
 /** @param {any} value */
 function renderMcpResult(_args, value) {
   return Array.isArray(value?.content) ? value.content : jsonContent(value);
+}
+
+export function mcpRequestTimeoutForTool(name) {
+  return MCP_REQUEST_TIMEOUT_MS_BY_TOOL[name] ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS;
+}
+
+export function mcpRequestOptionsForTool(name, signal) {
+  return {
+    signal,
+    timeout: mcpRequestTimeoutForTool(name),
+    resetTimeoutOnProgress: true,
+  };
 }
 
 function replaceAllLiteral(text, needle, replacement) {
@@ -664,7 +687,7 @@ export class PaperRagNativeBroker {
         },
       },
       CallToolResultSchema,
-      { signal: exec?.signal },
+      mcpRequestOptionsForTool(rawName, exec?.signal),
     );
     const safeResult = redactResult(result, this.#secrets);
     if (safeResult.isError) {

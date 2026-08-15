@@ -26,6 +26,7 @@ function normalizeConfig(config) {
     preset: String(config?.preset ?? "paper-research"),
     includeWorkflow: Boolean(config?.includeWorkflow ?? config?.reportJson),
     reportJson: Boolean(config?.reportJson),
+    scriptedWorkflow: Boolean(config?.scriptedWorkflow),
   };
 }
 
@@ -118,6 +119,92 @@ function fail(io, error) {
   io.exit(1);
 }
 
+export async function runScriptedWorkflow(ctx, agent, config, env = process.env) {
+  const tools = ctx.get("tools");
+  if (typeof tools?.execute !== "function") {
+    throw new Error("paper-rag-headless-runner: DSH tools runtime unavailable");
+  }
+
+  const boundaryMessage = createUserMessage({
+    content: [{ type: "text", text: config.task }],
+    source: { kind: "user" },
+  });
+  ctx.emit?.("agent/inbox/claimed", { agent, message: boundaryMessage });
+
+  const topic =
+    env.PAPER_RAG_DSH_HEADLESS_TOPIC ?? "retrieval augmented generation with self reflection";
+  const toolCalls = [];
+  const cards = [];
+
+  const call = async (name, args) => {
+    const callId = `paper-rag-live005-${toolCalls.length + 1}-${name}`;
+    const result = await tools.execute({
+      callId,
+      rootCallId: callId,
+      name,
+      arguments: args,
+      agent,
+      signal: new AbortController().signal,
+    });
+    toolCalls.push(name);
+    const structured = structuredFromToolResult(result);
+    const cardType = cardTypeForTool(structured?.tool ?? name);
+    if (cardType !== undefined) cards.push(cardType);
+    if (result?.isError) {
+      throw new Error(`${name} failed: ${toolResultText(result)}`);
+    }
+    if (structured?.ok === false) {
+      throw new Error(`${name} failed: ${structured?.error?.message ?? "structured error"}`);
+    }
+    return structured;
+  };
+
+  const discover = await call("paper_discover", {
+    topic,
+    max_candidates: 3,
+    sources: ["arxiv"],
+  });
+  const selected = selectDiscoveryCandidate(discover);
+  const candidateId = Number(selected.id);
+  if (!Number.isFinite(candidateId)) {
+    throw new Error("paper_discover selected candidate is missing a numeric id");
+  }
+
+  const ingest = await call("discovery_candidate_ingest", {
+    candidate_ids: [candidateId],
+    force: true,
+  });
+  const paperId = ingestPaperId(ingest, selected);
+  if (paperId === "") {
+    throw new Error("discovery_candidate_ingest returned no paper_id");
+  }
+
+  const qa = await call("paper_qa", {
+    question: "What problem does this paper solve, and what is its main method?",
+    paper_ids: [paperId],
+    top_k: 8,
+  });
+  const deliver = await call("paper_deliver", {
+    format: "markdown_survey",
+    paper_ids: [paperId],
+    title: "LIVE G2 Research Deliverable",
+  });
+
+  const citationCount = Array.isArray(qa?.data?.citations) ? qa.data.citations.length : 0;
+  const manifestPath = deliver?.data?.artifact?.manifest_path ?? "";
+  return {
+    text: [
+      `selected=${selected.title ?? selected.paper_id ?? candidateId}`,
+      `paper_id=${paperId}`,
+      `qa_citations=${citationCount}`,
+      `artifact_manifest=${manifestPath}`,
+    ].join("\n"),
+    reason: { kind: "completed" },
+    tool_calls: toolCalls,
+    cards,
+  };
+}
+
 export async function run(ctx, rawConfig, io) {
   io ??= internals;
   const config = normalizeConfig(rawConfig);
@@ -153,23 +240,28 @@ export async function run(ctx, rawConfig, io) {
   });
 
   await agent.whenIdle();
-  const firstSeq = agent.session.seq;
-  agent.followup(
-    createUserMessage({
-      content: [
-        {
-          type: "text",
-          text: config.task,
-        },
-      ],
-      source: { kind: "user" },
-    }),
-  );
-  await agent.whenIdle();
+  let outcome;
+  if (config.scriptedWorkflow) {
+    outcome = await runScriptedWorkflow(ctx, agent, config);
+  } else {
+    const firstSeq = agent.session.seq;
+    agent.followup(
+      createUserMessage({
+        content: [
+          {
+            type: "text",
+            text: config.task,
+          },
+        ],
+        source: { kind: "user" },
+      }),
+    );
+    await agent.whenIdle();
+    outcome = summarize(agent.session.events, firstSeq, {
+      includeWorkflow: config.includeWorkflow,
+    });
+  }
   await sessions.flush(agent.session);
-  const outcome = summarize(agent.session.events, firstSeq, {
-    includeWorkflow: config.includeWorkflow,
-  });
   if (config.reportJson) {
     io.stdout.write(`${JSON.stringify({ preset: config.preset, ...outcome }, null, 2)}\n`);
   } else {
@@ -179,6 +271,41 @@ export async function run(ctx, rawConfig, io) {
     io.stderr.write(`dsh: ${outcome.reason.error.code}: ${outcome.reason.error.message}\n`);
   }
   io.exit(outcome.reason?.kind === "completed" ? 0 : 1);
+}
+
+function structuredFromToolResult(result) {
+  const value = result?.value;
+  if (value !== null && typeof value === "object") {
+    return value.structuredContent ?? value;
+  }
+  return {};
+}
+
+function toolResultText(result) {
+  const content = Array.isArray(result?.content) ? result.content : [];
+  const text = content
+    .filter((block) => block?.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+  return result?.error?.message ?? text ?? "unknown error";
+}
+
+function selectDiscoveryCandidate(structured) {
+  const candidates = Array.isArray(structured?.data?.candidates)
+    ? structured.data.candidates
+    : [];
+  const selected = candidates.find((candidate) => candidate?.id !== undefined);
+  if (selected === undefined) {
+    throw new Error(`paper_discover returned no candidates`);
+  }
+  return selected;
+}
+
+function ingestPaperId(structured, selected) {
+  const data = structured?.data ?? {};
+  const results = Array.isArray(data.results) ? data.results : [data];
+  const result = results.find((item) => item?.paper_id);
+  return String(result?.paper_id ?? selected?.paper_id ?? "");
 }
 
 export function apply(ctx, config) {
