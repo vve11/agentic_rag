@@ -35,6 +35,8 @@ The Workbench MVP already supports:
 - Ask: cited QA with evidence cards.
 - Discover: candidate discovery and approval-gated ingest.
 - DSH Chat bridge: opens DSH Web as the chat and trace companion.
+- The core already has `paper_rag.rag.qa_stream`, but Workbench currently uses
+  blocking QA and does not expose streaming progress or agent stages.
 
 The latest live smoke exposed the next reliability needs:
 
@@ -54,6 +56,9 @@ The latest live smoke exposed the next reliability needs:
 - Add a first-class Paper Detail view with metadata, sections, chunks, and local
   evidence actions.
 - Add Citation Drilldown so every answer citation can be inspected in context.
+- Add streaming Ask with a visible agent timeline so users can see retrieval,
+  reflection, abstain, generation, and finalization progress before the full
+  answer is done.
 - Add a stronger DSH handoff model that sends selected papers, chunks, and
   questions into DSH as a prepared prompt while keeping DSH as a separate surface.
 - Preserve explicit approval for all real writes.
@@ -219,6 +224,37 @@ Keep the current approval boundary for writes:
 V2 may add disabled future actions for rebuild/reindex, but implementation must
 include backend tests proving they cannot write without approval.
 
+### 6. Streaming Ask And Agent Timeline
+
+Purpose: recover the live research-assistant feel without reintroducing
+DeerFlow.
+
+Ask should support a streaming path that emits stage events and answer chunks:
+
+- `start`: request accepted and trace id created.
+- `intent`: question classified.
+- `rewrite`: retrieval query generated.
+- `retrieved`: evidence chunks found.
+- `reflect`: reflection/follow-up decision when enabled.
+- `abstain`: evidence confidence decision.
+- `answer_chunk`: generated answer text.
+- `done`: final answer, citations, chunks, abstain, paper ids, query resolution.
+- `error`: stream failure with a safe message.
+
+Every non-token stage should include `trace_id`, `stage`, `status`, `summary`,
+and `elapsed_ms` when available. `answer_chunk` should include `trace_id`,
+`stage: "answer"`, and `text`.
+
+Workbench should render these events as:
+
+- a live `Agent Timeline` on the Ask page,
+- incrementally growing answer text,
+- final citation chips and drilldown once `done` arrives,
+- a clear fallback path to blocking `/api/qa` if streaming is unavailable.
+
+The streaming path belongs to Workbench's FastAPI adapter and React app. It must
+not use DeerFlow gateway routes or DeerFlow frontend code.
+
 ## API Design
 
 Reuse existing endpoints where possible:
@@ -227,6 +263,7 @@ Reuse existing endpoints where possible:
 - `GET /api/papers`
 - `POST /api/search`
 - `POST /api/qa`
+- `POST /api/qa/stream`
 - `POST /api/section`
 - `POST /api/discover`
 - `POST /api/ingest/candidates`
@@ -288,6 +325,32 @@ file paths or raw artifact paths.
 Optional read-only helper that returns a prepared prompt and DSH URL. The server
 does not submit anything to DSH.
 
+### `POST /api/qa/stream`
+
+Returns `text/event-stream` frames from `paper_rag.rag.async_api.stream_answer_async`.
+It accepts the same payload shape as `POST /api/qa` and is read-only.
+
+```ts
+type QaStreamEvent =
+  | { event: "start"; data: StageEventData }
+  | { event: "intent"; data: StageEventData & Record<string, unknown> }
+  | { event: "rewrite"; data: StageEventData & { queries?: string[]; keywords?: string } }
+  | { event: "retrieved"; data: StageEventData & { iter?: number; n_chunks?: number } }
+  | { event: "reflect"; data: StageEventData & Record<string, unknown> }
+  | { event: "abstain"; data: StageEventData & Record<string, unknown> }
+  | { event: "answer_chunk"; data: { trace_id: string; stage: "answer"; text: string } }
+  | { event: "done"; data: StageEventData & QaData & { paper_ids?: string[] } }
+  | { event: "error"; data: StageEventData & { message: string } };
+
+type StageEventData = {
+  trace_id: string;
+  stage: string;
+  status: "running" | "completed" | "failed" | "skipped";
+  summary: string;
+  elapsed_ms?: number;
+};
+```
+
 ## Frontend Design
 
 Navigation becomes:
@@ -311,8 +374,17 @@ New components:
 - `PaperDetailPanel`
 - `ChunkDetailPanel`
 - `ScoreBreakdown`
+- `AgentTimeline`
 - `DshHandoffDialog`
 - `WarningBanner`
+
+New frontend helpers:
+
+- `api/qaStream.ts`: fetch-based SSE parser, stream reader, and pure reducer.
+- `AgentTimeline`: stage list with status, summaries, and elapsed time.
+
+The Ask page should prefer streaming when available, but keep the existing
+blocking client method as a fallback.
 
 Layout principles:
 
@@ -350,6 +422,9 @@ Actions:
   supplied evidence.
 - If LLM generation is unavailable, Ask shows evidence-only mode with chunks and
   a clear generation warning.
+- If the streaming QA endpoint fails before `done`, Ask should show the last
+  completed stages, a safe error message, and a retry path that can use blocking
+  `/api/qa`.
 - If DSH is unavailable, handoff still provides a copyable prompt.
 - The frontend must never show raw secret values, credential file contents, or
   runtime session data.
@@ -361,6 +436,7 @@ Backend:
 - Unit tests for index-health diagnostics with fake SQLite/Qdrant/LLM states.
 - Tests that diagnostics redact paths and never serialize secret values.
 - Tests for paper detail and chunk detail endpoints.
+- Tests for normalized `qa_stream` event contract and Workbench SSE framing.
 - Tests that write-like actions remain approval-gated.
 - Regression tests that `paper_search` fallback is represented in response
   warnings or metadata.
@@ -368,10 +444,12 @@ Backend:
 Frontend:
 
 - Component tests for health cards, warning banners, paper detail, chunk detail,
-  and DSH handoff dialog.
-- Page tests for Health, Paper Detail, Citation Drilldown, and degraded Search.
+  Agent Timeline, and DSH handoff dialog.
+- Page tests for Health, Paper Detail, Citation Drilldown, streaming Ask, and
+  degraded Search.
 - Fixture-mode Playwright smoke covering Overview -> Health -> Library ->
-  Paper Detail -> Search -> Ask -> Citation Drilldown -> Discover approval.
+  Paper Detail -> Search -> Ask -> Agent Timeline -> Citation Drilldown ->
+  Discover approval.
 
 Integration:
 
@@ -387,8 +465,10 @@ Integration:
 3. Add Paper Detail endpoint and UI.
 4. Add Chunk Detail / Citation Drilldown.
 5. Add DSH handoff dialog.
-6. Extend Playwright fixture smoke and regression tests.
-7. Run backend, frontend, DSH, migration, and secret-scan validation.
+6. Normalize QA stream events and expose Workbench SSE.
+7. Add frontend streaming Ask and Agent Timeline.
+8. Extend Playwright fixture smoke and regression tests.
+9. Run backend, frontend, DSH, migration, and secret-scan validation.
 
 Each step should be committed separately and should preserve a clean git tree.
 
@@ -398,6 +478,8 @@ Each step should be committed separately and should preserve a clean git tree.
 - User can inspect one paper's sections and chunks from Library.
 - User can click an answer citation and see the exact chunk, paper, page, and
   surrounding context.
+- User can ask a question and see agent-stage progress plus incremental answer
+  text before final citations arrive.
 - User can understand when Qdrant is unavailable and whether sparse fallback is
   being used.
 - User can copy/open a DSH handoff prompt based on selected paper/chunk context.
@@ -411,6 +493,8 @@ Each step should be committed separately and should preserve a clean git tree.
 ## Implementation Constraints
 
 - Use the existing Workbench FastAPI adapter and React app.
+- Implement streaming through Workbench-owned `/api/qa/stream`; do not route it
+  through DeerFlow.
 - Reuse MCP tools first. Add Workbench-only read endpoints only for diagnostics
   or detail views that are not appropriate as model-visible tools.
 - Do not add dependencies unless they remove clear complexity.

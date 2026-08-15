@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build Paper RAG Workbench V2 as the primary local research workbench with index health, paper detail, citation drilldown, and DSH handoff.
+**Goal:** Build Paper RAG Workbench V2 as the primary local research workbench with index health, paper detail, citation drilldown, streaming Ask, agent timeline, and DSH handoff.
 
-**Architecture:** Extend the existing FastAPI Workbench adapter and React SPA. Keep Paper RAG business logic in `src/paper_rag`, use MCP tools for existing research operations, and add small read-only Workbench helpers only for diagnostics/detail views that are not model-facing tools.
+**Architecture:** Extend the existing FastAPI Workbench adapter and React SPA. Keep Paper RAG business logic in `src/paper_rag`, use MCP tools for existing research operations, add small read-only Workbench helpers for diagnostics/detail views, and expose Workbench-owned QA streaming through `/api/qa/stream` using the existing `paper_rag.rag.qa_stream` pipeline.
 
 **Tech Stack:** Python 3, FastAPI, Pydantic, SQLModel, React 18, TypeScript, Vite, Vitest, Testing Library, Playwright fixture smoke.
 
@@ -30,17 +30,23 @@
   - Never returns raw secrets or absolute local artifact/PDF paths.
 - Modify `src/paper_rag/workbench/api.py`
   - Adds injectable read-only helpers for tests.
-  - Adds `GET /api/health/index`, `GET /api/papers/{paper_id:path}`, `GET /api/chunks/{chunk_id}`, and `POST /api/dsh/handoff`.
+  - Adds `GET /api/health/index`, `GET /api/papers/{paper_id:path}`, `GET /api/chunks/{chunk_id}`, `POST /api/dsh/handoff`, and `POST /api/qa/stream`.
 - Modify `src/paper_rag/workbench/schemas.py`
   - Adds strict request schemas for DSH handoff.
+- Modify `src/paper_rag/rag/qa_stream.py`
+  - Normalizes stream events with `start`, `trace_id`, `stage`, `status`, `summary`, and `elapsed_ms`.
+- Modify `tests/test_finalization.py`
+  - Covers the canonical stream event contract.
 - Add tests to `tests/test_workbench_read_store.py`
   - Covers detail dictionaries, warning detection, bounded id validation, and path redaction.
 - Extend `tests/test_workbench_api.py`
-  - Covers new endpoints, secret safety, no write calls, and handoff prompt construction.
+  - Covers new endpoints, secret safety, no write calls, SSE framing, and handoff prompt construction.
 - Modify `integrations/paper-rag-workbench/src/types.ts`
-  - Adds typed contracts for health, detail, chunk drilldown, score breakdown, and DSH handoff.
+  - Adds typed contracts for health, detail, chunk drilldown, score breakdown, streaming QA, and DSH handoff.
 - Modify `integrations/paper-rag-workbench/src/api/client.ts`
   - Adds client methods for new endpoints and fixture-mode responses.
+- Create `integrations/paper-rag-workbench/src/api/qaStream.ts`
+  - Owns fetch-based SSE parsing, stream reading, and pure stream-state reducer.
 - Modify `integrations/paper-rag-workbench/src/api/fixtures.ts`
   - Adds degraded-health, paper-detail, chunk-detail, and handoff fixtures.
 - Create frontend components:
@@ -51,6 +57,7 @@
   - `integrations/paper-rag-workbench/src/components/PaperDetailPanel.tsx`
   - `integrations/paper-rag-workbench/src/components/ChunkDetailPanel.tsx`
   - `integrations/paper-rag-workbench/src/components/ScoreBreakdown.tsx`
+  - `integrations/paper-rag-workbench/src/components/AgentTimeline.tsx`
   - `integrations/paper-rag-workbench/src/components/DshHandoffDialog.tsx`
 - Create frontend pages:
   - `integrations/paper-rag-workbench/src/pages/HealthPage.tsx`
@@ -69,6 +76,7 @@
   - `integrations/paper-rag-workbench/src/__tests__/client.test.ts`
   - `integrations/paper-rag-workbench/src/__tests__/components.test.tsx`
   - `integrations/paper-rag-workbench/src/__tests__/pages.test.tsx`
+  - `integrations/paper-rag-workbench/src/__tests__/qaStream.test.ts`
 - Extend Playwright fixture smoke:
   - Extend `integrations/paper-rag-workbench/tests/workbench.spec.ts`.
 - Update docs:
@@ -2253,7 +2261,1144 @@ git commit -m "feat: add structured dsh handoff"
 
 ---
 
-### Task 7: Fixture Smoke, Docs, And Final Verification
+### Task 7: Normalize QA Stream Event Contract
+
+**Files:**
+- Modify: `src/paper_rag/rag/qa_stream.py`
+- Modify: `tests/test_finalization.py`
+
+**Interfaces:**
+- Consumes: `paper_rag.observability.new_trace_id() -> str`
+- Produces: `stream_answer(...) -> Generator[dict, None, None]`
+- Produces event frames shaped as `{"event": str, "data": dict[str, Any]}`
+- Produces common stage fields: `trace_id: str`, `stage: str`, `status: str`, `summary: str`, `elapsed_ms?: int`
+
+- [ ] **Step 1: Write failing stream-contract tests**
+
+Append these tests to `tests/test_finalization.py` near the existing streaming tests:
+
+```python
+def test_stream_answer_emits_start_with_trace_id(monkeypatch):
+    from paper_rag.rag import context_resolver, qa_stream
+
+    monkeypatch.setattr(context_resolver, "_load_memory_scope_hint", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        qa_stream,
+        "_retrieve_round",
+        lambda q, p, k: ([], {"dense_queries": [q], "bm25_query": q}),
+    )
+    monkeypatch.setattr(
+        qa_stream,
+        "classify",
+        lambda q: {"intent": "factual", "top_k": 5, "max_iter": 1, "rrf_k": 60},
+    )
+    monkeypatch.setattr(
+        qa_stream,
+        "rewrite",
+        lambda q: {"dense_queries": [q], "bm25_query": q, "raw": {}},
+    )
+
+    events = list(qa_stream.stream_answer("Q", paper_ids=None))
+
+    assert events[0]["event"] == "start"
+    start = events[0]["data"]
+    assert start["stage"] == "start"
+    assert start["status"] == "completed"
+    assert start["summary"] == "Started Paper RAG QA"
+    assert isinstance(start["trace_id"], str)
+    assert len(start["trace_id"]) == 16
+    trace_id = start["trace_id"]
+    assert all(event["data"].get("trace_id") == trace_id for event in events)
+
+
+def test_stream_answer_stage_events_include_contract_fields(monkeypatch):
+    from paper_rag.rag import context_resolver, qa_stream
+
+    def fake_retrieve(q, p, k):
+        return (
+            [
+                {
+                    "chunk_id": "c1",
+                    "paper_id": "p1",
+                    "text": "Self-RAG uses retrieval and reflection.",
+                    "score_rerank": 0.9,
+                }
+            ],
+            {"dense_queries": [q], "bm25_query": q},
+        )
+
+    def fake_stream(system, user):
+        yield "Self-RAG uses retrieval and reflection. [chunk:c1]"
+
+    monkeypatch.setattr(context_resolver, "_load_memory_scope_hint", lambda *args, **kwargs: [])
+    monkeypatch.setattr(qa_stream, "_retrieve_round", fake_retrieve)
+    monkeypatch.setattr(
+        qa_stream,
+        "classify",
+        lambda q: {"intent": "factual", "top_k": 2, "max_iter": 1, "rrf_k": 60},
+    )
+    monkeypatch.setattr(
+        qa_stream,
+        "rewrite",
+        lambda q: {"dense_queries": [q], "bm25_query": q, "raw": {}},
+    )
+    monkeypatch.setattr(qa_stream, "_stream_chat", fake_stream)
+
+    events = list(qa_stream.stream_answer("What is Self-RAG?", paper_ids=None))
+    trace_id = events[0]["data"]["trace_id"]
+    by_name = {event["event"]: event["data"] for event in events if event["event"] != "answer_chunk"}
+
+    assert by_name["intent"]["stage"] == "intent"
+    assert by_name["intent"]["status"] == "completed"
+    assert isinstance(by_name["intent"]["elapsed_ms"], int)
+    assert by_name["rewrite"]["stage"] == "rewrite"
+    assert by_name["retrieved"]["stage"] == "retrieve"
+    assert by_name["retrieved"]["query"] == "What is Self-RAG?"
+    assert by_name["abstain"]["stage"] == "abstain"
+    assert by_name["done"]["stage"] == "done"
+    assert by_name["done"]["status"] == "completed"
+    assert by_name["done"]["trace_id"] == trace_id
+
+    chunks = [event for event in events if event["event"] == "answer_chunk"]
+    assert chunks
+    assert chunks[0]["data"]["stage"] == "answer"
+    assert chunks[0]["data"]["trace_id"] == trace_id
+```
+
+- [ ] **Step 2: Run stream tests to verify they fail**
+
+Run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_finalization.py::test_stream_answer_emits_start_with_trace_id tests/test_finalization.py::test_stream_answer_stage_events_include_contract_fields
+```
+
+Expected: failure because `start`, `trace_id`, and normalized stage fields are not emitted yet.
+
+- [ ] **Step 3: Add stream event helpers**
+
+Modify `src/paper_rag/rag/qa_stream.py` imports:
+
+```python
+from time import perf_counter
+```
+
+Add helpers below `_SYSTEM`:
+
+```python
+def _elapsed_ms(started: float) -> int:
+    return int((perf_counter() - started) * 1000)
+
+
+def _event(
+    name: str,
+    *,
+    trace_id: str,
+    stage: str,
+    status: str,
+    summary: str,
+    started: float | None = None,
+    **data: Any,
+) -> dict[str, Any]:
+    payload = {
+        "trace_id": trace_id,
+        "stage": stage,
+        "status": status,
+        "summary": summary,
+        **data,
+    }
+    if started is not None:
+        payload["elapsed_ms"] = _elapsed_ms(started)
+    return {"event": name, "data": payload}
+```
+
+- [ ] **Step 4: Normalize stream emissions**
+
+Inside `stream_answer`, import and create one trace id before query resolution:
+
+```python
+from ..observability import new_trace_id
+
+trace_id = new_trace_id()
+yield _event(
+    "start",
+    trace_id=trace_id,
+    stage="start",
+    status="completed",
+    summary="Started Paper RAG QA",
+)
+```
+
+Wrap each stage with `perf_counter()`:
+
+```python
+stage_started = perf_counter()
+intent_cfg = classify(question)
+yield _event(
+    "intent",
+    trace_id=trace_id,
+    stage="intent",
+    status="completed",
+    summary=f"Classified as {intent_cfg['intent']}",
+    started=stage_started,
+    **intent_cfg,
+)
+```
+
+For the first rewrite event:
+
+```python
+yield _event(
+    "rewrite",
+    trace_id=trace_id,
+    stage="rewrite",
+    status="completed",
+    summary="Prepared retrieval queries",
+    started=stage_started,
+    queries=rw.get("dense_queries", []),
+    keywords=rw.get("bm25_query", ""),
+)
+```
+
+For retrieval success:
+
+```python
+yield _event(
+    "retrieved",
+    trace_id=trace_id,
+    stage="retrieve",
+    status="completed",
+    summary=f"Retrieved {len(chunks)} chunks",
+    started=stage_started,
+    iter=it,
+    query=current_query,
+    n_chunks=len(chunks),
+)
+```
+
+For retrieval failure:
+
+```python
+yield _event(
+    "error",
+    trace_id=trace_id,
+    stage="retrieve",
+    status="failed",
+    summary="Retrieval failed",
+    started=stage_started,
+    message=f"retrieve failed: {e}",
+)
+```
+
+For `answer_chunk`:
+
+```python
+yield {
+    "event": "answer_chunk",
+    "data": {"trace_id": trace_id, "stage": "answer", "text": tok},
+}
+```
+
+Before every `done` yield, update `done_data`:
+
+```python
+done_data.update(
+    {
+        "trace_id": trace_id,
+        "stage": "done",
+        "status": "completed",
+        "summary": "Paper RAG QA complete",
+    }
+)
+```
+
+Apply the same `_event(...)` pattern to `reflect`, `abstain`, and chat-stream errors. Existing payload fields such as `query_resolution`, `evidence_chunks`, `evidence_selection`, and `paper_ids` must remain present.
+
+- [ ] **Step 5: Run stream tests**
+
+Run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_finalization.py
+```
+
+Expected: all tests in `tests/test_finalization.py` pass.
+
+- [ ] **Step 6: Commit Task 7**
+
+Run:
+
+```bash
+git add src/paper_rag/rag/qa_stream.py tests/test_finalization.py
+git commit -m "feat: normalize paper rag stream events"
+```
+
+---
+
+### Task 8: Workbench QA Stream API
+
+**Files:**
+- Modify: `src/paper_rag/workbench/api.py`
+- Modify: `tests/test_workbench_api.py`
+
+**Interfaces:**
+- Consumes: `paper_rag.rag.async_api.stream_answer_async`
+- Consumes: `QaRequest` from `src/paper_rag/workbench/schemas.py`
+- Produces: `POST /api/qa/stream` returning `text/event-stream`
+- Produces: `_sse_frame(event: dict[str, Any]) -> str`
+
+- [ ] **Step 1: Write failing Workbench SSE tests**
+
+Append this test to `tests/test_workbench_api.py`:
+
+```python
+def test_qa_stream_endpoint_frames_sse_events(tmp_path):
+    from paper_rag.workbench.api import create_app
+
+    async def fake_stream_answer(
+        question,
+        *,
+        paper_ids=None,
+        conversation_id=None,
+        user_id="system",
+        resolved_question=None,
+    ):
+        assert question == "What is Self-RAG?"
+        assert paper_ids == ["arxiv:2310.11511"]
+        assert conversation_id == "workbench"
+        assert user_id == "workbench"
+        yield {
+            "event": "start",
+            "data": {
+                "trace_id": "trace1234567890",
+                "stage": "start",
+                "status": "completed",
+                "summary": "Started Paper RAG QA",
+            },
+        }
+        yield {
+            "event": "answer_chunk",
+            "data": {
+                "trace_id": "trace1234567890",
+                "stage": "answer",
+                "text": "Self-RAG",
+            },
+        }
+        yield {
+            "event": "done",
+            "data": {
+                "trace_id": "trace1234567890",
+                "stage": "done",
+                "status": "completed",
+                "summary": "Paper RAG QA complete",
+                "answer": "Self-RAG",
+                "citations": [],
+                "chunks": [],
+                "abstain": {},
+                "n_chunks": 0,
+                "paper_ids": ["arxiv:2310.11511"],
+                "query_resolution": {"effective_question": "What is Self-RAG?"},
+            },
+        }
+
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *_args: {},
+            stream_answer_fn=fake_stream_answer,
+        )
+    )
+
+    with client.stream(
+        "POST",
+        "/api/qa/stream",
+        json={
+            "question": "What is Self-RAG?",
+            "paper_ids": ["arxiv:2310.11511"],
+            "top_k": 8,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: start" in body
+    assert '"stage": "answer"' in body
+    assert "event: done" in body
+    assert "trace1234567890" in body
+```
+
+- [ ] **Step 2: Run API test to verify it fails**
+
+Run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_workbench_api.py::test_qa_stream_endpoint_frames_sse_events
+```
+
+Expected: failure because `stream_answer_fn` injection and `/api/qa/stream` do not exist.
+
+- [ ] **Step 3: Add stream imports and types**
+
+Modify `src/paper_rag/workbench/api.py` imports:
+
+```python
+import json
+from collections.abc import AsyncIterator
+from starlette.responses import StreamingResponse
+```
+
+Add type alias near `CallTool`:
+
+```python
+QaStreamer = Callable[..., AsyncIterator[dict[str, Any]]]
+```
+
+Extend `create_app` arguments:
+
+```python
+    stream_answer_fn: QaStreamer | None = None,
+```
+
+Inside `create_app`, after `store = ...`:
+
+```python
+    if stream_answer_fn is None:
+        from paper_rag.rag.async_api import stream_answer_async
+
+        stream_answer_fn = stream_answer_async
+```
+
+- [ ] **Step 4: Implement SSE framing**
+
+Add endpoint inside `create_app` after blocking `/api/qa`:
+
+```python
+    @app.post("/api/qa/stream")
+    async def qa_stream(payload: QaRequest) -> StreamingResponse:
+        async def events() -> AsyncIterator[str]:
+            async for event in stream_answer_fn(
+                payload.question,
+                paper_ids=payload.paper_ids,
+                conversation_id="workbench",
+                user_id=app_settings.actor_id,
+                resolved_question=payload.resolved_question,
+            ):
+                yield _sse_frame(event)
+
+        return StreamingResponse(events(), media_type="text/event-stream")
+```
+
+Add helper below `_call`:
+
+```python
+def _sse_frame(event: dict[str, Any]) -> str:
+    name = str(event.get("event") or "message")
+    data = event.get("data")
+    payload = json.dumps(data if isinstance(data, dict) else {}, ensure_ascii=False)
+    return f"event: {name}\ndata: {payload}\n\n"
+```
+
+Do not include API keys, credential paths, request headers, or local PDF paths in stream frames.
+
+- [ ] **Step 5: Run Workbench API tests**
+
+Run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_workbench_api.py
+```
+
+Expected: all Workbench API tests pass.
+
+- [ ] **Step 6: Commit Task 8**
+
+Run:
+
+```bash
+git add src/paper_rag/workbench/api.py tests/test_workbench_api.py
+git commit -m "feat: stream workbench qa events"
+```
+
+---
+
+### Task 9: Frontend Streaming Ask And Agent Timeline
+
+**Files:**
+- Create: `integrations/paper-rag-workbench/src/api/qaStream.ts`
+- Create: `integrations/paper-rag-workbench/src/components/AgentTimeline.tsx`
+- Create: `integrations/paper-rag-workbench/src/__tests__/qaStream.test.ts`
+- Modify: `integrations/paper-rag-workbench/src/types.ts`
+- Modify: `integrations/paper-rag-workbench/src/api/client.ts`
+- Modify: `integrations/paper-rag-workbench/src/api/fixtures.ts`
+- Modify: `integrations/paper-rag-workbench/src/pages/AskPage.tsx`
+- Modify: `integrations/paper-rag-workbench/src/styles.css`
+- Modify: `integrations/paper-rag-workbench/src/__tests__/components.test.tsx`
+- Modify: `integrations/paper-rag-workbench/src/__tests__/pages.test.tsx`
+
+**Interfaces:**
+- Consumes: `/api/qa/stream` from Task 8.
+- Produces: `parseSseMessages(input: string, carry?: string) -> { messages: ParsedSseMessage[]; carry: string }`
+- Produces: `createInitialQaStreamState(question: string) -> QaStreamState`
+- Produces: `reduceQaStreamEvent(state: QaStreamState, event: QaStreamEvent) -> QaStreamState`
+- Produces: `streamPaperQa(options: StreamPaperQaOptions) -> Promise<void>`
+- Produces: `AgentTimeline({ stages, running }: { stages: QaStreamStage[]; running: boolean })`
+- Produces: `WorkbenchClient.qaStream(input, onEvent) -> Promise<void>`
+
+- [ ] **Step 1: Write failing stream helper tests**
+
+Create `integrations/paper-rag-workbench/src/__tests__/qaStream.test.ts`:
+
+```ts
+import { describe, expect, test } from "vitest";
+
+import {
+  createInitialQaStreamState,
+  parseSseMessages,
+  reduceQaStreamEvent,
+} from "../api/qaStream";
+
+describe("qa stream helpers", () => {
+  test("parses SSE messages across chunk boundaries", () => {
+    const first = parseSseMessages('event: start\ndata: {"stage":"sta', "");
+    expect(first.messages).toEqual([]);
+    expect(first.carry).toBe('event: start\ndata: {"stage":"sta');
+
+    const second = parseSseMessages('rt"}\n\nevent: done\ndata: {"answer":"ok"}\n\n', first.carry);
+    expect(second.carry).toBe("");
+    expect(second.messages).toEqual([
+      { event: "start", data: { stage: "start" } },
+      { event: "done", data: { answer: "ok" } },
+    ]);
+  });
+
+  test("appends answer chunks and finalizes done data", () => {
+    let state = createInitialQaStreamState("What is Self-RAG?");
+    state = reduceQaStreamEvent(state, {
+      event: "start",
+      data: {
+        trace_id: "abc",
+        stage: "start",
+        status: "completed",
+        summary: "Started Paper RAG QA",
+      },
+    });
+    state = reduceQaStreamEvent(state, {
+      event: "answer_chunk",
+      data: { trace_id: "abc", stage: "answer", text: "hello " },
+    });
+    state = reduceQaStreamEvent(state, {
+      event: "answer_chunk",
+      data: { trace_id: "abc", stage: "answer", text: "world" },
+    });
+    state = reduceQaStreamEvent(state, {
+      event: "done",
+      data: {
+        trace_id: "abc",
+        stage: "done",
+        status: "completed",
+        summary: "Paper RAG QA complete",
+        answer: "hello world",
+        citations: ["c1"],
+        chunks: [],
+        abstain: { decision: "answer" },
+        n_chunks: 1,
+        paper_ids: ["p1"],
+        query_resolution: { effective_question: "What is Self-RAG?" },
+      },
+    });
+
+    expect(state.answer.answer).toBe("hello world");
+    expect(state.answer.trace_id).toBe("abc");
+    expect(state.answer.citations).toEqual(["c1"]);
+    expect(state.done).toBe(true);
+    expect(state.stages.find((stage) => stage.stage === "answer")?.status).toBe("completed");
+  });
+
+  test("marks backend error stage as failed", () => {
+    const state = reduceQaStreamEvent(createInitialQaStreamState("Q"), {
+      event: "error",
+      data: {
+        trace_id: "abc",
+        stage: "retrieve",
+        status: "failed",
+        summary: "Retrieval failed",
+        message: "retrieve failed: boom",
+      },
+    });
+
+    expect(state.error).toBe("retrieve failed: boom");
+    expect(state.stages.find((stage) => stage.stage === "retrieve")?.status).toBe("failed");
+  });
+});
+```
+
+- [ ] **Step 2: Write failing timeline and Ask page tests**
+
+Add to `components.test.tsx`:
+
+```tsx
+import { AgentTimeline } from "../components/AgentTimeline";
+import { qaStreamFixture } from "../api/fixtures";
+
+test("agent timeline renders stage progress", () => {
+  render(<AgentTimeline stages={qaStreamFixture.stages} running={false} />);
+
+  expect(screen.getByRole("heading", { name: /agent timeline/i })).toBeInTheDocument();
+  expect(screen.getByText(/Understanding question/i)).toBeInTheDocument();
+  expect(screen.getByText(/Retrieved 2 chunks/i)).toBeInTheDocument();
+});
+```
+
+Add to `pages.test.tsx`:
+
+```tsx
+test("ask page streams answer and shows agent timeline", async () => {
+  const user = userEvent.setup();
+  render(<AskPage client={createWorkbenchClient({ fixtureMode: true })} />);
+
+  await user.type(screen.getByLabelText(/question/i), "What is Self-RAG?");
+  await user.click(screen.getByRole("button", { name: /^ask$/i }));
+
+  expect(await screen.findByRole("heading", { name: /agent timeline/i })).toBeInTheDocument();
+  expect(await screen.findByText(/Understanding question/i)).toBeInTheDocument();
+  expect(await screen.findByText(/decide when to retrieve/i)).toBeInTheDocument();
+  expect(screen.getByText("chunk-self-rag-1")).toBeInTheDocument();
+});
+```
+
+- [ ] **Step 3: Run frontend tests to verify they fail**
+
+Run:
+
+```bash
+pnpm --dir integrations/paper-rag-workbench test src/__tests__/qaStream.test.ts src/__tests__/components.test.tsx src/__tests__/pages.test.tsx
+```
+
+Expected: failures because stream helpers and `AgentTimeline` do not exist.
+
+- [ ] **Step 4: Add stream types and fixtures**
+
+Extend `types.ts`:
+
+```ts
+export type QaStreamEventName =
+  | "start"
+  | "intent"
+  | "rewrite"
+  | "retrieved"
+  | "reflect"
+  | "abstain"
+  | "answer_chunk"
+  | "done"
+  | "error";
+
+export type QaStageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+export type QaStreamData = {
+  trace_id?: string;
+  stage?: string;
+  status?: QaStageStatus;
+  summary?: string;
+  elapsed_ms?: number;
+  text?: string;
+  message?: string;
+  answer?: string;
+  citations?: string[];
+  chunks?: EvidenceChunk[];
+  abstain?: QaData["abstain"];
+  n_chunks?: number;
+  paper_ids?: string[];
+  query_resolution?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type QaStreamEvent = {
+  event: QaStreamEventName;
+  data: QaStreamData;
+};
+
+export type QaStreamStage = {
+  stage: string;
+  label: string;
+  status: QaStageStatus;
+  summary?: string;
+  elapsed_ms?: number;
+  error?: string;
+};
+
+export type QaStreamState = {
+  question: string;
+  answer: QaData & { trace_id?: string; n_chunks?: number };
+  stages: QaStreamStage[];
+  done: boolean;
+  error: string | null;
+};
+
+export type QaStreamHandler = (event: QaStreamEvent) => void;
+```
+
+Extend `WorkbenchClient`:
+
+```ts
+  qaStream(input: QaInput, onEvent: QaStreamHandler): Promise<void>;
+```
+
+Add fixture events to `fixtures.ts`:
+
+```ts
+export const qaStreamEventsFixture: QaStreamEvent[] = [
+  {
+    event: "start",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "start",
+      status: "completed",
+      summary: "Started Paper RAG QA",
+    },
+  },
+  {
+    event: "intent",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "intent",
+      status: "completed",
+      summary: "Classified as factual",
+      elapsed_ms: 2,
+    },
+  },
+  {
+    event: "retrieved",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "retrieve",
+      status: "completed",
+      summary: "Retrieved 2 chunks",
+      elapsed_ms: 8,
+      n_chunks: 2,
+    },
+  },
+  {
+    event: "answer_chunk",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "answer",
+      text: "Self-RAG trains a model to decide when to retrieve",
+    },
+  },
+  {
+    event: "answer_chunk",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "answer",
+      text: ", then critique whether retrieved evidence supports generated claims.",
+    },
+  },
+  {
+    event: "done",
+    data: {
+      trace_id: "trace-workbench-fixture",
+      stage: "done",
+      status: "completed",
+      summary: "Paper RAG QA complete",
+      answer: qaFixture.data!.answer,
+      citations: qaFixture.data!.citations,
+      chunks: qaFixture.data!.chunks,
+      abstain: qaFixture.data!.abstain,
+      n_chunks: qaFixture.data!.chunks.length,
+      paper_ids: ["arxiv:2310.11511"],
+      query_resolution: { effective_question: "What is Self-RAG?" },
+    },
+  },
+];
+```
+
+- [ ] **Step 5: Implement `qaStream.ts`**
+
+Create `integrations/paper-rag-workbench/src/api/qaStream.ts`:
+
+```ts
+import type {
+  QaData,
+  QaInput,
+  QaStageStatus,
+  QaStreamData,
+  QaStreamEvent,
+  QaStreamStage,
+  QaStreamState,
+} from "../types";
+
+export type ParsedSseMessage = {
+  event: string;
+  data: unknown;
+};
+
+export function parseSseMessages(input: string, carry = ""): { messages: ParsedSseMessage[]; carry: string } {
+  const combined = `${carry}${input}`;
+  const parts = combined.split("\n\n");
+  const nextCarry = parts.pop() || "";
+  const messages = parts
+    .map((part) => {
+      const lines = part.split("\n");
+      const event = lines.find((line) => line.startsWith("event: "))?.slice("event: ".length) || "message";
+      const dataText = lines
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => line.slice("data: ".length))
+        .join("\n");
+      return { event, data: dataText ? JSON.parse(dataText) : {} };
+    })
+    .filter((message) => message.event.length > 0);
+  return { messages, carry: nextCarry };
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  start: "Starting",
+  intent: "Understanding question",
+  rewrite: "Rewriting query",
+  retrieve: "Retrieving evidence",
+  reflect: "Reflecting",
+  abstain: "Checking evidence",
+  answer: "Generating answer",
+  done: "Complete",
+};
+
+export function createInitialQaStreamState(question: string): QaStreamState {
+  return {
+    question,
+    answer: { answer: "", citations: [], chunks: [], abstain: {} },
+    stages: [],
+    done: false,
+    error: null,
+  };
+}
+
+function upsertStage(stages: QaStreamStage[], data: QaStreamData): QaStreamStage[] {
+  const stage = String(data.stage || "unknown");
+  const status = (data.status || "completed") as QaStageStatus;
+  const item: QaStreamStage = {
+    stage,
+    label: STAGE_LABELS[stage] || stage,
+    status,
+    summary: data.summary,
+    elapsed_ms: typeof data.elapsed_ms === "number" ? data.elapsed_ms : undefined,
+    error: typeof data.message === "string" ? data.message : undefined,
+  };
+  const index = stages.findIndex((existing) => existing.stage === stage);
+  if (index === -1) return [...stages, item];
+  return stages.map((existing, current) => (current === index ? { ...existing, ...item } : existing));
+}
+
+export function reduceQaStreamEvent(state: QaStreamState, event: QaStreamEvent): QaStreamState {
+  if (event.event === "answer_chunk") {
+    return {
+      ...state,
+      answer: {
+        ...state.answer,
+        trace_id: event.data.trace_id || state.answer.trace_id,
+        answer: `${state.answer.answer}${event.data.text || ""}`,
+      },
+      stages: upsertStage(state.stages, {
+        ...event.data,
+        stage: "answer",
+        status: "running",
+        summary: "Generating answer",
+      }),
+    };
+  }
+  if (event.event === "done") {
+    return {
+      ...state,
+      done: true,
+      answer: {
+        answer: String(event.data.answer || state.answer.answer),
+        citations: Array.isArray(event.data.citations) ? event.data.citations : [],
+        chunks: Array.isArray(event.data.chunks) ? event.data.chunks : state.answer.chunks,
+        abstain: (event.data.abstain || state.answer.abstain) as QaData["abstain"],
+        trace_id: event.data.trace_id || state.answer.trace_id,
+        n_chunks: typeof event.data.n_chunks === "number" ? event.data.n_chunks : undefined,
+      },
+      stages: upsertStage(
+        upsertStage(state.stages, { stage: "answer", status: "completed", summary: "Generated answer" }),
+        event.data,
+      ),
+    };
+  }
+  if (event.event === "error") {
+    const message = typeof event.data.message === "string" ? event.data.message : "Stream failed";
+    return {
+      ...state,
+      error: message,
+      stages: upsertStage(state.stages, { ...event.data, status: "failed", summary: event.data.summary || message }),
+    };
+  }
+  return { ...state, stages: upsertStage(state.stages, event.data) };
+}
+
+export type StreamPaperQaOptions = {
+  url: string;
+  fetcher: typeof fetch;
+  body: QaInput;
+  signal?: AbortSignal;
+  onEvent: (event: QaStreamEvent) => void;
+};
+
+export async function streamPaperQa({
+  url,
+  fetcher,
+  body,
+  signal,
+  onEvent,
+}: StreamPaperQaOptions): Promise<void> {
+  const response = await fetcher(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`QA stream failed with ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let carry = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    const parsed = parseSseMessages(decoder.decode(value, { stream: true }), carry);
+    carry = parsed.carry;
+    for (const message of parsed.messages) {
+      onEvent(message as QaStreamEvent);
+    }
+  }
+}
+```
+
+- [ ] **Step 6: Add client streaming method**
+
+Modify `client.ts` imports:
+
+```ts
+import { streamPaperQa } from "./qaStream";
+import { qaStreamEventsFixture } from "./fixtures";
+```
+
+Add returned client method:
+
+```ts
+    qaStream: async (input: QaInput, onEvent: QaStreamHandler): Promise<void> => {
+      if (fixtureMode) {
+        for (const event of qaStreamEventsFixture) onEvent(event);
+        return;
+      }
+      return streamPaperQa({
+        url: `${baseUrl}/api/qa/stream`,
+        fetcher: fetchImpl,
+        body: input,
+        onEvent,
+      });
+    },
+```
+
+Ensure `QaStreamHandler` is imported from `../types`.
+
+- [ ] **Step 7: Implement Agent Timeline**
+
+Create `AgentTimeline.tsx`:
+
+```tsx
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+
+import type { QaStreamStage } from "../types";
+
+function StageIcon({ stage }: { stage: QaStreamStage }) {
+  if (stage.status === "failed") return <AlertCircle aria-hidden="true" size={16} />;
+  if (stage.status === "running") return <Loader2 aria-hidden="true" size={16} className="spin" />;
+  return <CheckCircle2 aria-hidden="true" size={16} />;
+}
+
+export function AgentTimeline({
+  stages,
+  running,
+}: {
+  stages: QaStreamStage[];
+  running: boolean;
+}) {
+  if (!running && stages.length === 0) return null;
+  return (
+    <section className="agent-timeline" aria-label="Agent Timeline">
+      <header>
+        <h3>Agent Timeline</h3>
+        {running ? <span className="status-pill degraded">running</span> : null}
+      </header>
+      <ol>
+        {stages.map((stage) => (
+          <li key={stage.stage}>
+            <StageIcon stage={stage} />
+            <div>
+              <strong>{stage.label}</strong>
+              <span>{stage.status}</span>
+              {typeof stage.elapsed_ms === "number" ? <span>{stage.elapsed_ms} ms</span> : null}
+              {stage.summary ? <p>{stage.summary}</p> : null}
+              {stage.error ? <p className="error-text">{stage.error}</p> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+```
+
+- [ ] **Step 8: Switch Ask page to streaming with blocking fallback**
+
+Modify `AskPage.tsx`:
+
+```tsx
+import { useRef, useState } from "react";
+import { AgentTimeline } from "../components/AgentTimeline";
+import { createInitialQaStreamState, reduceQaStreamEvent } from "../api/qaStream";
+import type { QaData, QaStreamEvent, QaStreamState, WorkbenchClient } from "../types";
+```
+
+Add state and ref:
+
+```tsx
+const [streamState, setStreamState] = useState<QaStreamState | null>(null);
+const askRunRef = useRef(0);
+```
+
+Replace the `try` body in `ask` with:
+
+```tsx
+const runId = askRunRef.current + 1;
+askRunRef.current = runId;
+const initial = createInitialQaStreamState(trimmedQuestion);
+setStreamState(initial);
+setData({ answer: "", citations: [], chunks: [], abstain: {} });
+
+try {
+  await client.qaStream(
+    {
+      question: trimmedQuestion,
+      paper_ids: paperIds,
+      top_k: topK,
+    },
+    (event: QaStreamEvent) => {
+      if (askRunRef.current !== runId) return;
+      setStreamState((current) => {
+        const next = reduceQaStreamEvent(current || createInitialQaStreamState(trimmedQuestion), event);
+        setData(next.answer);
+        return next;
+      });
+    },
+  );
+} catch (streamReason) {
+  const envelope = await client.qa({
+    question: trimmedQuestion,
+    paper_ids: paperIds,
+    top_k: topK,
+  });
+  if (!envelope.ok || !envelope.data) {
+    setError(
+      envelope.error?.message ||
+        (streamReason instanceof Error ? streamReason.message : "Question answering is unavailable."),
+    );
+    return;
+  }
+  setData(envelope.data);
+}
+```
+
+Render `AgentTimeline` above `AnswerPanel`:
+
+```tsx
+{streamState ? <AgentTimeline stages={streamState.stages} running={loading && !streamState.done} /> : null}
+```
+
+Keep `AnswerPanel` rendering final `data.chunks` so citation drilldown from Task 5 still works.
+
+- [ ] **Step 9: Add timeline styles**
+
+Add to `styles.css`:
+
+```css
+.agent-timeline {
+  background: #ffffff;
+  border: 1px solid #dde4eb;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.agent-timeline header,
+.agent-timeline li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.agent-timeline header {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.agent-timeline ol {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-timeline li div {
+  min-width: 0;
+}
+
+.agent-timeline li p {
+  margin: 4px 0 0;
+  color: #5f6b76;
+  overflow-wrap: anywhere;
+}
+
+.agent-timeline li span {
+  margin-left: 8px;
+  color: #66717c;
+  font-size: 13px;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+```
+
+- [ ] **Step 10: Run frontend stream tests**
+
+Run:
+
+```bash
+pnpm --dir integrations/paper-rag-workbench test src/__tests__/qaStream.test.ts src/__tests__/components.test.tsx src/__tests__/pages.test.tsx
+```
+
+Expected: selected tests pass.
+
+- [ ] **Step 11: Commit Task 9**
+
+Run:
+
+```bash
+git add integrations/paper-rag-workbench/src/api/qaStream.ts integrations/paper-rag-workbench/src/components/AgentTimeline.tsx integrations/paper-rag-workbench/src/__tests__/qaStream.test.ts integrations/paper-rag-workbench/src/types.ts integrations/paper-rag-workbench/src/api/client.ts integrations/paper-rag-workbench/src/api/fixtures.ts integrations/paper-rag-workbench/src/pages/AskPage.tsx integrations/paper-rag-workbench/src/styles.css integrations/paper-rag-workbench/src/__tests__/components.test.tsx integrations/paper-rag-workbench/src/__tests__/pages.test.tsx
+git commit -m "feat: add workbench streaming ask timeline"
+```
+
+---
+
+### Task 10: Fixture Smoke, Docs, And Final Verification
 
 **Files:**
 - Modify: `integrations/paper-rag-workbench/tests/workbench.spec.ts`
@@ -2261,8 +3406,8 @@ git commit -m "feat: add structured dsh handoff"
 - Modify: `README.md`
 
 **Interfaces:**
-- Consumes: all V2 UI flows from Tasks 4-6.
-- Produces: fixture Playwright coverage for Overview, Health, Library, Paper Detail, Search, Ask, Citation Drilldown, Discover approval dialog, and DSH handoff prompt.
+- Consumes: all V2 UI flows from Tasks 4-9.
+- Produces: fixture Playwright coverage for Overview, Health, Library, Paper Detail, Search, streaming Ask, Agent Timeline, Citation Drilldown, Discover approval dialog, and DSH handoff prompt.
 - Produces: docs that explain Workbench V2 and DSH's remaining role.
 
 - [ ] **Step 1: Inspect existing Playwright tests**
@@ -2284,14 +3429,15 @@ import { expect, test } from "@playwright/test";
 
 test("workbench v2 fixture flow", async ({ page }) => {
   await page.goto("/");
+  const nav = page.getByRole("navigation", { name: /workbench navigation/i });
 
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 
-  await page.getByRole("button", { name: /health/i }).click();
+  await nav.getByRole("button", { name: /health/i }).click();
   await expect(page.getByRole("heading", { name: "Health" })).toBeVisible();
   await expect(page.getByText(/Dense retrieval is unavailable/i)).toBeVisible();
 
-  await page.getByRole("button", { name: /library/i }).click();
+  await nav.getByRole("button", { name: /library/i }).click();
   await expect(page.getByText(/Self-RAG/)).toBeVisible();
   await page.getByRole("button", { name: /inspect paper self-rag/i }).click();
   await expect(page.getByText(/Abstract/)).toBeVisible();
@@ -2305,6 +3451,8 @@ test("workbench v2 fixture flow", async ({ page }) => {
   await nav.getByRole("button", { name: /^ask$/i }).click();
   await page.getByLabel(/question/i).fill("What is Self-RAG?");
   await page.getByRole("button", { name: /^ask$/i }).click();
+  await expect(page.getByRole("heading", { name: /Agent Timeline/i })).toBeVisible();
+  await expect(page.getByText(/Understanding question/i)).toBeVisible();
   await page.getByRole("button", { name: /chunk-self-rag-1/i }).click();
   await expect(page.getByText(/critiques its own generations/i)).toBeVisible();
   await page.getByRole("button", { name: /send to dsh/i }).click();
@@ -2319,7 +3467,8 @@ test("workbench v2 fixture flow", async ({ page }) => {
 });
 ```
 
-If route buttons collide with form buttons, select the navigation buttons by `nav[aria-label="Workbench navigation"] button`.
+Use the `nav` locator for route changes so navigation buttons do not collide
+with form buttons that share labels such as `Search`, `Ask`, and `Discover`.
 
 - [ ] **Step 3: Update docs**
 
@@ -2333,7 +3482,7 @@ Workbench is the primary Paper RAG research interface. It covers:
 - Health: SQLite, Qdrant, retrieval fallback, LLM credential status, and data-quality samples.
 - Library: indexed papers with paper detail, sections, chunks, and parser warnings.
 - Search: evidence retrieval with inspectable chunk drilldown.
-- Ask: generated answers with citation drilldown and retrieved evidence.
+- Ask: streaming generated answers with an agent timeline, citation drilldown, and retrieved evidence.
 - Discover: candidate discovery with explicit approval before real-library ingest.
 - DSH handoff: copy/open a structured prompt in DSH Web for long-form agent work.
 
@@ -2353,7 +3502,7 @@ the trace/chat companion for long-form agent handoff.
 Run:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_workbench_read_store.py tests/test_workbench_api.py tests/test_coverage_boost.py::test_paper_search_groups_by_paper_and_keeps_best tests/test_coverage_boost.py::test_paper_search_falls_back_to_hybrid_when_dense_is_empty tests/test_mcp_tools.py
+PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_finalization.py tests/test_workbench_read_store.py tests/test_workbench_api.py tests/test_coverage_boost.py::test_paper_search_groups_by_paper_and_keeps_best tests/test_coverage_boost.py::test_paper_search_falls_back_to_hybrid_when_dense_is_empty tests/test_mcp_tools.py
 pnpm --dir integrations/paper-rag-workbench test
 pnpm --dir integrations/paper-rag-workbench build
 VITE_WORKBENCH_FIXTURES=1 pnpm --dir integrations/paper-rag-workbench playwright
@@ -2368,9 +3517,9 @@ Expected:
 - Frontend build passes.
 - Fixture Playwright smoke passes.
 - Secret scan prints `secret scan: clean`.
-- `git status --short` shows only files intentionally changed by Task 7 before the commit.
+- `git status --short` shows only files intentionally changed by Task 10 before the commit.
 
-- [ ] **Step 5: Commit Task 7**
+- [ ] **Step 5: Commit Task 10**
 
 Run:
 
@@ -2405,10 +3554,13 @@ Commits:
 - `<hash>` feat: add workbench health page
 - `<hash>` feat: add paper detail and citation drilldown
 - `<hash>` feat: add structured dsh handoff
+- `<hash>` feat: normalize paper rag stream events
+- `<hash>` feat: stream workbench qa events
+- `<hash>` feat: add workbench streaming ask timeline
 - `<hash>` test: cover workbench v2 fixture flow
 
 Verification:
-- `PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_workbench_read_store.py tests/test_workbench_api.py tests/test_coverage_boost.py::test_paper_search_groups_by_paper_and_keeps_best tests/test_coverage_boost.py::test_paper_search_falls_back_to_hybrid_when_dense_is_empty tests/test_mcp_tools.py`
+- `PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_finalization.py tests/test_workbench_read_store.py tests/test_workbench_api.py tests/test_coverage_boost.py::test_paper_search_groups_by_paper_and_keeps_best tests/test_coverage_boost.py::test_paper_search_falls_back_to_hybrid_when_dense_is_empty tests/test_mcp_tools.py`
 - `pnpm --dir integrations/paper-rag-workbench test`
 - `pnpm --dir integrations/paper-rag-workbench build`
 - `VITE_WORKBENCH_FIXTURES=1 pnpm --dir integrations/paper-rag-workbench playwright`
@@ -2435,7 +3587,8 @@ Use this prompt in goal mode after confirming the plan:
 5. 不恢复、不创建 integrations/deer-flow/。
 6. 不提交 .env、API key、data/index、runtime/session/credentials、DSH sessions、真实 PDF、generated dist、node_modules 或临时 smoke 数据。
 7. 不执行真实写入论文库的 live smoke，除非我另行明确批准；Discover 测试只能到 approval dialog 或使用 fixture。
-8. Workbench 是主前端；DSH 只作为 chat/trace companion 和 handoff 目标，不依赖 DSH 私有 session internals。
-9. 如果遇到需要外部凭据、真实写入、无法获取源码/版本、DSH 私有 API、或需要人工产品取舍的事情，标记 blocked 并说明具体阻塞项。
-10. 完成标准：所有 Task 的实现、测试、fixture Playwright smoke、build、secret scan 全部通过；git 工作树干净；提交代码；汇报 commit 列表、验证命令、go/no-go 状态和剩余风险。
+8. Workbench 是主前端；Ask 流式能力必须通过 Workbench 自己的 /api/qa/stream 实现，不走 DeerFlow。
+9. DSH 只作为 chat/trace companion 和 handoff 目标，不依赖 DSH 私有 session internals。
+10. 如果遇到需要外部凭据、真实写入、无法获取源码/版本、DSH 私有 API、或需要人工产品取舍的事情，标记 blocked 并说明具体阻塞项。
+11. 完成标准：所有 Task 的实现、测试、fixture Playwright smoke、build、secret scan 全部通过；git 工作树干净；提交代码；汇报 commit 列表、验证命令、go/no-go 状态和剩余风险。
 ```
