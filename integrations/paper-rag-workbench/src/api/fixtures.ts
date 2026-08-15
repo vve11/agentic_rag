@@ -1,7 +1,11 @@
 import type {
+  ChunkDetailData,
   DiscoverData,
+  DshHandoffData,
+  IndexHealthData,
   IngestData,
   McpEnvelope,
+  PaperDetailData,
   PaperListData,
   QaData,
   SearchData,
@@ -146,4 +150,102 @@ export const ingestFixture: McpEnvelope<IngestData> = {
       },
     ],
   },
+};
+
+export const indexHealthFixture: IndexHealthData = {
+  status: "degraded",
+  sqlite: {
+    available: true,
+    paper_count: 8,
+    chunk_count: 345,
+    fts_available: true,
+  },
+  qdrant: {
+    configured: true,
+    mode: "server",
+    reachable: false,
+    collection_chunks: "paper_chunks",
+    degraded_reason: "connection refused",
+  },
+  retrieval: {
+    dense_available: false,
+    sparse_available: true,
+    hybrid_available: true,
+  },
+  llm: {
+    configured: true,
+    chat_model: "deepseek-v4-flash",
+    base_url_host: "api.deepseek.com",
+    credential_source: "file",
+  },
+  corpus_quality: {
+    duplicate_chunk_count: 1,
+    parser_artifact_count: 1,
+    missing_section_count: 0,
+    samples: [
+      {
+        kind: "duplicate_chunk",
+        paper_id: "arxiv:2310.11511",
+        chunk_ids: ["05e56a78", "f2d5041b"],
+        preview: "SELF-RAG retrieves passages on demand.",
+      },
+      {
+        kind: "parser_artifact",
+        paper_id: "arxiv:2310.11511",
+        chunk_id: "chunk-self-rag-1",
+        warnings: ["html_comment"],
+        preview: "<!-- page 2 --> Introduction text.",
+      },
+    ],
+  },
+  warnings: ["Dense retrieval is unavailable; sparse fallback is active."],
+};
+
+export const paperDetailFixture: PaperDetailData = {
+  paper: {
+    paper_id: "arxiv:2310.11511",
+    title: "Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection",
+    arxiv_id: "2310.11511",
+    year: 2023,
+    abstract: "SELF-RAG trains a model to retrieve and critique evidence.",
+    chunk_count: 58,
+    status: "done",
+    parsed_with: "pymupdf",
+  },
+  sections: [
+    {
+      section_id: "sec-abstract",
+      name: "Abstract",
+      idx: 0,
+      page_start: 1,
+      page_end: 1,
+      chunk_count: 1,
+    },
+    {
+      section_id: "sec-intro",
+      name: "Introduction",
+      idx: 1,
+      page_start: 1,
+      page_end: 2,
+      chunk_count: 3,
+    },
+  ],
+  chunks: searchFixture.data!.results,
+  warnings: ["parser_artifacts_detected"],
+};
+
+export const chunkDetailFixture: ChunkDetailData = {
+  chunk: {
+    ...searchFixture.data!.results[0],
+    text: "SELF-RAG retrieves passages on demand and critiques its own generations.",
+    warnings: ["html_comment"],
+  },
+  paper: paperDetailFixture.paper,
+  neighbors: [searchFixture.data!.results[1]],
+};
+
+export const dshHandoffFixture: DshHandoffData = {
+  dsh_url: "http://127.0.0.1:3080",
+  prompt:
+    "基于 Paper RAG Workbench 中选定的论文/证据继续研究：\n- Papers: arxiv:2310.11511\n- Chunks: chunk-self-rag-1\n- Question: What is Self-RAG?\n请使用 Paper RAG 工具回答，并保留证据引用。",
 };

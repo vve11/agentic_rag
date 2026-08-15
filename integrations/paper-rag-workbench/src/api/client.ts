@@ -1,6 +1,10 @@
 import {
+  chunkDetailFixture,
   discoverFixture,
+  dshHandoffFixture,
+  indexHealthFixture,
   ingestFixture,
+  paperDetailFixture,
   papersFixture,
   qaFixture,
   searchFixture,
@@ -9,11 +13,16 @@ import {
 } from "./fixtures";
 import type {
   CandidateIngestInput,
+  ChunkDetailData,
   DiscoverData,
   DiscoverInput,
+  DshHandoffData,
+  DshHandoffInput,
   HealthData,
+  IndexHealthData,
   IngestData,
   McpEnvelope,
+  PaperDetailData,
   PaperListData,
   QaData,
   QaInput,
@@ -62,12 +71,22 @@ export function createWorkbenchClient(
             },
           })
         : get("/api/health"),
+    indexHealth: (): Promise<IndexHealthData> =>
+      fixtureMode ? Promise.resolve(indexHealthFixture) : get("/api/health/index"),
     status: (): Promise<McpEnvelope<StatusData>> =>
       fixtureMode ? Promise.resolve(statusFixture) : get("/api/status"),
     papers: (limit = 20): Promise<McpEnvelope<PaperListData>> =>
       fixtureMode
         ? Promise.resolve(papersFixture)
         : get(`/api/papers?limit=${encodeURIComponent(limit)}`),
+    paperDetail: (paperId: string): Promise<PaperDetailData> =>
+      fixtureMode
+        ? Promise.resolve(paperDetailFixture)
+        : get(`/api/papers/${encodeURIComponent(paperId)}`),
+    chunkDetail: (chunkId: string): Promise<ChunkDetailData> =>
+      fixtureMode
+        ? Promise.resolve(chunkDetailFixture)
+        : get(`/api/chunks/${encodeURIComponent(chunkId)}`),
     search: (input: SearchInput): Promise<McpEnvelope<SearchData>> =>
       fixtureMode ? Promise.resolve(searchFixture) : post("/api/search", input),
     qa: (input: QaInput): Promise<McpEnvelope<QaData>> =>
@@ -78,6 +97,8 @@ export function createWorkbenchClient(
       fixtureMode ? Promise.resolve(discoverFixture) : post("/api/discover", input),
     ingestCandidates: (input: CandidateIngestInput): Promise<McpEnvelope<IngestData>> =>
       fixtureMode ? Promise.resolve(ingestFixture) : post("/api/ingest/candidates", input),
+    dshHandoff: (input: DshHandoffInput): Promise<DshHandoffData> =>
+      fixtureMode ? Promise.resolve(dshHandoffFixture) : post("/api/dsh/handoff", input),
   };
 }
 
