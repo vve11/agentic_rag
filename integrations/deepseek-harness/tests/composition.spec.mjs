@@ -51,12 +51,14 @@ describe("repo-local DeepSeek Harness runtime", () => {
     await expect(readFile(join(result.destDir, "preset.yml"), "utf8")).resolves.toContain(
       "Paper Research",
     );
-    await expect(
-      readFile(join(result.destDir, "agent.cordis.yml"), "utf8"),
-    ).resolves.toContain("@deepseek-ai/dsh-tool-ask-user");
-    await expect(
-      readFile(join(result.destDir, "agent.cordis.yml"), "utf8"),
-    ).resolves.toContain("paper-rag-native-broker-plugin.mjs");
+    const syncedAgent = await readFile(join(result.destDir, "agent.cordis.yml"), "utf8");
+    expect(syncedAgent).toContain("@deepseek-ai/dsh-tool-ask-user");
+    expect(syncedAgent).toContain("paper-rag-native-broker-plugin.mjs");
+    expect(syncedAgent).toContain("paper_discover");
+    expect(syncedAgent).toContain("discovery_candidate_ingest");
+    expect(syncedAgent).toContain("paper_deliver");
+    expect(syncedAgent).toContain("Candidate results are not Paper RAG answer evidence");
+    expect(syncedAgent).toContain("deepseek-v4-flash");
 
     const discovered = await discoverPaperResearchPreset(paths);
     expect(discovered).toMatchObject({
