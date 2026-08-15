@@ -108,18 +108,53 @@ def test_paper_search_groups_by_paper_and_keeps_best(monkeypatch):
     from paper_rag.tools._schema import PaperSearchInput
 
     fake_chunks = [
-        {"paper_id": "p1", "title": "T1", "section": "intro", "text": "AAA", "score": 0.5},
-        {"paper_id": "p1", "title": "T1", "section": "intro", "text": "BBB", "score": 0.9},
-        {"paper_id": "p2", "title": "T2", "section": "method", "text": "CCC", "score": 0.4},
-        {"paper_id": None, "title": None, "section": None, "text": "skip", "score": 1.0},
+        {"chunk_id": "c1", "paper_id": "p1", "title": "T1", "section": "intro", "text": "AAA", "score": 0.5},
+        {"chunk_id": "c2", "paper_id": "p1", "title": "T1", "section": "intro", "text": "BBB", "score": 0.9},
+        {"chunk_id": "c3", "paper_id": "p2", "title": "T2", "section": "method", "text": "CCC", "score": 0.4},
+        {"chunk_id": "c4", "paper_id": None, "title": None, "section": None, "text": "skip", "score": 1.0},
     ]
     monkeypatch.setattr(t, "retrieve", lambda q, top_k: fake_chunks)
     out = t.paper_search(PaperSearchInput(query="x", top_k=5))
     assert len(out) == 2
     assert out[0]["paper_id"] == "p1"
+    assert out[0]["chunk_id"] == "c2"
     assert out[0]["score"] == 0.9    # best chunk wins
     assert out[1]["paper_id"] == "p2"
     assert out[0]["snippet"] == "BBB"
+
+
+def test_paper_search_falls_back_to_hybrid_when_dense_is_empty(monkeypatch):
+    from paper_rag.tools import paper_search as t
+    from paper_rag.tools._schema import PaperSearchInput
+
+    monkeypatch.setattr(t, "retrieve", lambda q, top_k: [])
+    monkeypatch.setattr(
+        t,
+        "hybrid_search",
+        lambda q, top_k: [
+            {
+                "chunk_id": "c1",
+                "paper_id": "p1",
+                "title": "Self-RAG",
+                "section": "intro",
+                "text": "retrieval generation critique evidence",
+                "score_rrf": 0.8,
+            }
+        ],
+    )
+
+    out = t.paper_search(PaperSearchInput(query="self rag critique", top_k=5))
+
+    assert out == [
+        {
+            "chunk_id": "c1",
+            "paper_id": "p1",
+            "title": "Self-RAG",
+            "section": "intro",
+            "snippet": "retrieval generation critique evidence",
+            "score": 0.8,
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
