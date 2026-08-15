@@ -1,9 +1,10 @@
 import { render, screen, waitForElementToBeRemoved } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { createWorkbenchClient } from "../api/client";
 import { AskPage } from "../pages/AskPage";
+import { DiscoverPage } from "../pages/DiscoverPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { SearchPage } from "../pages/SearchPage";
@@ -66,5 +67,37 @@ describe("Overview and Library pages", () => {
     expect(await screen.findByText(/decide when to retrieve/i)).toBeInTheDocument();
     expect(screen.getByText("chunk-self-rag-1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy prompt for dsh/i })).toBeInTheDocument();
+  });
+
+  test("discover requires approval before candidate ingest", async () => {
+    const user = userEvent.setup();
+    const baseClient = createWorkbenchClient({ fixtureMode: true });
+    const ingestCandidates = vi.fn(baseClient.ingestCandidates);
+    const client = { ...baseClient, ingestCandidates };
+
+    render(<DiscoverPage client={client} />);
+
+    await user.type(screen.getByLabelText(/topic/i), "agentic rag");
+    await user.click(screen.getByRole("button", { name: /discover/i }));
+    expect(await screen.findByText(/Agentic Retrieval/)).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText(/select candidate 11/i));
+    await user.click(screen.getByRole("button", { name: /ingest selected/i }));
+    expect(ingestCandidates).not.toHaveBeenCalled();
+    expect(screen.getByText(/write indexed paper and chunks/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /approve ingest/i }));
+    expect(await screen.findByText(/arxiv:2601.00001/)).toBeInTheDocument();
+    expect(ingestCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidate_ids: [11],
+        approval: expect.objectContaining({
+          approved: true,
+          operation: "discovery_candidate_ingest",
+          candidate_ids: [11],
+          destination: "real-library",
+        }),
+      }),
+    );
   });
 });

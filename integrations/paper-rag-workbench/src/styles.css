@@ -92,7 +92,8 @@ textarea {
 .row-actions button,
 .toolbar-row button,
 .form-grid button,
-.citation-chips button {
+.citation-chips button,
+.modal button {
   border: 1px solid #c9d3dd;
   border-radius: 6px;
   background: #ffffff;
@@ -107,13 +108,22 @@ textarea {
 .row-actions button:hover,
 .toolbar-row button:hover,
 .form-grid button:hover,
-.citation-chips button:hover {
+.citation-chips button:hover,
+.modal button:hover {
   border-color: #6b93c8;
 }
 
-.form-grid button:disabled {
+.form-grid button:disabled,
+.toolbar-row button:disabled {
   color: #8b98a5;
   cursor: not-allowed;
+}
+
+.primary,
+.modal button.primary {
+  background: #1f5e9d;
+  border-color: #1f5e9d;
+  color: #ffffff;
 }
 
 .metric-grid {
@@ -222,6 +232,10 @@ textarea {
 
 .data-table tr:last-child td {
   border-bottom: 0;
+}
+
+.data-table tr.selected-row td {
+  background: #eef6ff;
 }
 
 .data-table code {
@@ -388,6 +402,41 @@ textarea {
 .answer-panel > p {
   color: #25313b;
   line-height: 1.55;
+}
+
+.modal-backdrop {
+  align-items: center;
+  background: rgba(18, 26, 34, 0.48);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 10;
+}
+
+.modal {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 20px 70px rgba(15, 23, 32, 0.28);
+  max-width: 520px;
+  padding: 20px;
+  width: min(520px, 100%);
+}
+
+.modal h3,
+.ingest-receipt h3 {
+  margin: 0 0 10px;
+}
+
+.modal p {
+  color: #44515d;
+}
+
+.modal ul,
+.ingest-receipt ul {
+  margin: 0 0 16px;
+  padding-left: 20px;
 }
 
 @media (max-width: 820px) {

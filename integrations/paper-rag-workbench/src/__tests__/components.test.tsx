@@ -2,7 +2,9 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
+import { ApprovalDialog } from "../components/ApprovalDialog";
 import { AnswerPanel } from "../components/AnswerPanel";
+import { CandidateTable } from "../components/CandidateTable";
 import { CitationChips } from "../components/CitationChips";
 import { EvidenceChunkCard } from "../components/EvidenceChunkCard";
 import { PaperTable } from "../components/PaperTable";
@@ -87,5 +89,43 @@ describe("Evidence components", () => {
     expect(screen.getByText(/critiques generations/i)).toBeInTheDocument();
     expect(screen.getByText("c1")).toBeInTheDocument();
     expect(screen.getByText(/reflection tokens/i)).toBeInTheDocument();
+  });
+});
+
+describe("Discovery approval components", () => {
+  test("CandidateTable labels candidates as non-evidence", () => {
+    render(
+      <CandidateTable
+        candidates={[
+          {
+            id: 11,
+            title: "Candidate Paper",
+            source: "arxiv",
+            rank: 1,
+            evidence_role: "discovery_only_not_answer_evidence",
+          },
+        ]}
+        selectedIds={[]}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Candidate Paper")).toBeInTheDocument();
+    expect(screen.getByText(/not answer evidence/i)).toBeInTheDocument();
+  });
+
+  test("ApprovalDialog names side effects before approval", () => {
+    render(
+      <ApprovalDialog
+        open
+        candidateIds={[11]}
+        onCancel={vi.fn()}
+        onApprove={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/candidate ids: 11/i)).toBeInTheDocument();
+    expect(screen.getByText(/write indexed paper and chunks/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /approve ingest/i })).toBeInTheDocument();
   });
 });
