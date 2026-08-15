@@ -20,9 +20,11 @@ Same hard caps as qa_agentic (max_inner_iters / max_inner_tokens).
 from __future__ import annotations
 
 from collections.abc import Generator
+from time import perf_counter
 from typing import Any
 
 from .. import config as cfg
+from ..observability import new_trace_id
 from ..retrieve.format import format_evidence
 from ..retrieve.pipeline import retrieve_round_with_rewrite
 from ..utils.logger import get_logger
@@ -46,6 +48,32 @@ _SYSTEM = (
     "citations. Keep the answer concise (≤200 words). If insufficient "
     "evidence, say so explicitly."
 )
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((perf_counter() - started) * 1000)
+
+
+def _event(
+    name: str,
+    *,
+    trace_id: str,
+    stage: str,
+    status: str,
+    summary: str,
+    started: float | None = None,
+    **data: Any,
+) -> dict[str, Any]:
+    payload = {
+        "trace_id": trace_id,
+        "stage": stage,
+        "status": status,
+        "summary": summary,
+        **data,
+    }
+    if started is not None:
+        payload["elapsed_ms"] = _elapsed_ms(started)
+    return {"event": name, "data": payload}
 
 
 def _retrieve_round(query: str, paper_ids, top_k: int) -> tuple[list[dict], dict]:
@@ -97,6 +125,15 @@ def stream_answer(
     """Yield events as the agentic pipeline progresses."""
     from .context_resolver import QARequestContext, resolution_to_trace, resolve_query
 
+    trace_id = new_trace_id()
+    yield _event(
+        "start",
+        trace_id=trace_id,
+        stage="start",
+        status="completed",
+        summary="Started Paper RAG QA",
+    )
+
     resolution = resolve_query(
         QARequestContext(
             raw_question=question,
@@ -112,8 +149,17 @@ def stream_answer(
     paper_ids = list(resolution.effective_paper_ids) or None
 
     c = cfg.load().rag
+    stage_started = perf_counter()
     intent_cfg = classify(question)
-    yield {"event": "intent", "data": intent_cfg}
+    yield _event(
+        "intent",
+        trace_id=trace_id,
+        stage="intent",
+        status="completed",
+        summary=f"Classified as {intent_cfg['intent']}",
+        started=stage_started,
+        **intent_cfg,
+    )
 
     max_iter = min(intent_cfg["max_iter"], c.max_inner_iters)
     top_k = intent_cfg["top_k"]
@@ -121,27 +167,61 @@ def stream_answer(
     current_query = question
 
     for it in range(max_iter):
+        stage_started = perf_counter()
         try:
             chunks, rw = _retrieve_round(current_query, paper_ids, top_k)
         except Exception as e:
-            yield {"event": "error", "data": {"message": f"retrieve failed: {e}"}}
+            yield _event(
+                "error",
+                trace_id=trace_id,
+                stage="retrieve",
+                status="failed",
+                summary="Retrieval failed",
+                started=stage_started,
+                message=f"retrieve failed: {e}",
+            )
             return
         if it == 0:
-            yield {"event": "rewrite", "data": {
-                "queries": rw.get("dense_queries", []),
-                "keywords": rw.get("bm25_query", ""),
-            }}
+            yield _event(
+                "rewrite",
+                trace_id=trace_id,
+                stage="rewrite",
+                status="completed",
+                summary="Prepared retrieval queries",
+                started=stage_started,
+                queries=rw.get("dense_queries", []),
+                keywords=rw.get("bm25_query", ""),
+            )
         for ch in chunks:
             cid = ch.get("chunk_id")
             if cid and cid not in all_chunks:
                 all_chunks[cid] = ch
-        yield {"event": "retrieved", "data": {"iter": it, "n_chunks": len(chunks)}}
+        yield _event(
+            "retrieved",
+            trace_id=trace_id,
+            stage="retrieve",
+            status="completed",
+            summary=f"Retrieved {len(chunks)} chunks",
+            started=stage_started,
+            iter=it,
+            query=current_query,
+            n_chunks=len(chunks),
+        )
 
         if not chunks:
             break
         if c.enable_reflect and it < max_iter - 1:
+            stage_started = perf_counter()
             r = reflect(question, format_evidence(chunks))
-            yield {"event": "reflect", "data": r}
+            yield _event(
+                "reflect",
+                trace_id=trace_id,
+                stage="reflect",
+                status="completed",
+                summary=f"Reflection judged evidence {r['sufficiency']}",
+                started=stage_started,
+                **r,
+            )
             if r["sufficiency"] == "sufficient":
                 break
             if r["follow_up"]:
@@ -161,6 +241,14 @@ def stream_answer(
             "abstain": {"decision": abstain_mod.DECISION_NO_CHUNKS},
             "query_resolution": query_resolution,
         }
+        done_data.update(
+            {
+                "trace_id": trace_id,
+                "stage": "done",
+                "status": "completed",
+                "summary": "Paper RAG QA complete",
+            }
+        )
         _persist_stream_research_memory(
             conversation_id=conversation_id,
             resolution=resolution,
@@ -174,6 +262,7 @@ def stream_answer(
 
     # === ADR-0014 abstain decision ===
     abstain_cfg = c.abstain
+    stage_started = perf_counter()
     abstain_result = abstain_mod.decide(
         final_chunks,
         enabled=abstain_cfg.enabled,
@@ -181,11 +270,28 @@ def stream_answer(
         threshold_high=abstain_cfg.threshold_high,
         min_chunks=abstain_cfg.min_chunks,
     )
-    yield {"event": "abstain", "data": abstain_result}
+    yield _event(
+        "abstain",
+        trace_id=trace_id,
+        stage="abstain",
+        status="completed",
+        summary=f"Abstain decision: {abstain_result['decision']}",
+        started=stage_started,
+        **abstain_result,
+    )
 
     if abstain_result["decision"] == abstain_mod.DECISION_NO_EVIDENCE:
         # Skip the LLM stream entirely.
-        yield {"event": "answer_chunk", "data": {"text": abstain_cfg.no_evidence_message}}
+        yield {
+            "event": "answer_chunk",
+            "data": {
+                "trace_id": trace_id,
+                "stage": "answer",
+                "status": "streaming",
+                "summary": "Streaming answer token",
+                "text": abstain_cfg.no_evidence_message,
+            },
+        }
         done_data = {
             "answer": abstain_cfg.no_evidence_message,
             "citations": [],
@@ -194,6 +300,14 @@ def stream_answer(
             "n_chunks": len(final_chunks),
             "query_resolution": query_resolution,
         }
+        done_data.update(
+            {
+                "trace_id": trace_id,
+                "stage": "done",
+                "status": "completed",
+                "summary": "Paper RAG QA complete",
+            }
+        )
         _persist_stream_research_memory(
             conversation_id=conversation_id,
             resolution=resolution,
@@ -229,9 +343,25 @@ def stream_answer(
     try:
         for tok in _stream_chat(_SYSTEM, user):
             full += tok
-            yield {"event": "answer_chunk", "data": {"text": tok}}
+            yield {
+                "event": "answer_chunk",
+                "data": {
+                    "trace_id": trace_id,
+                    "stage": "answer",
+                    "status": "streaming",
+                    "summary": "Streaming answer token",
+                    "text": tok,
+                },
+            }
     except Exception as e:
-        yield {"event": "error", "data": {"message": f"chat stream failed: {e}"}}
+        yield _event(
+            "error",
+            trace_id=trace_id,
+            stage="answer",
+            status="failed",
+            summary="Chat stream failed",
+            message=f"chat stream failed: {e}",
+        )
         return
 
     cleaned, valid = validate_citations(full, evidence_chunks)
@@ -250,6 +380,14 @@ def stream_answer(
         "paper_ids": paper_ids_used,
         "query_resolution": query_resolution,
     }
+    done_data.update(
+        {
+            "trace_id": trace_id,
+            "stage": "done",
+            "status": "completed",
+            "summary": "Paper RAG QA complete",
+        }
+    )
     _persist_stream_research_memory(
         conversation_id=conversation_id,
         resolution=resolution,

@@ -105,6 +105,93 @@ def test_stream_event_shape_when_no_evidence():
         qa_stream._retrieve_round, qa_stream.classify, qa_stream.rewrite = saved
 
 
+def test_stream_answer_emits_start_with_trace_id(monkeypatch):
+    from paper_rag.rag import context_resolver, qa_stream
+
+    monkeypatch.setattr(context_resolver, "_load_memory_scope_hint", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        qa_stream,
+        "_retrieve_round",
+        lambda q, p, k: ([], {"dense_queries": [q], "bm25_query": q}),
+    )
+    monkeypatch.setattr(
+        qa_stream,
+        "classify",
+        lambda q: {"intent": "factual", "top_k": 5, "max_iter": 1, "rrf_k": 60},
+    )
+    monkeypatch.setattr(
+        qa_stream,
+        "rewrite",
+        lambda q: {"dense_queries": [q], "bm25_query": q, "raw": {}},
+    )
+
+    events = list(qa_stream.stream_answer("Q", paper_ids=None))
+
+    assert events[0]["event"] == "start"
+    start = events[0]["data"]
+    assert start["stage"] == "start"
+    assert start["status"] == "completed"
+    assert start["summary"] == "Started Paper RAG QA"
+    assert isinstance(start["trace_id"], str)
+    assert len(start["trace_id"]) == 16
+    trace_id = start["trace_id"]
+    assert all(event["data"].get("trace_id") == trace_id for event in events)
+
+
+def test_stream_answer_stage_events_include_contract_fields(monkeypatch):
+    from paper_rag.rag import context_resolver, qa_stream
+
+    def fake_retrieve(q, p, k):
+        return (
+            [
+                {
+                    "chunk_id": "c1",
+                    "paper_id": "p1",
+                    "text": "Self-RAG uses retrieval and reflection.",
+                    "score_rerank": 0.9,
+                }
+            ],
+            {"dense_queries": [q], "bm25_query": q},
+        )
+
+    def fake_stream(system, user):
+        yield "Self-RAG uses retrieval and reflection. [chunk:c1]"
+
+    monkeypatch.setattr(context_resolver, "_load_memory_scope_hint", lambda *args, **kwargs: [])
+    monkeypatch.setattr(qa_stream, "_retrieve_round", fake_retrieve)
+    monkeypatch.setattr(
+        qa_stream,
+        "classify",
+        lambda q: {"intent": "factual", "top_k": 2, "max_iter": 1, "rrf_k": 60},
+    )
+    monkeypatch.setattr(
+        qa_stream,
+        "rewrite",
+        lambda q: {"dense_queries": [q], "bm25_query": q, "raw": {}},
+    )
+    monkeypatch.setattr(qa_stream, "_stream_chat", fake_stream)
+
+    events = list(qa_stream.stream_answer("What is Self-RAG?", paper_ids=None))
+    trace_id = events[0]["data"]["trace_id"]
+    by_name = {event["event"]: event["data"] for event in events if event["event"] != "answer_chunk"}
+
+    assert by_name["intent"]["stage"] == "intent"
+    assert by_name["intent"]["status"] == "completed"
+    assert isinstance(by_name["intent"]["elapsed_ms"], int)
+    assert by_name["rewrite"]["stage"] == "rewrite"
+    assert by_name["retrieved"]["stage"] == "retrieve"
+    assert by_name["retrieved"]["query"] == "What is Self-RAG?"
+    assert by_name["abstain"]["stage"] == "abstain"
+    assert by_name["done"]["stage"] == "done"
+    assert by_name["done"]["status"] == "completed"
+    assert by_name["done"]["trace_id"] == trace_id
+
+    chunks = [event for event in events if event["event"] == "answer_chunk"]
+    assert chunks
+    assert chunks[0]["data"]["stage"] == "answer"
+    assert chunks[0]["data"]["trace_id"] == trace_id
+
+
 def test_stream_answer_uses_selected_evidence_for_done_payload():
     from paper_rag.rag import qa_stream
 
