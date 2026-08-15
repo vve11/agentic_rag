@@ -55,4 +55,51 @@ class DshHandoffRequest(StrictRequest):
     source: str = Field("workbench", max_length=80)
 
 
+class ProjectCreateRequest(StrictRequest):
+    name: str = Field(..., min_length=1, max_length=180)
+    description: str = Field("", max_length=1000)
+
+
+class ProjectUpdateRequest(StrictRequest):
+    name: str | None = Field(None, min_length=1, max_length=180)
+    description: str | None = Field(None, max_length=1000)
+
+
+class ProjectPaperRequest(StrictRequest):
+    paper_id: str = Field(..., min_length=1, max_length=180)
+    title_snapshot: str = Field("", max_length=500)
+    source: str = Field("manual", max_length=80)
+
+
+class EvidencePinRequest(StrictRequest):
+    chunk_id: str = Field(..., min_length=1, max_length=180)
+    paper_id: str = Field(..., min_length=1, max_length=180)
+    quote_snapshot: str = Field("", max_length=4000)
+    source: str = Field("manual", max_length=80)
+    score_snapshot: float | None = None
+    label: str = Field("", max_length=120)
+    note: str = Field("", max_length=2000)
+
+
+class NoteRequest(StrictRequest):
+    target_type: str = Field(..., min_length=1, max_length=20)
+    target_id: str = Field(..., min_length=1, max_length=180)
+    body: str = Field(..., min_length=1, max_length=10000)
+    note_id: str | None = Field(None, min_length=1, max_length=180)
+
+
+class SavedQuestionRequest(StrictRequest):
+    question: str = Field(..., min_length=1, max_length=4000)
+    answer: str = Field("", max_length=20000)
+    citations: list[str] = Field(default_factory=list, max_length=100)
+    chunk_ids: list[str] = Field(default_factory=list, max_length=200)
+    trace_id: str | None = Field(None, max_length=180)
+    abstain: Any | None = None
+    context_policy: Any | None = None
+
+
+class ProjectHandoffRequest(StrictRequest):
+    instruction: str = Field("", max_length=4000)
+
+
 McpEnvelope = dict[str, Any]

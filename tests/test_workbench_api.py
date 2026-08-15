@@ -453,3 +453,130 @@ def test_qa_stream_endpoint_frames_sse_events(tmp_path):
     assert '"stage": "answer"' in body
     assert "event: done" in body
     assert "trace1234567890" in body
+
+
+def test_project_api_creates_project_and_saves_research_objects(tmp_path):
+    from paper_rag.workbench.api import create_app
+    from paper_rag.workbench.workspace_store import WorkspaceStore
+
+    store = WorkspaceStore(tmp_path / "state.sqlite")
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *_args: {},
+            workspace_store=store,
+        )
+    )
+
+    created = client.post(
+        "/api/projects",
+        json={"name": "Self-RAG 调研", "description": "project"},
+    ).json()
+    project_id = created["project"]["project_id"]
+
+    paper = client.post(
+        f"/api/projects/{project_id}/papers",
+        json={
+            "paper_id": "arxiv:2310.11511",
+            "title_snapshot": "Self-RAG",
+            "source": "library",
+        },
+    ).json()
+    evidence = client.post(
+        f"/api/projects/{project_id}/evidence",
+        json={
+            "chunk_id": "chunk-self-rag-1",
+            "paper_id": "arxiv:2310.11511",
+            "quote_snapshot": "SELF-RAG retrieves passages on demand.",
+            "source": "search",
+        },
+    ).json()
+    note = client.post(
+        f"/api/projects/{project_id}/notes",
+        json={
+            "target_type": "chunk",
+            "target_id": "chunk-self-rag-1",
+            "body": "local interpretation",
+        },
+    ).json()
+    saved = client.post(
+        f"/api/projects/{project_id}/questions",
+        json={
+            "question": "What is Self-RAG?",
+            "answer": "It retrieves and critiques.",
+            "citations": ["chunk-self-rag-1"],
+            "chunk_ids": ["chunk-self-rag-1"],
+            "trace_id": "trace-workbench-fixture",
+            "abstain": {"decision": "answer"},
+        },
+    ).json()
+    detail = client.get(f"/api/projects/{project_id}").json()
+
+    assert created["project"]["name"] == "Self-RAG 调研"
+    assert paper["paper"]["paper_id"] == "arxiv:2310.11511"
+    assert evidence["evidence"]["chunk_id"] == "chunk-self-rag-1"
+    assert note["note"]["body"] == "local interpretation"
+    assert saved["question"]["citations"] == ["chunk-self-rag-1"]
+    assert detail["summary"]["paper_count"] == 1
+    assert detail["summary"]["evidence_count"] == 1
+    assert "sk-" not in str(detail)
+
+
+def test_project_api_archives_and_excludes_archived_projects(tmp_path):
+    from paper_rag.workbench.api import create_app
+    from paper_rag.workbench.workspace_store import WorkspaceStore
+
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *_args: {},
+            workspace_store=WorkspaceStore(tmp_path / "state.sqlite"),
+        )
+    )
+
+    project_id = client.post("/api/projects", json={"name": "Archive me"}).json()["project"][
+        "project_id"
+    ]
+    archived = client.post(f"/api/projects/{project_id}/archive").json()
+    active_list = client.get("/api/projects").json()
+    full_list = client.get("/api/projects?include_archived=true").json()
+
+    assert archived["project"]["status"] == "archived"
+    assert active_list["projects"] == []
+    assert full_list["projects"][0]["project_id"] == project_id
+
+
+def test_project_dsh_handoff_uses_project_context_without_calling_tools(tmp_path):
+    from paper_rag.workbench.api import create_app
+    from paper_rag.workbench.workspace_store import WorkspaceStore
+
+    calls = []
+    store = WorkspaceStore(tmp_path / "state.sqlite")
+    project = store.create_project("Self-RAG 调研")
+    store.add_project_paper(project["project_id"], "arxiv:2310.11511", "Self-RAG", "library")
+    store.pin_evidence(
+        project["project_id"],
+        "chunk-self-rag-1",
+        "arxiv:2310.11511",
+        "evidence excerpt",
+        "ask",
+    )
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *args: calls.append(args),
+            workspace_store=store,
+        )
+    )
+
+    response = client.post(
+        f"/api/projects/{project['project_id']}/dsh-handoff",
+        json={"instruction": "Compare methods."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dsh_url"] == "http://127.0.0.1:3080"
+    assert "Compare methods." in payload["prompt"]
+    assert "chunk-self-rag-1" in payload["prompt"]
+    assert calls == []

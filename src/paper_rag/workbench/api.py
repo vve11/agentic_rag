@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -18,11 +19,19 @@ from .schemas import (
     CandidateIngestRequest,
     DiscoverRequest,
     DshHandoffRequest,
+    EvidencePinRequest,
+    NoteRequest,
+    ProjectCreateRequest,
+    ProjectHandoffRequest,
+    ProjectPaperRequest,
+    ProjectUpdateRequest,
     QaRequest,
+    SavedQuestionRequest,
     SearchRequest,
     SectionRequest,
 )
 from .settings import WorkbenchSettings
+from .workspace_store import WorkspaceStore
 
 CallTool = Callable[[str, dict[str, Any] | None, McpRequestContext], dict[str, Any]]
 IndexHealthBuilder = Callable[[WorkbenchSettings], dict[str, Any]]
@@ -35,10 +44,14 @@ def create_app(
     call_tool_fn: CallTool = call_tool,
     index_health_fn: IndexHealthBuilder | None = None,
     read_store: WorkbenchReadStore | None = None,
+    workspace_store: WorkspaceStore | None = None,
     stream_answer_fn: QaStreamer | None = None,
 ) -> FastAPI:
     app_settings = settings or WorkbenchSettings.from_env()
     store = read_store or WorkbenchReadStore()
+    project_store = workspace_store or WorkspaceStore(
+        app_settings.workspace_state_path or Path("data/runtime/workbench/state.sqlite")
+    )
     if stream_answer_fn is None:
         from paper_rag.rag.async_api import stream_answer_async
 
@@ -174,6 +187,117 @@ def create_app(
         return {
             "dsh_url": app_settings.dsh_url,
             "prompt": _build_dsh_prompt(payload),
+        }
+
+    @app.get("/api/projects")
+    def projects(include_archived: bool = False) -> dict[str, Any]:
+        return {"projects": project_store.list_projects(include_archived=include_archived)}
+
+    @app.post("/api/projects")
+    def create_project(payload: ProjectCreateRequest) -> dict[str, Any]:
+        project = project_store.create_project(payload.name, payload.description)
+        return {"project": project}
+
+    @app.get("/api/projects/{project_id}")
+    def project_detail(project_id: str) -> dict[str, Any]:
+        try:
+            return project_store.build_project_snapshot(project_id)
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+
+    @app.patch("/api/projects/{project_id}")
+    def update_project(project_id: str, payload: ProjectUpdateRequest) -> dict[str, Any]:
+        try:
+            project = project_store.update_project(
+                project_id,
+                name=payload.name,
+                description=payload.description,
+            )
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        return {"project": project}
+
+    @app.post("/api/projects/{project_id}/archive")
+    def archive_project(project_id: str) -> dict[str, Any]:
+        try:
+            project = project_store.archive_project(project_id)
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        return {"project": project}
+
+    @app.post("/api/projects/{project_id}/papers")
+    def add_project_paper(project_id: str, payload: ProjectPaperRequest) -> dict[str, Any]:
+        try:
+            paper = project_store.add_project_paper(
+                project_id,
+                payload.paper_id,
+                title_snapshot=payload.title_snapshot,
+                source=payload.source,
+            )
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        return {"paper": paper}
+
+    @app.post("/api/projects/{project_id}/evidence")
+    def pin_project_evidence(project_id: str, payload: EvidencePinRequest) -> dict[str, Any]:
+        try:
+            evidence = project_store.pin_evidence(
+                project_id,
+                payload.chunk_id,
+                payload.paper_id,
+                quote_snapshot=payload.quote_snapshot,
+                source=payload.source,
+                score_snapshot=payload.score_snapshot,
+                label=payload.label,
+                note=payload.note,
+            )
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        return {"evidence": evidence}
+
+    @app.post("/api/projects/{project_id}/notes")
+    def create_project_note(project_id: str, payload: NoteRequest) -> dict[str, Any]:
+        try:
+            note = project_store.upsert_note(
+                project_id,
+                payload.target_type,
+                payload.target_id,
+                payload.body,
+                note_id=payload.note_id,
+            )
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        except ValueError as exc:
+            raise _http_error(400, "BAD_REQUEST", str(exc)) from exc
+        return {"note": note}
+
+    @app.post("/api/projects/{project_id}/questions")
+    def save_project_question(project_id: str, payload: SavedQuestionRequest) -> dict[str, Any]:
+        try:
+            question = project_store.save_question(
+                project_id,
+                payload.question,
+                payload.answer,
+                payload.citations,
+                payload.chunk_ids,
+                trace_id=payload.trace_id,
+                abstain=payload.abstain,
+                context_policy=payload.context_policy,
+            )
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        return {"question": question}
+
+    @app.post("/api/projects/{project_id}/dsh-handoff")
+    def project_dsh_handoff(project_id: str, payload: ProjectHandoffRequest) -> dict[str, Any]:
+        try:
+            handoff = project_store.create_dsh_handoff(project_id, payload.instruction)
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        return {
+            "dsh_url": app_settings.dsh_url,
+            "prompt": handoff["prompt"],
+            "handoff": handoff,
         }
 
     return app
