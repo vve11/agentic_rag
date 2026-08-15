@@ -3,8 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, test } from "vitest";
 
 import { createWorkbenchClient } from "../api/client";
+import { AskPage } from "../pages/AskPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { OverviewPage } from "../pages/OverviewPage";
+import { SearchPage } from "../pages/SearchPage";
 
 describe("Overview and Library pages", () => {
   test("overview shows corpus health, model status, and DSH bridge", async () => {
@@ -41,5 +43,28 @@ describe("Overview and Library pages", () => {
 
     expect(await screen.findByRole("heading", { name: /introduction/i })).toBeInTheDocument();
     expect(screen.getByText(/retrieves passages on demand/i)).toBeInTheDocument();
+  });
+
+  test("search page renders evidence chunks", async () => {
+    const user = userEvent.setup();
+    render(<SearchPage client={createWorkbenchClient({ fixtureMode: true })} />);
+
+    await user.type(screen.getByLabelText(/search evidence/i), "reflection tokens");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+
+    expect(await screen.findByText("chunk:chunk-self-rag-1")).toBeInTheDocument();
+    expect(screen.getByText(/retrieves passages on demand/i)).toBeInTheDocument();
+  });
+
+  test("ask page renders answer citations and DSH prompt bridge", async () => {
+    const user = userEvent.setup();
+    render(<AskPage client={createWorkbenchClient({ fixtureMode: true })} />);
+
+    await user.type(screen.getByLabelText(/question/i), "What is Self-RAG?");
+    await user.click(screen.getByRole("button", { name: /^ask$/i }));
+
+    expect(await screen.findByText(/decide when to retrieve/i)).toBeInTheDocument();
+    expect(screen.getByText("chunk-self-rag-1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /copy prompt for dsh/i })).toBeInTheDocument();
   });
 });
