@@ -16,11 +16,19 @@ class SearchRequest(StrictRequest):
     year_max: int | None = None
 
 
+class ContextPolicy(StrictRequest):
+    include_pinned_evidence: bool = False
+    include_notes: bool = False
+    restrict_to_project_papers: bool = False
+
+
 class QaRequest(StrictRequest):
     question: str
     paper_ids: list[str] | None = None
     resolved_question: str | None = None
     top_k: int = Field(8, ge=1, le=20)
+    project_id: str | None = Field(None, min_length=1, max_length=180)
+    context_policy: ContextPolicy | None = None
 
 
 class SectionRequest(StrictRequest):

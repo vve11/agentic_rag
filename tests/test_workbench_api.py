@@ -455,6 +455,203 @@ def test_qa_stream_endpoint_frames_sse_events(tmp_path):
     assert "trace1234567890" in body
 
 
+def test_qa_without_project_context_preserves_previous_tool_args(tmp_path):
+    from paper_rag.workbench.api import create_app
+
+    seen: dict[str, Any] = {}
+
+    def fake_call_tool(name, args, ctx):
+        seen.update(name=name, args=args, conversation_id=ctx.conversation_id)
+        return {
+            "structuredContent": {
+                "ok": True,
+                "tool": "paper_qa",
+                "evidence_role": "indexed_chunks",
+                "data": {
+                    "answer": "Self-RAG retrieves.",
+                    "citations": ["chunk-self-rag-1"],
+                    "chunks": [],
+                    "abstain": {"decision": "answer"},
+                },
+            }
+        }
+
+    client = TestClient(create_app(_settings(tmp_path), call_tool_fn=fake_call_tool))
+
+    response = client.post(
+        "/api/qa",
+        json={
+            "question": "What is Self-RAG?",
+            "paper_ids": ["arxiv:2310.11511"],
+            "resolved_question": "What is Self-RAG?",
+            "top_k": 5,
+        },
+    )
+
+    assert response.status_code == 200
+    assert seen == {
+        "name": "paper_qa",
+        "args": {
+            "question": "What is Self-RAG?",
+            "paper_ids": ["arxiv:2310.11511"],
+            "resolved_question": "What is Self-RAG?",
+            "top_k": 5,
+        },
+        "conversation_id": "workbench",
+    }
+    assert "context_policy" not in response.json()["data"]
+    assert "note_refs" not in response.json()["data"]
+
+
+def test_scoped_qa_adds_project_context_without_mixing_note_citations(tmp_path):
+    from paper_rag.workbench.api import create_app
+    from paper_rag.workbench.workspace_store import WorkspaceStore
+
+    seen: dict[str, Any] = {}
+    store = WorkspaceStore(tmp_path / "state.sqlite")
+    project = store.create_project("Self-RAG 调研")
+    store.add_project_paper(project["project_id"], "arxiv:2310.11511", "Self-RAG", "library")
+    store.pin_evidence(
+        project["project_id"],
+        "chunk-self-rag-1",
+        "arxiv:2310.11511",
+        quote_snapshot="SELF-RAG retrieves passages on demand.",
+        source="ask",
+    )
+    note = store.upsert_note(
+        project["project_id"],
+        "chunk",
+        "chunk-self-rag-1",
+        "User note: compare the reflection token framing.",
+    )
+
+    def fake_call_tool(name, args, ctx):
+        seen.update(name=name, args=args)
+        return {
+            "structuredContent": {
+                "ok": True,
+                "tool": "paper_qa",
+                "evidence_role": "indexed_chunks",
+                "data": {
+                    "answer": "Self-RAG retrieves and critiques generations.",
+                    "citations": ["chunk-self-rag-1"],
+                    "chunks": [{"chunk_id": "chunk-self-rag-1"}],
+                    "abstain": {"decision": "answer"},
+                },
+            }
+        }
+
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=fake_call_tool,
+            workspace_store=store,
+        )
+    )
+
+    response = client.post(
+        "/api/qa",
+        json={
+            "question": "What is the core idea?",
+            "paper_ids": ["arxiv:external"],
+            "project_id": project["project_id"],
+            "context_policy": {
+                "include_pinned_evidence": True,
+                "include_notes": True,
+                "restrict_to_project_papers": True,
+            },
+        },
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert seen["name"] == "paper_qa"
+    assert seen["args"]["paper_ids"] == ["arxiv:external", "arxiv:2310.11511"]
+    assert "Pinned evidence" in seen["args"]["question"]
+    assert "User notes" in seen["args"]["question"]
+    assert "not paper evidence" in seen["args"]["question"]
+    assert "chunk-self-rag-1" in seen["args"]["question"]
+    assert payload["data"]["citations"] == ["chunk-self-rag-1"]
+    assert payload["data"]["note_refs"] == [note["note_id"]]
+    assert note["note_id"] not in payload["data"]["citations"]
+    assert payload["data"]["context_policy"] == {
+        "include_pinned_evidence": True,
+        "include_notes": True,
+        "restrict_to_project_papers": True,
+    }
+
+
+def test_scoped_qa_stream_enriches_done_event_and_restricts_papers(tmp_path):
+    from paper_rag.workbench.api import create_app
+    from paper_rag.workbench.workspace_store import WorkspaceStore
+
+    seen: dict[str, Any] = {}
+    store = WorkspaceStore(tmp_path / "state.sqlite")
+    project = store.create_project("Self-RAG 调研")
+    store.add_project_paper(project["project_id"], "arxiv:2310.11511", "Self-RAG", "library")
+    store.upsert_note(project["project_id"], "paper", "arxiv:2310.11511", "Local reading note.")
+
+    async def fake_stream_answer(
+        question,
+        *,
+        paper_ids=None,
+        conversation_id=None,
+        user_id="system",
+        resolved_question=None,
+    ):
+        seen.update(
+            question=question,
+            paper_ids=paper_ids,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            resolved_question=resolved_question,
+        )
+        yield {
+            "event": "done",
+            "data": {
+                "trace_id": "trace-scoped",
+                "stage": "done",
+                "status": "completed",
+                "answer": "Self-RAG",
+                "citations": [],
+                "chunks": [],
+                "abstain": {},
+            },
+        }
+
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *_args: {},
+            workspace_store=store,
+            stream_answer_fn=fake_stream_answer,
+        )
+    )
+
+    with client.stream(
+        "POST",
+        "/api/qa/stream",
+        json={
+            "question": "What is Self-RAG?",
+            "project_id": project["project_id"],
+            "context_policy": {
+                "include_pinned_evidence": False,
+                "include_notes": True,
+                "restrict_to_project_papers": True,
+            },
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert seen["paper_ids"] == ["arxiv:2310.11511"]
+    assert "User notes" in seen["question"]
+    assert "event: done" in body
+    assert '"note_refs"' in body
+    assert '"context_policy"' in body
+    assert '"restrict_to_project_papers": true' in body
+
+
 def test_project_api_creates_project_and_saves_research_objects(tmp_path):
     from paper_rag.workbench.api import create_app
     from paper_rag.workbench.workspace_store import WorkspaceStore

@@ -127,23 +127,34 @@ def create_app(
 
     @app.post("/api/qa")
     def qa(payload: QaRequest) -> dict[str, Any]:
-        return _call(
+        try:
+            args, scoped_context = _qa_args_with_project_context(payload, project_store)
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        envelope = _call(
             "paper_qa",
-            payload.model_dump(exclude_none=True),
+            args,
             app_settings,
             call_tool_fn,
         )
+        return _enrich_qa_envelope(envelope, scoped_context)
 
     @app.post("/api/qa/stream")
     async def qa_stream(payload: QaRequest) -> StreamingResponse:
+        try:
+            args, scoped_context = _qa_args_with_project_context(payload, project_store)
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+
         async def events() -> AsyncIterator[str]:
             async for event in stream_answer_fn(
-                payload.question,
-                paper_ids=payload.paper_ids,
+                args["question"],
+                paper_ids=args.get("paper_ids"),
                 conversation_id="workbench",
                 user_id=app_settings.actor_id,
-                resolved_question=payload.resolved_question,
+                resolved_question=args.get("resolved_question"),
             ):
+                event = _enrich_qa_stream_event(event, scoped_context)
                 yield _sse_frame(event)
 
         return StreamingResponse(events(), media_type="text/event-stream")
@@ -376,6 +387,129 @@ def _call(
 ) -> dict[str, Any]:
     result = call_tool_fn(tool_name, args, _context(settings, tool_name=tool_name, boundary=boundary))
     return mcp_envelope(result, tool=tool_name)
+
+
+def _qa_args_with_project_context(
+    payload: QaRequest,
+    project_store: WorkspaceStore,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    args = payload.model_dump(
+        exclude_none=True,
+        exclude={"project_id", "context_policy"},
+    )
+    if not payload.project_id:
+        return args, None
+
+    snapshot = project_store.build_project_snapshot(payload.project_id)
+    policy = (
+        payload.context_policy.model_dump()
+        if payload.context_policy is not None
+        else {
+            "include_pinned_evidence": False,
+            "include_notes": False,
+            "restrict_to_project_papers": False,
+        }
+    )
+    warnings: list[str] = []
+
+    if policy["restrict_to_project_papers"]:
+        paper_ids = list(args.get("paper_ids") or [])
+        for paper in snapshot["papers"]:
+            if paper["paper_id"] not in paper_ids:
+                paper_ids.append(paper["paper_id"])
+        if paper_ids:
+            args["paper_ids"] = paper_ids
+        else:
+            warnings.append("Project has no saved papers; no paper restriction applied.")
+
+    context_lines = _project_context_lines(snapshot, policy, warnings)
+    if context_lines:
+        args["question"] = "\n".join(
+            [
+                payload.question,
+                "",
+                "Workbench project context:",
+                *context_lines,
+                "",
+                (
+                    "Use user notes only as user-authored context, not paper evidence. "
+                    "Paper claims must be supported by paper chunk citations."
+                ),
+            ]
+        )
+
+    note_refs = (
+        [note["note_id"] for note in snapshot["notes"]]
+        if policy["include_notes"]
+        else []
+    )
+    return args, {
+        "note_refs": note_refs,
+        "context_policy": policy,
+        "project_context_warnings": warnings,
+    }
+
+
+def _project_context_lines(
+    snapshot: dict[str, Any],
+    policy: dict[str, bool],
+    warnings: list[str],
+) -> list[str]:
+    lines: list[str] = []
+    if policy["include_pinned_evidence"]:
+        pins = snapshot["evidence"]
+        if pins:
+            lines.append("Pinned evidence (paper chunk ids; verify in final citations):")
+            lines.extend(
+                (
+                    f"- {pin['paper_id']} / {pin['chunk_id']}: "
+                    f"{pin.get('quote_snapshot') or 'No excerpt'}"
+                )
+                for pin in pins
+            )
+        else:
+            warnings.append("Project has no pinned evidence.")
+
+    if policy["include_notes"]:
+        notes = snapshot["notes"]
+        if notes:
+            lines.append("User notes (user-authored; not paper evidence):")
+            lines.extend(
+                f"- {note['note_id']} {note['target_type']}:{note['target_id']}: {note['body']}"
+                for note in notes
+            )
+        else:
+            warnings.append("Project has no user notes.")
+    return lines
+
+
+def _enrich_qa_envelope(
+    envelope: dict[str, Any],
+    scoped_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if scoped_context is None:
+        return envelope
+    data = envelope.setdefault("data", {})
+    if isinstance(data, dict):
+        data["note_refs"] = scoped_context["note_refs"]
+        data["context_policy"] = scoped_context["context_policy"]
+        data["project_context_warnings"] = scoped_context["project_context_warnings"]
+    return envelope
+
+
+def _enrich_qa_stream_event(
+    event: dict[str, Any],
+    scoped_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if scoped_context is None or event.get("event") != "done":
+        return event
+    enriched = dict(event)
+    data = dict(enriched.get("data") or {})
+    data["note_refs"] = scoped_context["note_refs"]
+    data["context_policy"] = scoped_context["context_policy"]
+    data["project_context_warnings"] = scoped_context["project_context_warnings"]
+    enriched["data"] = data
+    return enriched
 
 
 def _sse_frame(event: dict[str, Any]) -> str:

@@ -65,6 +65,11 @@ def test_workspace_store_saves_papers_evidence_notes_and_questions(tmp_path: Pat
         ["chunk-self-rag-1"],
         trace_id="trace-workbench-fixture",
         abstain={"decision": "answer"},
+        context_policy={
+            "include_pinned_evidence": True,
+            "include_notes": True,
+            "restrict_to_project_papers": True,
+        },
     )
     snapshot = store.build_project_snapshot(project["project_id"])
 
@@ -72,6 +77,11 @@ def test_workspace_store_saves_papers_evidence_notes_and_questions(tmp_path: Pat
     assert pin["chunk_id"] == "chunk-self-rag-1"
     assert note["target_type"] == "chunk"
     assert saved["citations"] == ["chunk-self-rag-1"]
+    assert saved["context_policy"] == {
+        "include_pinned_evidence": True,
+        "include_notes": True,
+        "restrict_to_project_papers": True,
+    }
     assert snapshot["summary"] == {
         "paper_count": 1,
         "evidence_count": 1,
