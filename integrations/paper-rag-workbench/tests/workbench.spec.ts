@@ -1,41 +1,49 @@
 import { expect, test } from "@playwright/test";
 
-test("workbench v2 fixture flow", async ({ page }) => {
+test("workbench bilingual fixture flow", async ({ page }) => {
   await page.goto("/");
-  const nav = page.getByRole("navigation", { name: /workbench navigation/i });
+  const nav = page.getByRole("navigation", { name: /工作台导航/ });
 
+  await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
+  await expect(nav.getByRole("button", { name: "概览" })).toHaveAttribute("aria-current", "page");
+
+  await page.getByRole("button", { name: "EN" }).click();
+  await expect(page.getByRole("navigation", { name: /Workbench navigation/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 
-  await nav.getByRole("button", { name: /health/i }).click();
-  await expect(page.getByRole("heading", { name: "Health", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "中" }).click();
+  await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
+
+  await nav.getByRole("button", { name: /健康检查/ }).click();
+  await expect(page.getByRole("heading", { name: "健康检查", exact: true })).toBeVisible();
   await expect(page.getByText(/Dense retrieval is unavailable/i)).toBeVisible();
 
-  await nav.getByRole("button", { name: /library/i }).click();
+  await nav.getByRole("button", { name: /论文库/ }).click();
   await expect(page.getByText(/Self-RAG/)).toBeVisible();
-  await page.getByRole("button", { name: /inspect paper self-rag/i }).click();
+  await page.getByRole("button", { name: /查看论文 self-rag/i }).click();
   await expect(page.getByText(/Abstract/)).toBeVisible();
 
-  await nav.getByRole("button", { name: /^search$/i }).click();
-  await page.getByLabel(/search evidence/i).fill("reflection tokens");
-  await page.locator("form").getByRole("button", { name: /^search$/i }).click();
-  await page.getByRole("button", { name: /inspect chunk chunk-self-rag-1/i }).click();
+  await nav.getByRole("button", { name: /^检索$/ }).click();
+  await page.getByLabel(/检索证据/).fill("reflection tokens");
+  await page.locator("form").getByRole("button", { name: /^检索$/ }).click();
+  await page.getByRole("button", { name: /查看分块 chunk-self-rag-1/i }).click();
   await expect(page.getByText(/critiques its own generations/i)).toBeVisible();
 
-  await nav.getByRole("button", { name: /^ask$/i }).click();
-  await page.getByLabel(/question/i).fill("What is Self-RAG?");
-  await page.locator("form").getByRole("button", { name: /^ask$/i }).click();
-  await expect(page.getByRole("heading", { name: /Agent Timeline/i })).toBeVisible();
+  await nav.getByRole("button", { name: /^问答$/ }).click();
+  await page.getByLabel(/问题/).fill("What is Self-RAG?");
+  await page.locator("form").getByRole("button", { name: /^提问$/ }).click();
+  await expect(page.getByRole("heading", { name: /执行轨迹/ })).toBeVisible();
   await expect(page.getByText(/Understanding question/i)).toBeVisible();
   await page.getByRole("button", { name: /chunk-self-rag-1/i }).click();
   await expect(page.getByText(/critiques its own generations/i)).toBeVisible();
-  await page.getByRole("button", { name: /send to dsh/i }).click();
-  await expect(page.getByRole("dialog", { name: /send to dsh/i })).toBeVisible();
-  await page.getByRole("button", { name: /close dsh handoff/i }).click();
+  await page.getByRole("button", { name: /发送到 DSH/ }).click();
+  await expect(page.getByRole("dialog", { name: /发送到 DSH/ })).toBeVisible();
+  await page.getByRole("button", { name: /关闭 DSH 交接/ }).click();
 
-  await nav.getByRole("button", { name: /discover/i }).click();
-  await page.getByLabel(/topic/i).fill("agentic rag");
-  await page.locator("form").getByRole("button", { name: /discover/i }).click();
-  await page.getByLabel(/select candidate 11/i).check();
-  await page.getByRole("button", { name: /ingest selected/i }).click();
-  await expect(page.getByText(/write indexed paper and chunks/i)).toBeVisible();
+  await nav.getByRole("button", { name: /发现/ }).click();
+  await page.getByLabel(/主题/).fill("agentic rag");
+  await page.locator("form").getByRole("button", { name: /^发现$/ }).click();
+  await page.getByLabel(/选择候选 11/).check();
+  await page.getByRole("button", { name: /入库所选/ }).click();
+  await expect(page.getByText(/写入索引论文和分块/)).toBeVisible();
 });

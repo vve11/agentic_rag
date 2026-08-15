@@ -27,6 +27,16 @@ Workbench is the primary Paper RAG research interface. It covers:
 DSH remains the chat and trace companion. Workbench does not depend on DeerFlow
 or DSH private session internals.
 
+## Language
+
+Workbench starts in Chinese by default. Use the `中 / EN` toggle in the sidebar
+to switch the interface language. The selection is stored in browser
+`localStorage` under `paper-rag-workbench-language`.
+
+Only Workbench-owned UI copy is localized. Paper titles, abstracts, evidence
+chunks, citations, raw backend errors, model names, paper ids, chunk ids, and
+model answers remain in their source language.
+
 ## Validation
 
 ```bash
