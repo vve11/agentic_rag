@@ -1773,7 +1773,7 @@ def _run_live004_workflow(
             _mcp_call(
                 "paper_qa",
                 {
-                    "question": "What is the core retrieval or generation method in this paper?",
+                    "question": "What problem does this paper solve, and what is its main method? Cite indexed chunks.",
                     "paper_ids": [paper_id],
                     "top_k": 8,
                 },
@@ -1784,7 +1784,11 @@ def _run_live004_workflow(
             _mcp_call(
                 "paper_qa",
                 {
-                    "question": "How does the follow-up relate to the method from the previous turn?",
+                    "question": (
+                        "Based only on indexed chunks, how does the previous answer's method "
+                        "relate to this paper's RAG setup? Cite chunks if supported; otherwise "
+                        "return a weak/no-evidence abstain."
+                    ),
                     "paper_ids": [paper_id],
                     "top_k": 8,
                 },
