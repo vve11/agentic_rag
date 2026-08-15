@@ -48,4 +48,11 @@ class CandidateIngestRequest(StrictRequest):
     approval: ApprovalPayload | None = None
 
 
+class DshHandoffRequest(StrictRequest):
+    question: str = Field(..., min_length=1, max_length=4000)
+    paper_ids: list[str] = Field(default_factory=list, max_length=12)
+    chunk_ids: list[str] = Field(default_factory=list, max_length=20)
+    source: str = Field("workbench", max_length=80)
+
+
 McpEnvelope = dict[str, Any]

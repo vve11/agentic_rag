@@ -10,9 +10,12 @@ from paper_rag.mcp.registry import call_tool
 
 from .approval import build_request_boundary, validate_candidate_ingest_approval
 from .credentials import credential_status
+from .diagnostics import build_index_health
+from .read_store import WorkbenchReadStore
 from .schemas import (
     CandidateIngestRequest,
     DiscoverRequest,
+    DshHandoffRequest,
     QaRequest,
     SearchRequest,
     SectionRequest,
@@ -20,14 +23,24 @@ from .schemas import (
 from .settings import WorkbenchSettings
 
 CallTool = Callable[[str, dict[str, Any] | None, McpRequestContext], dict[str, Any]]
+IndexHealthBuilder = Callable[[WorkbenchSettings], dict[str, Any]]
 
 
 def create_app(
     settings: WorkbenchSettings | None = None,
     *,
     call_tool_fn: CallTool = call_tool,
+    index_health_fn: IndexHealthBuilder | None = None,
+    read_store: WorkbenchReadStore | None = None,
 ) -> FastAPI:
     app_settings = settings or WorkbenchSettings.from_env()
+    store = read_store or WorkbenchReadStore()
+    index_health_builder = index_health_fn or (
+        lambda current_settings: build_index_health(
+            current_settings,
+            read_store=store,
+        )
+    )
     app = FastAPI(title="Paper RAG Workbench", version="0.1.0")
 
     @app.get("/api/health")
@@ -41,6 +54,10 @@ def create_app(
                 "small_model": app_settings.small_model,
             },
         }
+
+    @app.get("/api/health/index")
+    def index_health() -> dict[str, Any]:
+        return index_health_builder(app_settings)
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
@@ -56,6 +73,26 @@ def create_app(
     @app.get("/api/papers")
     def papers(limit: int = 20) -> dict[str, Any]:
         return _call("paper_list", {"limit": limit}, app_settings, call_tool_fn)
+
+    @app.get("/api/papers/{paper_id:path}")
+    def paper_detail(paper_id: str) -> dict[str, Any]:
+        try:
+            detail = store.paper_detail(paper_id)
+        except ValueError as exc:
+            raise _http_error(400, "BAD_REQUEST", str(exc)) from exc
+        if detail is None:
+            raise _http_error(404, "NOT_FOUND", f"Paper not found: {paper_id}")
+        return detail
+
+    @app.get("/api/chunks/{chunk_id}")
+    def chunk_detail(chunk_id: str) -> dict[str, Any]:
+        try:
+            detail = store.chunk_detail(chunk_id)
+        except ValueError as exc:
+            raise _http_error(400, "BAD_REQUEST", str(exc)) from exc
+        if detail is None:
+            raise _http_error(404, "NOT_FOUND", f"Chunk not found: {chunk_id}")
+        return detail
 
     @app.post("/api/search")
     def search(payload: SearchRequest) -> dict[str, Any]:
@@ -110,6 +147,13 @@ def create_app(
             boundary=boundary,
         )
 
+    @app.post("/api/dsh/handoff")
+    def dsh_handoff(payload: DshHandoffRequest) -> dict[str, Any]:
+        return {
+            "dsh_url": app_settings.dsh_url,
+            "prompt": _build_dsh_prompt(payload),
+        }
+
     return app
 
 
@@ -160,4 +204,31 @@ def mcp_envelope(result: dict[str, Any], *, tool: str) -> dict[str, Any]:
                 "retryable": False,
             },
         },
+    )
+
+
+def _http_error(status_code: int, code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "ok": False,
+            "error": {
+                "code": code,
+                "message": message,
+                "retryable": False,
+            },
+        },
+    )
+
+
+def _build_dsh_prompt(payload: DshHandoffRequest) -> str:
+    papers = ", ".join(payload.paper_ids) if payload.paper_ids else "未指定"
+    chunks = ", ".join(payload.chunk_ids) if payload.chunk_ids else "未指定"
+    return (
+        "基于 Paper RAG Workbench 中选定的论文/证据继续研究：\n"
+        f"- Source: {payload.source}\n"
+        f"- Papers: {papers}\n"
+        f"- Chunks: {chunks}\n"
+        f"- Question: {payload.question.strip()}\n"
+        "请使用 Paper RAG 工具回答，并保留证据引用。"
     )

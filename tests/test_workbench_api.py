@@ -237,3 +237,143 @@ def test_workbench_launcher_loads_dsh_credentials_for_core_llm(tmp_path):
 
     assert env["OPENAI_API_KEY"] == "test-openai-key"
     assert env["DEEPSEEK_API_KEY"] == "test-deepseek-key"
+
+
+def test_index_health_endpoint_uses_read_only_builder(tmp_path):
+    from paper_rag.workbench.api import create_app
+
+    def fake_index_health(settings):
+        assert settings.chat_model == "deepseek-v4-flash"
+        return {
+            "status": "degraded",
+            "sqlite": {
+                "available": True,
+                "paper_count": 8,
+                "chunk_count": 345,
+                "fts_available": True,
+            },
+            "qdrant": {
+                "configured": True,
+                "mode": "server",
+                "reachable": False,
+                "degraded_reason": "connection refused",
+            },
+            "retrieval": {
+                "dense_available": False,
+                "sparse_available": True,
+                "hybrid_available": True,
+            },
+            "llm": {
+                "configured": True,
+                "chat_model": "deepseek-v4-flash",
+                "base_url_host": "api.deepseek.com",
+                "credential_source": "file",
+            },
+            "corpus_quality": {
+                "duplicate_chunk_count": 1,
+                "parser_artifact_count": 1,
+                "missing_section_count": 0,
+                "samples": [],
+            },
+            "warnings": ["Dense retrieval is unavailable; sparse fallback is active."],
+        }
+
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *_args: {},
+            index_health_fn=fake_index_health,
+        )
+    )
+
+    response = client.get("/api/health/index")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "degraded"
+    assert payload["llm"]["chat_model"] == "deepseek-v4-flash"
+    assert "sk-" not in str(payload)
+
+
+def test_paper_detail_endpoint_returns_404_for_missing_paper(tmp_path):
+    from paper_rag.workbench.api import create_app
+
+    class FakeReadStore:
+        def paper_detail(self, paper_id):
+            assert paper_id == "arxiv:missing"
+            return None
+
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *_args: {},
+            read_store=FakeReadStore(),
+        )
+    )
+
+    response = client.get("/api/papers/arxiv:missing")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"]["code"] == "NOT_FOUND"
+
+
+def test_chunk_detail_endpoint_redacts_storage_paths(tmp_path):
+    from paper_rag.workbench.api import create_app
+
+    class FakeReadStore:
+        def chunk_detail(self, chunk_id):
+            assert chunk_id == "chunk-a"
+            return {
+                "chunk": {
+                    "chunk_id": "chunk-a",
+                    "paper_id": "arxiv:2310.11511",
+                    "text": "Evidence text.",
+                    "warnings": [],
+                },
+                "paper": {"paper_id": "arxiv:2310.11511", "title": "Self-RAG"},
+                "neighbors": [],
+            }
+
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *_args: {},
+            read_store=FakeReadStore(),
+        )
+    )
+
+    payload = client.get("/api/chunks/chunk-a").json()
+
+    assert payload["chunk"]["chunk_id"] == "chunk-a"
+    assert "source_path" not in str(payload)
+    assert "asset_path" not in str(payload)
+
+
+def test_dsh_handoff_builds_prompt_without_calling_tools(tmp_path):
+    from paper_rag.workbench.api import create_app
+
+    calls = []
+
+    def fake_call_tool(name, args, ctx):
+        calls.append((name, args, ctx))
+        return {"structuredContent": {"ok": True, "tool": name, "data": {}}}
+
+    client = TestClient(create_app(_settings(tmp_path), call_tool_fn=fake_call_tool))
+
+    response = client.post(
+        "/api/dsh/handoff",
+        json={
+            "question": "Self-RAG 的核心理念是什么？",
+            "paper_ids": ["arxiv:2310.11511"],
+            "chunk_ids": ["chunk-a"],
+            "source": "ask",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dsh_url"] == "http://127.0.0.1:3080"
+    assert "arxiv:2310.11511" in payload["prompt"]
+    assert "chunk-a" in payload["prompt"]
+    assert "证据引用" in payload["prompt"]
+    assert calls == []
