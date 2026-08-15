@@ -102,4 +102,9 @@ class ProjectHandoffRequest(StrictRequest):
     instruction: str = Field("", max_length=4000)
 
 
+class CompareRequest(StrictRequest):
+    paper_ids: list[str] = Field(default_factory=list, max_length=20)
+    dimensions: list[str] = Field(default_factory=list, max_length=12)
+
+
 McpEnvelope = dict[str, Any]

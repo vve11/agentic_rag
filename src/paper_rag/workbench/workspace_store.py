@@ -348,7 +348,7 @@ class WorkspaceStore:
             "evidence": evidence,
             "notes": notes,
             "saved_questions": questions,
-            "compare_runs": [],
+            "compare_runs": self.list_compare_runs(project_id),
             "warnings": [],
         }
 
@@ -390,6 +390,146 @@ class WorkspaceStore:
                 question["question_id"] for question in snapshot["saved_questions"]
             ],
             "created_at": now,
+        }
+
+    def create_compare_run(
+        self,
+        project_id: str,
+        paper_ids: list[str],
+        dimensions: list[str],
+    ) -> dict[str, Any]:
+        self._require_project(project_id)
+        selected_paper_ids = paper_ids or [
+            paper["paper_id"] for paper in self.build_project_snapshot(project_id)["papers"]
+        ]
+        selected_dimensions = dimensions or ["method", "limitation"]
+        run_id = _new_id("compare")
+        now = _now()
+        warnings = ["LLM synthesis unavailable; rendered evidence-only matrix."]
+        cells = self._build_compare_cells(
+            project_id,
+            selected_paper_ids,
+            selected_dimensions,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO compare_runs
+                    (
+                        run_id, project_id, dimensions_json, paper_ids_json,
+                        status, warnings_json, created_at
+                    )
+                VALUES (?, ?, ?, ?, 'degraded', ?, ?)
+                """,
+                (
+                    run_id,
+                    project_id,
+                    _json_dumps(selected_dimensions),
+                    _json_dumps(selected_paper_ids),
+                    _json_dumps(warnings),
+                    now,
+                ),
+            )
+            for cell in cells:
+                conn.execute(
+                    """
+                    INSERT INTO compare_cells
+                        (
+                            cell_id, run_id, project_id, paper_id, dimension, summary,
+                            evidence_chunk_ids_json, note_ids_json, confidence
+                        )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        _new_id("cell"),
+                        run_id,
+                        project_id,
+                        cell["paper_id"],
+                        cell["dimension"],
+                        cell["summary"],
+                        _json_dumps(cell["evidence_chunk_ids"]),
+                        _json_dumps(cell["note_ids"]),
+                        cell["confidence"],
+                    ),
+                )
+            self._touch_project(conn, project_id)
+        run = self.get_compare_run(project_id, run_id)
+        if run is None:
+            raise RuntimeError("created compare run could not be loaded")
+        return run
+
+    def list_compare_runs(self, project_id: str) -> list[dict[str, Any]]:
+        self._require_project(project_id)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT run_id
+                FROM compare_runs
+                WHERE project_id = ?
+                ORDER BY created_at DESC
+                """,
+                (project_id,),
+            ).fetchall()
+        return [
+            run
+            for row in rows
+            if (run := self.get_compare_run(project_id, row["run_id"])) is not None
+        ]
+
+    def get_compare_run(self, project_id: str, run_id: str) -> dict[str, Any] | None:
+        self._require_project(project_id)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT run_id, project_id, dimensions_json, paper_ids_json,
+                       status, warnings_json, created_at
+                FROM compare_runs
+                WHERE project_id = ? AND run_id = ?
+                """,
+                (project_id, run_id),
+            ).fetchone()
+            if row is None:
+                return None
+            cell_rows = conn.execute(
+                """
+                SELECT paper_id, dimension, summary, evidence_chunk_ids_json,
+                       note_ids_json, confidence
+                FROM compare_cells
+                WHERE project_id = ? AND run_id = ?
+                ORDER BY rowid ASC
+                """,
+                (project_id, run_id),
+            ).fetchall()
+        return {
+            "run_id": row["run_id"],
+            "project_id": row["project_id"],
+            "dimensions": _json_loads(row["dimensions_json"], []),
+            "paper_ids": _json_loads(row["paper_ids_json"], []),
+            "status": row["status"],
+            "cells": [_compare_cell_from_row(cell_row) for cell_row in cell_rows],
+            "warnings": _json_loads(row["warnings_json"], []),
+            "created_at": row["created_at"],
+        }
+
+    def create_compare_dsh_handoff(self, project_id: str, run_id: str) -> dict[str, Any]:
+        run = self.get_compare_run(project_id, run_id)
+        if run is None:
+            raise KeyError(f"Compare run not found: {run_id}")
+        prompt = _build_compare_prompt(run)
+        return {
+            "handoff_id": _new_id("handoff"),
+            "project_id": project_id,
+            "prompt": prompt,
+            "paper_ids": run["paper_ids"],
+            "chunk_ids": sorted(
+                {
+                    chunk_id
+                    for cell in run["cells"]
+                    for chunk_id in cell["evidence_chunk_ids"]
+                }
+            ),
+            "question_ids": [],
+            "created_at": _now(),
         }
 
     def _init_schema(self) -> None:
@@ -500,6 +640,53 @@ class WorkspaceStore:
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
+    def _build_compare_cells(
+        self,
+        project_id: str,
+        paper_ids: list[str],
+        dimensions: list[str],
+    ) -> list[dict[str, Any]]:
+        snapshot = self.build_project_snapshot(project_id)
+        evidence_by_paper: dict[str, list[dict[str, Any]]] = {}
+        for pin in snapshot["evidence"]:
+            evidence_by_paper.setdefault(pin["paper_id"], []).append(pin)
+
+        notes_by_paper: dict[str, list[dict[str, Any]]] = {}
+        notes_by_chunk: dict[str, list[dict[str, Any]]] = {}
+        for note in snapshot["notes"]:
+            if note["target_type"] == "paper":
+                notes_by_paper.setdefault(note["target_id"], []).append(note)
+            if note["target_type"] == "chunk":
+                notes_by_chunk.setdefault(note["target_id"], []).append(note)
+
+        cells: list[dict[str, Any]] = []
+        for paper_id in paper_ids:
+            pins = evidence_by_paper.get(paper_id, [])
+            chunk_ids = [pin["chunk_id"] for pin in pins]
+            note_ids = [note["note_id"] for note in notes_by_paper.get(paper_id, [])]
+            for chunk_id in chunk_ids:
+                note_ids.extend(note["note_id"] for note in notes_by_chunk.get(chunk_id, []))
+
+            for dimension in dimensions:
+                if pins:
+                    first_quote = pins[0].get("quote_snapshot") or pins[0]["chunk_id"]
+                    summary = f"Evidence pinned for {dimension}: {first_quote}"
+                    confidence = "evidence_backed"
+                else:
+                    summary = "No pinned evidence"
+                    confidence = "missing"
+                cells.append(
+                    {
+                        "paper_id": paper_id,
+                        "dimension": dimension,
+                        "summary": summary,
+                        "evidence_chunk_ids": chunk_ids,
+                        "note_ids": sorted(set(note_ids)),
+                        "confidence": confidence,
+                    }
+                )
+        return cells
+
     def _require_project(self, project_id: str) -> dict[str, Any]:
         project = self.get_project(project_id)
         if project is None:
@@ -560,6 +747,33 @@ def _build_project_prompt(snapshot: dict[str, Any], instruction: str) -> str:
     if not questions:
         lines.append("- 无已保存问题")
     lines.extend(["", "请使用 Paper RAG 工具核查关键结论，所有论文事实保留证据引用。"])
+    return "\n".join(lines)
+
+
+def _build_compare_prompt(run: dict[str, Any]) -> str:
+    lines = [
+        "Continue from this Paper RAG Workbench Compare run.",
+        "",
+        f"Compare run: {run['run_id']}",
+        f"Project: {run['project_id']}",
+        f"Dimensions: {', '.join(run['dimensions'])}",
+        "",
+        "Cells:",
+    ]
+    for cell in run["cells"]:
+        evidence = ", ".join(cell["evidence_chunk_ids"]) or "No pinned evidence"
+        lines.append(
+            (
+                f"- {cell['paper_id']} / {cell['dimension']}: "
+                f"{cell['summary']} | evidence: {evidence}"
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "Use Paper RAG tools to verify paper facts. Keep user notes separate from paper evidence.",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -624,6 +838,17 @@ def _question_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "abstain": _json_loads(row["abstain_json"], None),
         "context_policy": _json_loads(row["context_policy_json"], None),
         "created_at": row["created_at"],
+    }
+
+
+def _compare_cell_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "paper_id": row["paper_id"],
+        "dimension": row["dimension"],
+        "summary": row["summary"],
+        "evidence_chunk_ids": _json_loads(row["evidence_chunk_ids_json"], []),
+        "note_ids": _json_loads(row["note_ids_json"], []),
+        "confidence": row["confidence"],
     }
 
 

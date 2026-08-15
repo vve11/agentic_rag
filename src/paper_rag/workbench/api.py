@@ -17,6 +17,7 @@ from .diagnostics import build_index_health
 from .read_store import WorkbenchReadStore
 from .schemas import (
     CandidateIngestRequest,
+    CompareRequest,
     DiscoverRequest,
     DshHandoffRequest,
     EvidencePinRequest,
@@ -292,6 +293,48 @@ def create_app(
     def project_dsh_handoff(project_id: str, payload: ProjectHandoffRequest) -> dict[str, Any]:
         try:
             handoff = project_store.create_dsh_handoff(project_id, payload.instruction)
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        return {
+            "dsh_url": app_settings.dsh_url,
+            "prompt": handoff["prompt"],
+            "handoff": handoff,
+        }
+
+    @app.post("/api/projects/{project_id}/compare")
+    def create_compare(project_id: str, payload: CompareRequest) -> dict[str, Any]:
+        try:
+            run = project_store.create_compare_run(
+                project_id,
+                paper_ids=payload.paper_ids,
+                dimensions=payload.dimensions,
+            )
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        return {"run": run}
+
+    @app.get("/api/projects/{project_id}/compare-runs")
+    def compare_runs(project_id: str) -> dict[str, Any]:
+        try:
+            runs = project_store.list_compare_runs(project_id)
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        return {"runs": runs}
+
+    @app.get("/api/projects/{project_id}/compare-runs/{run_id}")
+    def compare_run(project_id: str, run_id: str) -> dict[str, Any]:
+        try:
+            run = project_store.get_compare_run(project_id, run_id)
+        except KeyError as exc:
+            raise _http_error(404, "NOT_FOUND", str(exc)) from exc
+        if run is None:
+            raise _http_error(404, "NOT_FOUND", f"Compare run not found: {run_id}")
+        return {"run": run}
+
+    @app.post("/api/projects/{project_id}/compare-runs/{run_id}/dsh-handoff")
+    def compare_dsh_handoff(project_id: str, run_id: str) -> dict[str, Any]:
+        try:
+            handoff = project_store.create_compare_dsh_handoff(project_id, run_id)
         except KeyError as exc:
             raise _http_error(404, "NOT_FOUND", str(exc)) from exc
         return {

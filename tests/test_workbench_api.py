@@ -580,3 +580,89 @@ def test_project_dsh_handoff_uses_project_context_without_calling_tools(tmp_path
     assert "Compare methods." in payload["prompt"]
     assert "chunk-self-rag-1" in payload["prompt"]
     assert calls == []
+
+
+def test_compare_api_creates_evidence_first_matrix_without_calling_tools(tmp_path):
+    from paper_rag.workbench.api import create_app
+    from paper_rag.workbench.workspace_store import WorkspaceStore
+
+    calls = []
+    store = WorkspaceStore(tmp_path / "state.sqlite")
+    project = store.create_project("RAG Compare")
+    store.add_project_paper(project["project_id"], "arxiv:2310.11511", "Self-RAG", "library")
+    store.add_project_paper(project["project_id"], "arxiv:2005.11401", "RAG", "library")
+    store.pin_evidence(
+        project["project_id"],
+        "chunk-self-rag-1",
+        "arxiv:2310.11511",
+        quote_snapshot="SELF-RAG retrieves passages on demand.",
+        source="search",
+    )
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *args: calls.append(args),
+            workspace_store=store,
+        )
+    )
+
+    response = client.post(
+        f"/api/projects/{project['project_id']}/compare",
+        json={
+            "paper_ids": ["arxiv:2310.11511", "arxiv:2005.11401"],
+            "dimensions": ["method", "limitation"],
+        },
+    )
+    payload = response.json()
+    runs = client.get(f"/api/projects/{project['project_id']}/compare-runs").json()
+    loaded = client.get(
+        f"/api/projects/{project['project_id']}/compare-runs/{payload['run']['run_id']}"
+    ).json()
+
+    assert response.status_code == 200
+    assert payload["run"]["status"] == "degraded"
+    assert len(payload["run"]["cells"]) == 4
+    assert any(
+        cell["evidence_chunk_ids"] == ["chunk-self-rag-1"]
+        for cell in payload["run"]["cells"]
+    )
+    assert any(cell["summary"] == "No pinned evidence" for cell in payload["run"]["cells"])
+    assert runs["runs"][0]["run_id"] == payload["run"]["run_id"]
+    assert loaded["run"]["run_id"] == payload["run"]["run_id"]
+    assert calls == []
+
+
+def test_compare_dsh_handoff_previews_prompt_without_calling_tools(tmp_path):
+    from paper_rag.workbench.api import create_app
+    from paper_rag.workbench.workspace_store import WorkspaceStore
+
+    calls = []
+    store = WorkspaceStore(tmp_path / "state.sqlite")
+    project = store.create_project("RAG Compare")
+    store.add_project_paper(project["project_id"], "arxiv:2310.11511", "Self-RAG", "library")
+    store.pin_evidence(
+        project["project_id"],
+        "chunk-self-rag-1",
+        "arxiv:2310.11511",
+        quote_snapshot="SELF-RAG retrieves passages on demand.",
+        source="search",
+    )
+    run = store.create_compare_run(project["project_id"], ["arxiv:2310.11511"], ["method"])
+    client = TestClient(
+        create_app(
+            _settings(tmp_path),
+            call_tool_fn=lambda *args: calls.append(args),
+            workspace_store=store,
+        )
+    )
+
+    response = client.post(
+        f"/api/projects/{project['project_id']}/compare-runs/{run['run_id']}/dsh-handoff"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dsh_url"] == "http://127.0.0.1:3080"
+    assert "Compare run" in payload["prompt"]
+    assert "chunk-self-rag-1" in payload["prompt"]
+    assert calls == []
