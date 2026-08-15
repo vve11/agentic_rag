@@ -8,7 +8,15 @@ from fastapi import FastAPI, HTTPException
 from paper_rag.mcp.context import McpRequestContext, McpServerConfig
 from paper_rag.mcp.registry import call_tool
 
-from .schemas import DiscoverRequest, QaRequest, SearchRequest, SectionRequest
+from .approval import build_request_boundary, validate_candidate_ingest_approval
+from .credentials import credential_status
+from .schemas import (
+    CandidateIngestRequest,
+    DiscoverRequest,
+    QaRequest,
+    SearchRequest,
+    SectionRequest,
+)
 from .settings import WorkbenchSettings
 
 CallTool = Callable[[str, dict[str, Any] | None, McpRequestContext], dict[str, Any]]
@@ -36,7 +44,14 @@ def create_app(
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
-        return _call("paper_status", {}, app_settings, call_tool_fn)
+        envelope = _call("paper_status", {}, app_settings, call_tool_fn)
+        data = envelope.setdefault("data", {})
+        data["workbench"] = {
+            "credentials": credential_status(
+                credentials_path=app_settings.credentials_path
+            ).as_dict()
+        }
+        return envelope
 
     @app.get("/api/papers")
     def papers(limit: int = 20) -> dict[str, Any]:
@@ -81,6 +96,19 @@ def create_app(
     @app.get("/api/discovery-runs/{run_id}")
     def discovery_run(run_id: int) -> dict[str, Any]:
         return _call("discovery_run_get", {"run_id": run_id}, app_settings, call_tool_fn)
+
+    @app.post("/api/ingest/candidates")
+    def ingest_candidates(payload: CandidateIngestRequest) -> dict[str, Any]:
+        approval = validate_candidate_ingest_approval(payload)
+        boundary = build_request_boundary("discovery_candidate_ingest", approval)
+        args = payload.model_dump(exclude={"approval"}, exclude_none=True)
+        return _call(
+            "discovery_candidate_ingest",
+            args,
+            app_settings,
+            call_tool_fn,
+            boundary=boundary,
+        )
 
     return app
 
