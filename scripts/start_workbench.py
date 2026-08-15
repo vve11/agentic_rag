@@ -8,6 +8,8 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+import yaml
+
 
 def build_launcher_env(repo: Path, base_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ if base_env is None else base_env)
@@ -18,7 +20,25 @@ def build_launcher_env(repo: Path, base_env: Mapping[str, str] | None = None) ->
         "PAPER_RAG_DSH_CREDENTIALS_PATH",
         str(repo / "data/runtime/deepseek-harness/credentials/.credentials.yaml"),
     )
+    _load_dsh_credentials(env)
     return env
+
+
+def _load_dsh_credentials(env: dict[str, str]) -> None:
+    path = Path(env["PAPER_RAG_DSH_CREDENTIALS_PATH"])
+    if not path.exists():
+        return
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        return
+    deepseek_key = data.get("DEEPSEEK_API_KEY")
+    openai_key = data.get("OPENAI_API_KEY")
+    if isinstance(deepseek_key, str) and deepseek_key:
+        env.setdefault("DEEPSEEK_API_KEY", deepseek_key)
+    if isinstance(openai_key, str) and openai_key:
+        env.setdefault("OPENAI_API_KEY", openai_key)
+    elif isinstance(deepseek_key, str) and deepseek_key:
+        env.setdefault("OPENAI_API_KEY", deepseek_key)
 
 
 def main() -> int:

@@ -221,3 +221,19 @@ def test_workbench_launcher_env_defaults(tmp_path):
     assert env["PAPER_RAG_DSH_CREDENTIALS_PATH"] == str(
         tmp_path / "data/runtime/deepseek-harness/credentials/.credentials.yaml"
     )
+
+
+def test_workbench_launcher_loads_dsh_credentials_for_core_llm(tmp_path):
+    from scripts.start_workbench import build_launcher_env
+
+    credentials = tmp_path / "data/runtime/deepseek-harness/credentials/.credentials.yaml"
+    credentials.parent.mkdir(parents=True)
+    credentials.write_text(
+        "DEEPSEEK_API_KEY: test-deepseek-key\nOPENAI_API_KEY: test-openai-key\n",
+        encoding="utf-8",
+    )
+
+    env = build_launcher_env(tmp_path, {})
+
+    assert env["OPENAI_API_KEY"] == "test-openai-key"
+    assert env["DEEPSEEK_API_KEY"] == "test-deepseek-key"
