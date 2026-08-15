@@ -5,7 +5,8 @@ arXiv、PDF URL 或本地 PDF 入库，解析论文，切分 chunk，建立 SQLi
 混合索引，并通过 DeepSeek Harness 的 `paper-research` 预设和私有 MCP 工具完成
 带引用约束的研究问答、发现、知识构建、交付物和反馈闭环。
 
-默认交互入口是 DeepSeek Harness，本仓库不再包含旧宿主源码。
+Paper RAG Workbench 是默认主前端；DSH Web 仍作为长程 agent handoff
+的 trace/chat companion，本仓库不再包含旧宿主源码。
 
 ## 快速开始
 
@@ -62,6 +63,9 @@ child。核心包位于 `src/paper_rag/`，宿主适配位于
 Workbench: `http://127.0.0.1:3090`
 
 DSH Chat: `http://127.0.0.1:3080`
+
+Paper RAG Workbench is the primary local frontend; DSH Web remains available as
+the trace/chat companion for long-form agent handoff.
 
 ## 常用命令
 
