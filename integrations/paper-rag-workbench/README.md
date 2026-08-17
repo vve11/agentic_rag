@@ -24,8 +24,8 @@ Workbench is the primary Paper RAG research interface. It covers:
 - Discover: candidate discovery with explicit approval before real-library ingest.
 - DSH handoff: copy/open a structured prompt in DSH Web for long-form agent work.
 
-DSH remains the chat and trace companion. Workbench does not depend on DeerFlow
-or DSH private session internals.
+DSH remains the chat and trace companion. Workbench has no dependency on the
+retired host or DSH private session internals.
 
 ## Language
 
